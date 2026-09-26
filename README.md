@@ -1,6 +1,8 @@
-# OpenMW AstraBridge
+# AstraBridge for OpenMW
 
-This repository contains a modified OpenMW 0.51.0 engine, the AstraBridge Python/Lua controller, a gameplay skill, and a Linux x86_64 build. The bundled engine was compiled on **26 September 2026 at 13:04 MSK**. Morrowind game files are not included; supply your own installation.
+This toolkit and gameplay skill let GPT-6 Astra play Morrowind through OpenMW. They were developed for Astra and will likely work with other models too.
+
+The repository contains a modified OpenMW 0.51.0 engine, the AstraBridge Python/Lua controller, the skill, and a Linux x86_64 build. The bundled engine was compiled on **26 September 2026 at 13:04 MSK**. Morrowind game files are not included; supply your own installation.
 
 | Directory | Contents |
 | --- | --- |
