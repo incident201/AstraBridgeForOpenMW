@@ -25,7 +25,7 @@ cd "$ASTRA_HOME"
 
 ## Start or resume
 
-1. Run `./astra status`. If no controller is running, use `./astra start` in the user's graphical session. On the target KDE/Nvidia machine this opens a normal XWayland window with sound. Do not use `--headless` there.
+1. Run `./astra status`. If no controller is running, use `./astra start` in the user's graphical session. If the installation needs a discrete-GPU launcher such as `prime-run`, prefix the start command with it. On the target KDE/Nvidia machine this opens a normal XWayland window with sound. Do not use `--headless` there.
 2. Run `./astra observe` and open the returned `screenshot` with the image-viewing tool. A path in JSON is not itself an image presented to the model.
 3. Follow the user's choice of continuing, loading, or starting a new game. Use `saves` to obtain a fresh save handle before `load`; do not load an arbitrary latest slot or a developer fixture.
 4. Use `status --player` for a fast character summary. It does not open menus, capture an image, or invalidate item/spell handles.
@@ -56,6 +56,8 @@ These references describe the public interface; no source-code inspection is nee
 ## Observe → act → verify → remember
 
 The harness pauses the world between bounded actions. Reasoning time does not consume effect duration or let enemies move. Turning, waiting, and moving within an action do consume simulation time. A `chain` has no mandatory thinking pause between its steps.
+
+This also pauses NPC animation and time-dependent game scripts. During the opening ship scene, movement can return `action_unavailable` while the game has disabled controls and waits for the guard to arrive. Do not infer a broken script from a still image or an unchanged scene between commands. Advance the scene with `act '{"seconds":3}'` (repeat if needed), then inspect the new observation, NPC positions, messages, and `feedback`. If an action ends with `game_paused`, inspect the current UI and handle the game's tutorial prompt before continuing.
 
 After an action, check `feedback`, `action.reason`, observed movement, messages, and the new observation. Submission, a finished animation, or mana spent does not by itself confirm the intended outcome. Inspect the result before sending the next dependent action.
 
