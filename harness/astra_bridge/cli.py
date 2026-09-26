@@ -113,6 +113,7 @@ def main():
     p = commands.add_parser('look');p.add_argument('--heading',dest='heading_deg',type=float);p.add_argument('--pitch',dest='pitch_deg',type=float)
     p = commands.add_parser("chain"); p.add_argument("json", help='{"actions":[{"op":"strike"},{"op":"strike"}],"max_seconds":12}')
     p = commands.add_parser('atlas'); p.add_argument('--radius-m',type=float,default=35)
+    p.add_argument('--list', action='store_true'); p.add_argument('--space')
     p = commands.add_parser('revisit'); p.add_argument('ref'); p.add_argument('--run',action='store_true')
     p.add_argument('--seconds',type=float,default=12); p.add_argument('--under-fire',action='store_true')
     p = commands.add_parser("inspect"); p.add_argument("view", choices=["stats", "inventory", "spells", "journal","conversations","combat","effects","character"]); p.add_argument("--page", type=int, default=0);p.add_argument('--topic')

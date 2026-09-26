@@ -69,7 +69,7 @@ In a real observation, use:
 | `ui_…` | `ui` → `elements[].ref`, or observation's `ui.elements` | `choose`, `edit`, `adjust`, `hover` | Bound to the current UI revision. Refresh after a UI change. |
 | `passage_…` | `observe` → `terrain.passages[].ref` | `go` | Short-lived local sample; refresh after moving. |
 | `ground_…` | `ground` → `ground_targets[].ref` | `go`, `walk --ref` | Short-lived visible-point sample; use promptly without moving first. |
-| `node_…` | `atlas` / observation → `exploration.nodes[].ref` | `revisit` | Recorded node, subject to branch/waypoint availability. Check `can_revisit`. |
+| `node_…` | `atlas` / observation → `exploration.nodes[].ref` | `revisit` | Persistent recorded node in this playthrough and space. Check `can_revisit` and `revisit_source`. |
 | `place_…` | `remember`, `recall` | `return-to`, `connect` | A semantic note; returning requires a valid recorded motor marker. |
 | `save_…` | `saves` → `saves[].ref` | `load` | Fetch a fresh save listing immediately before loading. |
 
@@ -146,7 +146,9 @@ If saving is unavailable during the tutorial or a modal UI, do not bypass it. Pr
 
 `record-start` starts a new H.264 MP4 in the configured directory. `record-status` returns its `path`, frames/duration, `recording`, `capturing`, backend and any `error`. `record-stop` finalizes it.
 
-The timeline includes active gameplay and UI work, excludes thinking pauses, and has no audio. Output is 30 fps; slow rendering can repeat frames. No file-size limit is imposed. Keep the window mapped and its size stable while recording. `video_window_resized` requires a new recording. Do not claim a recording succeeded without checking its final status.
+The timeline includes active gameplay and UI work, excludes thinking pauses, and has no audio. Output is 60 fps H.264 (CRF 18), sampled from completed OpenMW back-buffer frames before buffer swap. Capture and encoding run separately; the video uses a uniform 1/60-second timeline. No file-size limit is imposed. Keep the window size stable while recording.
+
+`rendered_frames`, `repeated_frames`, `ring_dropped_frames`, `encoder_queue_peak` and `frame_interval_ms` expose actual capture performance. Engine stalls, including loading, can still require repeated frames to preserve duration. Check these counters rather than trusting nominal FPS. The render hook requires the matching patched engine; an older binary reports `engine_frame_unavailable_rebuild_engine`. Screenshots also use completed frames (`capture_sync: render_complete`) when available. There is no desktop/compositor readback in this recording backend. `video_window_resized` requires a new recording. Do not claim a recording succeeded without checking its final status.
 
 ## Recovery
 

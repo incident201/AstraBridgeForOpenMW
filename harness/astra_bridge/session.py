@@ -14,6 +14,7 @@ import uuid
 from .display import Display
 from .protocol import BridgeError, ERRORS, atomic_json, check_result, validate, number, LogDecoder
 from .recording import Recorder
+from .frame_stream import FrameStream
 from .memory import SpatialMemory
 from .terrain_map import render_terrain
 from .feedback import feedback
@@ -106,7 +107,10 @@ class Session:
             raise BridgeError("openmw_binary_missing")
         packaged = candidates[-1]
         binary = Path(self.engine_binary) if self.engine_binary else packaged
+        if self.display.frame_stream: self.display.frame_stream.close()
+        self.display.frame_stream = FrameStream(self.runtime / 'engine-frames.bin')
         env = self.display.env.copy()
+        env['ASTRA_FRAME_STREAM'] = str(self.display.frame_stream.path)
         env["LD_LIBRARY_PATH"] = self.engine_libraries or str(packaged.parent / "lib")
         env["XDG_CACHE_HOME"] = str(self.runtime / "cache")
         env["SDL_VIDEODRIVER"] = "x11"
@@ -181,7 +185,7 @@ class Session:
         # Private transport cursor; the public observe command has no extra fields.
         # Every observation request (including internal UI checks) ingests its delta.
         if op == 'observe' and self.atlas.segment:
-            args = {**args, '_trail_segment': self.atlas.segment, '_trail_after': self.atlas.sequence}
+            args = {**args, '_trail_segment': self.atlas.visit, '_trail_after': self.atlas.sequence}
         if not self.process or self.process.poll() is not None:
             raise BridgeError("game_not_running")
         if self.uncertain and op not in {"stop", "ping", "quit"}:
@@ -207,25 +211,35 @@ class Session:
             raise BridgeError(error if error in ERRORS else "operation_failed")
         if op == "stop":
             self.uncertain = False
-        result = check_result(response.get("result", {}))
+        raw = response.get("result", {})
+        # This metadata never crosses the public projection boundary.
+        frame = raw.pop('_atlas_frame', None) if op == 'observe' else None
+        if frame is not None:
+            if (type(frame) is not dict or set(frame) != {'space', 'origin'}
+                or not isinstance(frame['space'], str) or len(frame['space']) > 1024
+                or not isinstance(frame['origin'], list) or len(frame['origin']) != 3):
+                raise BridgeError('invalid_bridge_response')
+            for value in frame['origin']: number(value, -1e9, 1e9)
+        result = check_result(raw)
         if 'saves' in result: self.save_refs = {s['ref']: s for s in result['saves']}
         if op == 'load': self.atlas.restore(self.save_refs.get(args.get('ref')))
-        if op == 'new_game': self.atlas.restore(None)
-        if op == 'observe': self.atlas.ingest(result)
+        if op == 'new_game': self.atlas.new_game()
+        if op == 'observe': self.atlas.ingest(result, frame)
         if op == 'mark' and result.get('ref'): self.atlas.note_marker(result['ref'])
         return result
 
     def observe(self):
         result = self.command("observe")
         if result.get('ui',{}).get('blocked'):raise BridgeError('non_gameplay_ui')
-        # Lua confirms pause and settles several UI frames. X11 capture is still not
-        # an engine render fence; report this honestly in the observation metadata.
-        time.sleep(.08)
+        # Lua confirms pause and settles UI. Native capture waits for fresh
+        # completed frames; legacy X11 fallback remains explicitly best-effort.
+        time.sleep(.02)
         self.observation_id += 1
         path = self.runtime / "screenshots" / f"{self.session_id[:8]}-{self.observation_id:06}.png"
         size = self.display.capture(path)
         result.update({"observation": self.observation_id, "screenshot": str(path), "screen": size,
-                       "capture_sync": "paused_best_effort", "capture_backend":"xcomposite_window"})
+                       "capture_sync": "render_complete" if self.display.frame_stream.supported else "paused_best_effort",
+                       "capture_backend":self.display.frame_stream.backend if self.display.frame_stream.supported else "xcomposite_window"})
         if result.get('terrain',{}).get('supported'):
             map_path=path.with_suffix('.svg')
             render_terrain(result,map_path)
@@ -306,7 +320,19 @@ class Session:
             started = time.monotonic()
             before=self.latest_observation
             if op == 'atlas':
-                if args.keys()-{'radius_m'}: raise BridgeError('invalid_arguments')
+                if args.keys()-{'radius_m','list','space'}: raise BridgeError('invalid_arguments')
+                if args.get('list'): return {'spaces': self.atlas.catalog()}
+                if args.get('space'):
+                    ref = args['space']
+                    if not any(s['ref'] == ref for s in self.atlas.catalog()): raise BridgeError('unknown_map_space')
+                    active = self.atlas.segment
+                    try:
+                        self.atlas.segment = ref
+                        result = self.atlas.present(self.runtime / 'screenshots' / (ref+'-archive.svg'),
+                                                    number(args.get('radius_m',35),10,80), archived=ref != active)
+                        for space in result.get('spaces', []): space['current'] = space['ref'] == active
+                        return result
+                    finally: self.atlas.segment = active
                 radius = number(args.get('radius_m', 35), 10, 80)
                 observation = self.observe()
                 if not observation.get('exploration', {}).get('supported'): return {'supported': False}
@@ -318,10 +344,11 @@ class Session:
                 node = self.atlas.resolve(args['ref'])
                 if not node: raise BridgeError('unknown_map_node')
                 route = self.atlas.travelled_route(node)
-                if route is None: raise BridgeError('recorded_route_unavailable')
+                if route is None and not self.atlas.current().get('persistent'): raise BridgeError('recorded_route_unavailable')
                 pose = self.atlas.current()['pose']
                 offset = [round(a-b, 4) for a,b in zip(node['p'], pose)]
-                offsets = [[round(a-b, 4) for a,b in zip(p, pose)] for p in route]
+                if sum(v*v for v in offset) >= 10000: raise BridgeError('recorded_route_unavailable')
+                offsets = [[round(a-b, 4) for a,b in zip(p, pose)] for p in route] if route else None
                 marker = self.command('mark', _atlas_offset=offset, _atlas_route=offsets)['ref']
                 result = self.call('go', {**args, 'ref': marker})
                 if result['action'].get('reason') == 'arrived':

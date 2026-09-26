@@ -10,6 +10,8 @@ import heapq
 from pathlib import Path
 import shutil
 import subprocess
+import sqlite3
+import uuid
 
 
 def distance(a, b):
@@ -23,10 +25,64 @@ def bearing(a, b):
 class ExplorationAtlas:
     def __init__(self, path: Path):
         self.path = path
-        self.data = json.loads(path.read_text()) if path.exists() else {'segments': [], 'markers': []}
+        # SQLite is the durable authority. Legacy JSON remains untouched for recovery.
+        self.db = sqlite3.connect(path.with_suffix('.sqlite3'), check_same_thread=False)
+        self.db.execute('PRAGMA journal_mode=WAL')
+        self.db.execute('PRAGMA synchronous=FULL')
+        self.db.executescript("""
+            CREATE TABLE IF NOT EXISTS graphs (ref TEXT PRIMARY KEY, payload TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS checkpoints (key TEXT PRIMARY KEY, payload TEXT NOT NULL);
+        """)
+        self.data = {'segments': [json.loads(row[0]) for row in self.db.execute('SELECT payload FROM graphs')], 'markers': []}
+        self.profile = self._meta('profile') or uuid.uuid4().hex
+        self._set_meta('profile', self.profile)
+        if not self._meta('legacy_imported'):
+            if path.exists():
+                self.data = json.loads(path.read_text())
+                for graph in self.data['segments']:
+                    self._store(graph)
+            self._set_meta('legacy_imported', '1')
+        if not self._meta('checkpoints_imported'):
+            for checkpoint in (path.parent / 'exploration-checkpoints').glob('*.json'):
+                snapshot = json.loads(checkpoint.read_text())
+                if snapshot.get('version') != 1: continue
+                snapshot.setdefault('profile', self.profile)
+                graph = snapshot['segment']
+                if not any(s['ref'] == graph['ref'] for s in self.data['segments']):
+                    graph['legacy_snapshot'] = snapshot['save']['description']
+                    self.data['segments'].append(graph)
+                    self._store(graph)
+                self.db.execute('INSERT OR IGNORE INTO checkpoints VALUES (?,?)',
+                                (self.save_key(snapshot['save']), json.dumps(snapshot, ensure_ascii=False)))
+            self._set_meta('checkpoints_imported', '1')
+        for graph in self.data['segments']:
+            if 'profile' not in graph: self._store(graph)
+        self.db.commit()
+        self.visit = None
+        self.active_offset = [0, 0, 0]
         self.segment = None
         self.sequence = 0
         self.restore_pending = None
+        self._route_cache = None
+
+    def _meta(self, key):
+        row = self.db.execute('SELECT value FROM meta WHERE key=?', (key,)).fetchone()
+        return row[0] if row else None
+
+    def _set_meta(self, key, value):
+        self.db.execute('INSERT OR REPLACE INTO meta VALUES (?,?)', (key, value))
+
+    def _store(self, graph):
+        graph.setdefault('profile', self.profile)
+        self.db.execute('INSERT OR REPLACE INTO graphs VALUES (?,?)',
+                        (graph['ref'], json.dumps(graph, ensure_ascii=False, separators=(',', ':'))))
+
+    def new_game(self):
+        self.reset_runtime()
+        self.profile = uuid.uuid4().hex
+        self._set_meta('profile', self.profile)
+        self.db.commit()
 
     @staticmethod
     def save_key(slot):
@@ -40,7 +96,13 @@ class ExplorationAtlas:
         directory = self.path.parent / 'exploration-checkpoints'
         directory.mkdir(exist_ok=True)
         path = directory / (self.save_key(slot)+'.json')
-        snapshot = {'version': 1, 'save': slot, 'segment': s}
+        snapshot = {'version': 1, 'save': slot, 'segment': s, 'profile': self.profile}
+        with self.db:
+            player = slot.get('player_name', '')
+            self._set_meta('player:' + player, self.profile)
+            self._set_meta('owner:' + self.profile, player)
+            self.db.execute('INSERT OR REPLACE INTO checkpoints VALUES (?,?)',
+                            (self.save_key(slot), json.dumps(snapshot, ensure_ascii=False)))
         tmp = path.with_suffix('.tmp')
         tmp.write_text(json.dumps(snapshot, ensure_ascii=False, separators=(',', ':')))
         tmp.replace(path)
@@ -48,31 +110,106 @@ class ExplorationAtlas:
     def restore(self, slot):
         self.reset_runtime()
         if not slot: return
+        player = slot.get('player_name', '')
+        known = self._meta('player:' + player)
+        owner = self._meta('owner:' + self.profile)
+        if known: self.profile = known
+        elif owner and owner != player: self.profile = uuid.uuid4().hex
+        self._set_meta('player:' + player, self.profile)
+        self._set_meta('owner:' + self.profile, player)
+        self._set_meta('profile', self.profile)
+        self.db.commit()
         path = self.path.parent / 'exploration-checkpoints' / (self.save_key(slot)+'.json')
-        if path.exists():
-            snapshot = json.loads(path.read_text())
+        row = self.db.execute('SELECT payload FROM checkpoints WHERE key=?', (self.save_key(slot),)).fetchone()
+        if row or path.exists():
+            snapshot = json.loads(row[0] if row else path.read_text())
             saved = snapshot.get('save', {})
             same_metadata = all(saved.get(k) == slot.get(k) for k in ('description','player_name','player_level'))
             if 'time_played_seconds' in saved and 'time_played_seconds' in slot:
                 close_timestamp = saved['time_played_seconds'] == slot['time_played_seconds']
             else:
                 close_timestamp = abs(saved.get('created',0)-slot.get('created',0)) < 1
-            if snapshot.get('version') == 1 and same_metadata and close_timestamp: self.restore_pending = snapshot
+            if snapshot.get('version') == 1 and same_metadata and close_timestamp:
+                self.restore_pending = snapshot
+                if snapshot.get('profile'):
+                    self.profile = snapshot['profile']
+                    self._set_meta('profile', self.profile)
+                    self._set_meta('player:' + player, self.profile)
+                    self._set_meta('owner:' + self.profile, player)
+                    self.db.commit()
 
     def persist(self):
-        tmp = self.path.with_suffix('.tmp')
-        tmp.write_text(json.dumps(self.data, ensure_ascii=False, separators=(',', ':')))
-        tmp.replace(self.path)
+        with self.db:
+            if self.current(): self._store(self.current())
 
     def reset_runtime(self):
         self.segment, self.sequence = None, 0
+        self.visit = None
         self.restore_pending = None
         self.data['markers'] = []
 
     def current(self):
         return next((s for s in self.data['segments'] if s['ref'] == self.segment), None)
 
-    def ingest(self, observation):
+    def ingest(self, observation, frame=None):
+        if frame is not None:
+            return self._ingest_anchored(observation, frame)
+        return self._ingest_legacy(observation)
+
+    def _ingest_anchored(self, observation, frame):
+        """Private frame uses only the player's origin; never geometry or other objects.
+
+        Exposed nodes remain relative to the current player. A cell transition,
+        load or teleport starts a new stroke, never an edge through unseen space.
+        """
+        trace = observation.get('trajectory')
+        if not trace or not trace.get('samples') and trace['ref'] != self.visit:
+            return
+        if trace['ref'] != self.visit:
+            self.visit, self.sequence = trace['ref'], 0
+            digest = hashlib.sha256((self.profile + '\0' + frame['space']).encode()).hexdigest()[:24]
+            self.segment = 'space_' + digest
+            s = self.current()
+            snapshot, self.restore_pending = self.restore_pending, None
+            if not s:
+                # Only a verified save supplies a transform for a legacy graph.
+                if snapshot and snapshot['segment']['location'] == observation.get('location'):
+                    s = deepcopy(snapshot['segment'])
+                    s['restored_from_save'] = snapshot['save']['description']
+                    s['anchor'] = [a-b for a,b in zip(frame['origin'], s['pose'])]
+                    for node in s['nodes']:
+                        node['ref'] = f"node_{self.segment}_{node['label']}"
+                        node.pop('motor_ref', None)
+                else:
+                    s = {'points': [], 'nodes': [], 'anchor': list(frame['origin'])}
+                s.update(ref=self.segment, profile=self.profile, persistent=True, current_node=None,
+                         location=observation.get('location', ''))
+                s.pop('origin_offset', None)
+                self.data['segments'].append(s)
+            self.active_offset = [a-b for a,b in zip(frame['origin'], s['anchor'])]
+            s['current_node'] = None
+        s = self.current()
+        angle = math.radians(trace['start_heading_deg'])
+        for row in trace['samples']:
+            if row['sequence'] <= self.sequence: continue
+            f, r = row['forward_m'], row['sideways_m']
+            point = [f*math.sin(angle)+r*math.cos(angle), f*math.cos(angle)-r*math.sin(angle), row['vertical_m']]
+            point = [round(x+y, 4) for x,y in zip(point, self.active_offset)]
+            gap = self.sequence == 0 or row['sequence'] != self.sequence+1
+            s['points'].append({'p': point, 'sequence': row['sequence'], 'gap': gap})
+            s['pose'], s['heading'] = point, row['heading_deg']
+            self.sequence = row['sequence']
+        s['location'] = observation.get('location', s['location'])
+        s['locations'] = sorted(set(s.get('locations', []) + [s['location']]))
+        self.persist()
+
+    def catalog(self):
+        return [{'ref': s['ref'], 'location': s['location'], 'locations':s.get('locations', [s['location']]), 'nodes': len(s['nodes']),
+                 'recorded_points': len(s['points']), 'current': s['ref'] == self.segment,
+                 'persistent': s.get('persistent', False)}
+                for s in self.data['segments'] if s.get('profile', self.profile) == self.profile]
+
+    def _ingest_legacy(self, observation):
         trace = observation.get('trajectory')
         if not trace or not trace.get('samples') and trace['ref'] != self.segment:
             return
@@ -97,7 +234,7 @@ class ExplorationAtlas:
             if not self.current():
                 self.data['segments'].append({'ref': self.segment, 'points': [], 'nodes': [],
                                              'current_node': None, 'location': observation.get('location', '')})
-            self.data['segments'] = self.data['segments'][-12:]
+            self.visit = self.segment
         s = self.current()
         angle = math.radians(trace['start_heading_deg'])
         for row in trace['samples']:
@@ -110,10 +247,10 @@ class ExplorationAtlas:
             s['points'].append({'p': point, 'sequence': row['sequence'], 'gap': gap})
             s['pose'], s['heading'] = point, row['heading_deg']
             self.sequence = row['sequence']
-        s['points'] = s['points'][-5000:]
         if s['points']:
             s['points'][0]['gap'] = True
         s['location'] = observation.get('location', s['location'])
+        s['locations'] = sorted(set(s.get('locations', []) + [s['location']]))
         self.persist()
 
     def note_marker(self, ref):
@@ -142,7 +279,6 @@ class ExplorationAtlas:
             node = {'ref': f"node_{self.segment}_{index}", 'label': f'A{index}', 'p': list(pose),
                     'visits': 0, 'views': [], 'probes': [], 'options': [], 'walkable': True}
             s['nodes'].append(node)
-            s['nodes'] = s['nodes'][-256:]
             created = True
         if node is None:
             s['current_node'] = None
@@ -206,20 +342,24 @@ class ExplorationAtlas:
         s = self.current()
         if not s or not s.get('points'):
             return {}, [], []
+        cache_key = (s['ref'], len(s['points']), len(s['nodes']), tuple(s['pose']))
+        if self._route_cache and self._route_cache[0] == cache_key: return self._route_cache[1]
         points = [row['p'] for row in s['points']]
         edges = [[] for _ in points]
         buckets = {}
+        reachable_nodes = [n for n in s['nodes'] if math.dist(s['pose'], n['p']) < 100]
         def connect(i, j):
             d = math.dist(points[i], points[j])
             edges[i].append((j, d))
             edges[j].append((i, d))
         for i, row in enumerate(s['points']):
             p = row['p']
+            if math.dist(p, s['pose']) >= 100: continue
             if i and not row['gap']:
                 # Do not turn a recorded fall, teleport or large sampling gap
                 # into an instruction to walk back up it.
                 prev = points[i-1]
-                if math.dist(prev, p) < 2 and abs(prev[2]-p[2]) <= distance(prev, p)*1.1+.15:
+                if math.dist(prev, s['pose']) < 100 and math.dist(prev, p) < 2 and abs(prev[2]-p[2]) <= distance(prev, p)*1.1+.15:
                     connect(i-1, i)
             key = tuple(math.floor(v/.075) for v in p)
             for dx in (-1, 0, 1):
@@ -242,12 +382,17 @@ class ExplorationAtlas:
                     costs[j], parents[j] = candidate, i
                     heapq.heappush(queue, (candidate, j))
         routes = {}
-        for n in s['nodes']:
-            matches = [i for i in costs if math.dist(points[i], n['p']) <= .04]
-            if matches and math.dist(s['pose'], n['p']) < 100:
+        for n in reachable_nodes:
+            key = tuple(math.floor(v/.075) for v in n['p'])
+            candidates = (i for dx in (-1,0,1) for dy in (-1,0,1) for dz in (-1,0,1)
+                          for i in buckets.get((key[0]+dx,key[1]+dy,key[2]+dz), ()))
+            matches = [i for i in candidates if i in costs and math.dist(points[i], n['p']) <= .04]
+            if matches:
                 end = min(matches, key=lambda i: costs[i]+math.dist(points[i], n['p']))
                 routes[n['ref']] = (end, costs[end]+math.dist(points[end], n['p']))
-        return routes, parents, points
+        result = routes, parents, points
+        self._route_cache = (cache_key, result)
+        return result
 
     def travelled_route(self, node):
         routes, parents, points = self.travelled_routes()
@@ -278,7 +423,7 @@ class ExplorationAtlas:
             return None
         return reduced
 
-    def present(self, path: Path, radius=35):
+    def present(self, path: Path, radius=35, archived=False):
         s = self.current()
         if not s or 'pose' not in s:
             return {'supported': False}
@@ -293,14 +438,19 @@ class ExplorationAtlas:
             rows.append({'ref': n['ref'], 'label': n['label'], 'distance_m': round(distance(n['p'], pose), 2),
                          'bearing_deg': round(relative_bearing, 1),
                          'height_change_m': round(n['p'][2]-pose[2], 2), 'visits': n['visits'],
-                         'can_revisit': n['ref'] in routes,
-                         'revisit_source': 'recorded_trail' if n['ref'] in routes else 'unavailable',
+                         'can_revisit': n['ref'] in routes or bool(s.get('persistent') and n.get('walkable') and math.dist(n['p'], pose) < 100),
+                         'revisit_source': 'recorded_trail' if n['ref'] in routes else 'native_path_required' if s.get('persistent') and n.get('walkable') and math.dist(n['p'], pose) < 100 else 'unavailable',
                          'route_distance_m': round(routes[n['ref']][1], 2) if n['ref'] in routes else None,
                          'untraversed_directions': [{'heading_deg': round(d['heading'], 1), 'meters': d['meters']} for d in directions],
                          'landmarks': n.get('landmarks', []), 'screenshots': [self.portable_view(v) for v in n['views']]})
+        if archived:
+            for row in rows:
+                row['can_revisit'] = False
+                row['revisit_source'] = 'different_space'
         self.render(path, radius, nodes, rows)
         result = {'supported': True, 'segment': self.segment, 'source': 'travelled_path_and_observed_probes',
                   'location': s['location'], 'radius_m': radius, 'nodes': rows, 'svg': str(path),
+                  'persistent': s.get('persistent', False), 'spaces': self.catalog(), 'archived':archived,
                   'not_a_full_map': True, 'sampled_path': True,
                   'recorded_points': len(s['points']), 'current_node': s.get('current_node')}
         if s.get('restored_from_save'): result['restored_from_save'] = s['restored_from_save']
@@ -360,7 +510,7 @@ class ExplorationAtlas:
             y = 83+i*35
             label = f"{row['label']} · {row['distance_m']:.1f} m · height {row['height_change_m']:+.1f} · visits {row['visits']}"
             svg.append(f'<text x="710" y="{y}">{escape(label)}</text>')
-            detail = f"Recorded route: {row['route_distance_m']:.1f} m" if row['can_revisit'] else 'No connected recorded route'
+            detail = f"Recorded route: {row['route_distance_m']:.1f} m" if row['route_distance_m'] is not None else 'Requires current native path' if row['can_revisit'] else 'No connected recorded route'
             svg.append(f'<text x="720" y="{y+16}" fill="#92a4b4" font-size="11">{escape(detail)}</text>')
         svg.extend(['<text x="20" y="716">Cyan: sampled path · grey: other height · green: observed rays · dashed: directions not traversed</text>',
                     '<text x="710" y="685" fill="#92a4b4">No surface is inferred between rays.</text>',

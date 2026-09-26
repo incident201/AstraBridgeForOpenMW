@@ -38,6 +38,12 @@ function M.sample(force)
     rows[#rows+1]={sequence=sequence,forward_m=round(f),sideways_m=round(s),vertical_m=round(z),heading_deg=round(yaw)}
     if #rows>512 then table.remove(rows,1) end
 end
+-- Controller-only coordinate-frame metadata, removed before public validation.
+-- Contains this player's origin, not any level geometry or object coordinates.
+function M.frame()
+    if not origin then return nil end
+    return {space=space,origin={origin.x/70,origin.y/70,origin.z/70}}
+end
 function M.report(after,segment)
     M.sample(true)
     if not origin then return nil end

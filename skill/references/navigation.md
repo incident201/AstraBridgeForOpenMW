@@ -109,9 +109,18 @@ Swimming uses normal movement plus view pitch, for example looking upward then a
 
 `atlas --radius-m R` returns recorded travel memory around the current pose. R=10…80 m, default 35. `observe` also includes this under `exploration`.
 
+Atlas is stored transactionally in `runtime/exploration-memory.sqlite3`; graphs, points and nodes have no retention-count limit. Private transforms align only the player's observed trajectory. The interface never exposes world coordinates or unseen geometry.
+
+```sh
+./astra atlas --list
+./astra atlas --space SPACE_REF --radius-m 80
+```
+
+`--list` lists all stored spaces in this playthrough. `--space` reads a graph from another location without moving; its view is centred on the last recorded pose, and `archived:true` disables revisiting from that view. Old JSON/checkpoint files are imported without deleting them. Old visits lacking a trustworthy coordinate transform remain readable archives; a matching checkpoint can align them when loaded.
+
 Useful fields:
 
-- `nodes[]`: `ref`, display `label` (A1, A2…), distance/bearing/height relative to the player, `visits`, `can_revisit`, `route_distance_m`, observed landmarks, screenshot references and `untraversed_directions`. `distance_m` is horizontal straight-line distance; `route_distance_m` follows recorded travel. `can_revisit` means a connected recorded route exists, not that it is currently clear of doors or NPCs.
+- `nodes[]`: `ref`, display `label` (A1, A2…), distance/bearing/height relative to the player, `visits`, `can_revisit`, `route_distance_m`, observed landmarks, screenshot references and `untraversed_directions`. `distance_m` is horizontal straight-line distance; `route_distance_m` follows recorded travel. `revisit_source: recorded_trail` means a connected recorded route exists. `native_path_required` means the point is known but the current position has no connected trail; the engine must find a valid path. `can_revisit` permits an attempt; doors or NPCs may still block it.
 - `current_node`: the currently recognized recorded node, if any.
 - `svg`, optional `png`: visualizations of the travelled path and observed local probes. PNG is generated only when `rsvg-convert` is available. Open it explicitly; returning a filename does not show it to the model.
 - `not_a_full_map`, `sampled_path`: reminders that the diagram is partial sampled memory.
@@ -124,11 +133,11 @@ Travel-memory diagrams use **north up**, unlike the local walking surface. Cyan 
 ./astra revisit NODE_REF --seconds 10
 ```
 
-`revisit NODE_REF [--run] [--seconds S] [--under-fire]` asks the motor to return to that recorded point. It is movement, not teleportation, and can fail or produce a partial path. Map state is associated with a save/branch; a load must not import knowledge from a later, unvisited timeline.
+`revisit NODE_REF [--run] [--seconds S] [--under-fire]` asks the motor to return to that recorded point. It is movement, not teleportation, and can fail or produce a partial path. Travel knowledge is persistent across cell visits, saves, loads and controller restarts. Loading an earlier save retains routes already learned in this playthrough; it does not imply that old doors, items or NPC states still apply. A new game uses a separate atlas profile.
 
-The motor first tries the engine's normal pathfinder. If that route is incomplete or crosses physical geometry, it can fall back to this branch's recorded travelled path (`navigation.source: recorded_trail`). This includes the actual stairs and doorway turns. It never connects different floors just because their XY positions match, or draws routes over missing samples. Expired motor handles do not erase a recorded route.
+The motor first tries the engine's normal pathfinder. If that route is incomplete or crosses physical geometry, it can fall back to the recorded travelled path (`navigation.source: recorded_trail`). This includes the actual stairs and doorway turns. It never connects different floors just because their XY positions match, or draws routes over missing samples. Expired motor handles do not erase a recorded route.
 
-Collision is checked during movement. For a blocking NPC the motor briefly waits, then attempts a short local detour with floor support and both legs checked; otherwise it returns `blocked`. A closed door can block an older route. A time limit returns `step_limit`; call `revisit` again to continue from the current pose. `recorded_route_unavailable` means the trace is disconnected, too far away, or exceeds the bounded route budget.
+Collision is checked during movement. For a blocking NPC the motor briefly waits, then attempts a short local detour with floor support and both legs checked; otherwise it returns `blocked`. A closed door can block an older route. A time limit returns `step_limit`; call `revisit` again to continue from the current pose. `recorded_route_unavailable` means the point cannot be safely resolved or exceeds the bounded route budget. A disconnected permanent point can use native navigation, without inventing a connecting trail.
 
 ## Semantic notes and route history
 

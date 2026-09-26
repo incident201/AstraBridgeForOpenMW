@@ -225,3 +225,12 @@ replace('apps/openmw/mwlua/uibindings.cpp','        api["_astraUiEdit"]',
         };
         api["_astraUiEdit"]''')
 print('Astra patch applied (dialogue accessibility and native UI pointer).')
+# A render-completion capture hook is required for paced, tear-free video.
+frame_source=Path(__file__).with_name('astraframe.hpp')
+frame_target=root/'components/sdlutil/astraframe.hpp'
+if not frame_target.exists() or frame_target.read_bytes()!=frame_source.read_bytes():
+    shutil.copyfile(frame_source,frame_target)
+replace('components/sdlutil/sdlgraphicswindow.cpp', '#include "sdlgraphicswindow.hpp"',
+        '#include "sdlgraphicswindow.hpp"\n#include "astraframe.hpp"')
+replace('components/sdlutil/sdlgraphicswindow.cpp', '        SDL_GL_SwapWindow(mWindow);',
+        '        AstraFrame::capture(mWindow);\n        SDL_GL_SwapWindow(mWindow);')

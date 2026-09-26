@@ -225,3 +225,107 @@ def test_ballistic_motor_math_and_projection():
 def test_ballistic_adapter_rejects_a_blocked_weapon_path():
     r=subprocess.run(['lua','tests/combat_adapter.lua','blocked_shot'],cwd=Path(__file__).resolve().parents[1],capture_output=True,text=True)
     assert r.returncode==0,r.stdout+r.stderr
+
+
+def anchored(atlas, samples, visit='visit1', space='private_cell', origin=(100,200,3), heading=0):
+    obs=observation(samples, segment=visit, heading=heading)
+    atlas.ingest(obs, {'space':space, 'origin':list(origin)})
+    return obs
+
+
+def test_persistent_spaces_reentry_restart_and_heading(tmp_path):
+    atlas=ExplorationAtlas(tmp_path/'atlas.json')
+    obs=anchored(atlas,[sample(1)])
+    node=atlas.annotate(obs);ref=node['ref']
+    anchored(atlas,[sample(i+2,forward=i+1) for i in range(4)])
+    # Leave through one door, then return to the same position facing east.
+    anchored(atlas,[sample(1)],'visit2','another_cell')
+    anchored(atlas,[sample(1)],'visit3',origin=(100,204,3),heading=90)
+    assert atlas.resolve(ref)['label']=='A1'
+    assert atlas.travelled_route(atlas.resolve(ref))==[[0,4,0],[0,3,0],[0,2,0],[0,1,0],[0,0,0]]
+    atlas=ExplorationAtlas(tmp_path/'atlas.json')
+    anchored(atlas,[sample(1)],'after_restart',origin=(100,204,3),heading=270)
+    assert atlas.resolve(ref) and atlas.travelled_route(atlas.resolve(ref))
+    public=atlas.present(tmp_path/'map.svg')
+    assert public['persistent'] and len(public['spaces'])==2
+    assert 'private_cell' not in str(public) and 'anchor' not in str(public)
+    assert (tmp_path/'atlas.sqlite3').exists()
+
+
+def test_persistent_spaces_no_retention_limit_or_teleport_edge(tmp_path):
+    atlas=ExplorationAtlas(tmp_path/'atlas.json')
+    anchored(atlas,[sample(1)])
+    ref=atlas.segment
+    for i in range(15):
+        anchored(atlas,[sample(1)],f'visit{i+2}',f'cell{i}')
+    assert len(atlas.catalog())==16
+    anchored(atlas,[sample(1)],'back',origin=(120,200,3))
+    assert atlas.segment==ref and atlas.current()['points'][-1]['gap']
+    assert len(atlas.travelled_routes()[1])==1, 'teleport must not create a walkable edge'
+    # Long visits and node histories must not silently discard earlier points.
+    anchored(atlas,[sample(i+2,forward=(i+1)*.4) for i in range(5001)],'back',origin=(120,200,3))
+    assert len(atlas.current()['points'])==5003
+
+
+def test_persistent_new_game_separates_knowledge_and_load_selects_profile(tmp_path):
+    atlas=ExplorationAtlas(tmp_path/'atlas.json')
+    obs=anchored(atlas,[sample(1)]);node=atlas.annotate(obs)
+    slot={'created':10,'description':'Save','player_name':'P','player_level':1}
+    atlas.checkpoint(slot)
+    ref=node['ref'];profile=atlas.profile
+    atlas.new_game()
+    obs=anchored(atlas,[sample(1)],'newgame');atlas.annotate(obs)
+    assert atlas.profile!=profile and atlas.resolve(ref) is None
+    atlas.restore(slot)
+    anchored(atlas,[sample(1)],'loaded')
+    assert atlas.profile==profile and atlas.resolve(ref)
+
+
+def test_persistent_save_load_keeps_learned_routes(tmp_path):
+    atlas=ExplorationAtlas(tmp_path/'atlas.json')
+    obs=anchored(atlas,[sample(1)]);atlas.annotate(obs)
+    slot={'created':10,'description':'Save','player_name':'P','player_level':1}
+    atlas.checkpoint(slot)
+    obs=anchored(atlas,[sample(2,forward=1),sample(3,forward=2),sample(4,forward=3)])
+    node=atlas.annotate(obs)
+    atlas.restore(slot)
+    anchored(atlas,[sample(1)],'loaded')
+    assert atlas.resolve(node['ref']) and atlas.travelled_route(node)
+
+
+def test_legacy_checkpoint_migrates_only_when_position_known(tmp_path):
+    atlas=ExplorationAtlas(tmp_path/'atlas.json')
+    old=observation([sample(1),sample(2,forward=1),sample(3,forward=2)])
+    atlas.ingest(old);atlas.annotate(old)
+    slot={'created':1,'description':'Old','player_name':'P','player_level':1}
+    atlas.checkpoint(slot);atlas.restore(slot)
+    anchored(atlas,[sample(1)],'new',origin=(500,600,0))
+    assert atlas.current()['pose']==[0,2,0]
+    anchored(atlas,[sample(1)],'other',space='other')
+    anchored(atlas,[sample(1)],'returned',origin=(500,600,0))
+    assert atlas.current()['pose']==[0,2,0]
+    assert len(atlas.current()['nodes'])==1
+
+
+def test_unknown_save_of_other_player_isolated(tmp_path):
+    atlas=ExplorationAtlas(tmp_path/'atlas.json')
+    o=anchored(atlas,[sample(1)]);node=atlas.annotate(o)
+    atlas.checkpoint({'created':1,'description':'S','player_name':'A','player_level':1})
+    atlas.restore({'created':2,'description':'S2','player_name':'B','player_level':1})
+    anchored(atlas,[sample(1)],'other_player')
+    assert atlas.resolve(node['ref']) is None
+
+
+def test_disconnected_known_point_requires_native_path_not_invented_trail(tmp_path):
+    atlas=ExplorationAtlas(tmp_path/'atlas.json')
+    o=anchored(atlas,[sample(1)]);node=atlas.annotate(o)
+    anchored(atlas,[sample(1)],'other_door',origin=(110,200,3))
+    assert atlas.travelled_route(node) is None
+    row=atlas.present(tmp_path/'map.svg')['nodes'][0]
+    assert row['can_revisit'] and row['revisit_source']=='native_path_required'
+    archived=atlas.present(tmp_path/'archive.svg',archived=True)['nodes'][0]
+    assert not archived['can_revisit'] and archived['revisit_source']=='different_space'
+
+
+def test_private_atlas_metadata_rejected_at_public_boundary():
+    with pytest.raises(BridgeError): check_result({'_atlas_frame':{'space':'private', 'origin':[1,2,3]}})

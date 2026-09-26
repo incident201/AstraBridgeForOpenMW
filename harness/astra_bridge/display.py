@@ -17,6 +17,7 @@ class Display:
         self.name = name or os.environ.get("DISPLAY")
         self.headless, self.process, self.window = headless, None, None
         self.server_pid = None
+        self.frame_stream = None
         self.env = os.environ.copy()
         self.env["LD_LIBRARY_PATH"] = str(root / "tools/usr/lib")
         self.xdotool = shutil.which("xdotool") or str(root / "tools/usr/bin/xdotool")
@@ -85,6 +86,10 @@ class Display:
                "width": int(geometry["WIDTH"]), "height": int(geometry["HEIGHT"])}
 
     def capture(self, path: Path):
+        if self.frame_stream and self.frame_stream.supported:
+            size = self.frame_stream.capture(path)
+            self.width, self.height = size['width'], size['height']
+            return size
         from .window_capture import WindowCapture
         import mss.tools
         previous = os.environ.get("XAUTHORITY")
@@ -143,6 +148,9 @@ class Display:
         self.run('key','--clearmodifiers','--delay','80','t')
 
     def stop(self):
+        if self.frame_stream:
+            self.frame_stream.close()
+            self.frame_stream = None
         if self.process and self.process.poll() is None:
             os.killpg(self.process.pid, signal.SIGTERM)
             self.process.wait(timeout=5)

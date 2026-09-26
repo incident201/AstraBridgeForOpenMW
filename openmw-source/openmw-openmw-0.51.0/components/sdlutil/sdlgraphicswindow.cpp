@@ -1,4 +1,5 @@
 #include "sdlgraphicswindow.hpp"
+#include "astraframe.hpp"
 
 #include <SDL_video.h>
 
@@ -230,6 +231,7 @@ namespace SDLUtil
         if (!mRealized)
             return;
 
+        AstraFrame::capture(mWindow);
         SDL_GL_SwapWindow(mWindow);
     }
 

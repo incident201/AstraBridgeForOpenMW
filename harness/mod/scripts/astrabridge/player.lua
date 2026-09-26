@@ -257,6 +257,7 @@ local function observation(args)
     if out.ui.supported then out.text_source='native_ui' end
     out.body=bodyState()
     out.trajectory=Trajectory.report(args and args._trail_after,args and args._trail_segment)
+    out._atlas_frame=Trajectory.frame()
     out.combat=combatInfo()
     out.effects=activeEffects()
     if not I.UI.getMode() and not out.ui.modal then
