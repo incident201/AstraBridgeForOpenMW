@@ -1,0 +1,149 @@
+# Navigation, maps and memory
+
+Use current screenshots plus structured navigation data. The maps below are partial assistance, not a complete layout of the level. For handle types and result interpretation, see [commands.md](commands.md).
+
+## Coordinate conventions
+
+- Distances are metres; durations are simulation seconds.
+- Absolute heading: 0° north, 90° east, 180° south, 270° west.
+- Relative bearing: 0° ahead, positive to the right, negative to the left.
+- Pitch: positive looks down, negative looks up.
+- Forward/right distances are relative to the character's heading at the start of the command. Positive vertical distance means up.
+- The agent receives relative geometry and public handles, not engine/world coordinates.
+
+## Pick an operation
+
+| Syntax, after `./astra` | Input / behavior |
+|---|---|
+| `look --heading H --pitch P` | Set either or both absolute angles. H=0…360, P=−80…80. Finite normal player turn; consumes time. |
+| `act 'JSON'` | Short direct movement/input. Fields below. |
+| `survey` | Refresh bounded local walking-surface samples; returns an action plus observation with `terrain`. |
+| `ground` | Return `ground_targets`: visible walkable point candidates with refs, screen aim points, relative distances/heights and path status. |
+| `go POINT_REF --seconds S --run --under-fire` | Follow a path toward a passage/ground/waypoint/walk ref. S=0.5…20, default 12. Flags are optional. **Not an actor or door ref.** |
+| `walk X Y --observation OBS --run` | Select a visible floor point from current screenshot pixels and walk toward it. The result can return a reusable `walk_…` ref. |
+| `walk --ref POINT_REF --run` | Use a returned ground/walk reference. Do not combine `--ref` with X/Y/observation. No `--seconds` option; use `go` for an explicit budget. |
+| `move-local F --sideways-m R --under-fire` | Bounded direct movement to a relative horizontal offset; each component −4…4 m. Preserves its initial view direction, unlike path-following `go`. |
+| `approach OBJECT_REF --reach activate --run --under-fire` | Approach a visible object/NPC. Reach can be `activate` (default), `melee` or `touch`; latter two are useful for actors. Does **not** activate it. |
+| `focus OBJECT_REF --wait-ready` | Aim using an ordinary turn, without walking. `--wait-ready` can wait for a corpse to become lootable. Does **not** activate it. |
+| `interact OBJECT_REF --approach` | Optionally approach, then focus, then send ordinary Activate. This is the normal talk/open/pickup command. |
+| `fly --forward-m F --sideways-m R --vertical-m U --seconds S --under-fire` | Local flight, requiring active levitation. Defaults F/R/U=0, S=10; at least one nonzero offset, combined length ≤20 m; S=0.2…15. |
+| `scan --pitch P` | Default pitch 0. Observe then turn through three 90° increments. Returns `views`, `final`, `completed`, `reason`, `elapsed`; does not restore the original heading. Requires no active live lock. |
+| `fov DEGREES` | Set horizontal FOV within 70…115°. Default harness view is 100°. |
+
+`walk` also accepts `--under-fire`. This flag disables the early damage stop for the movement commands that support it; it does not confer protection. Ordinary navigation can stop on damage, a changed location/UI, obstruction, lost target, time limit or partial path. Check the returned reason and actual distance, not just `ok:true`.
+
+Path-following `go`/`walk` looks along its movement. A live combat lock controls the camera: `unlock` before independent turns/scans/path navigation. Combat pursuit/retreat intentionally keeps the actor in view; see [combat.md](combat.md).
+
+### Direct `act` fields
+
+| JSON field | Range / default |
+|---|---|
+| `seconds` | 0.02…3; default 0.25. |
+| `move` | −1…1; positive forward, negative backward; default 0. |
+| `strafe` | −1…1; positive right, negative left; default 0. |
+| `yaw` | Relative horizontal turn −180…180 degrees; positive right. |
+| `pitch` | Relative vertical turn −90…90 degrees, clamped to the supported view range; positive down. |
+| `run`, `sneak`, `attack` | Booleans, default false. `attack` holds ordinary Use during the step; prefer `strike`/`cast` for complete controlled uses. |
+| `trigger` | One ordinary trigger such as `Jump` or `Activate`. Prefer `trigger Inventory/Journal/GameMenu/Rest` for menus. |
+| `target` | Optional current visible-object handle for an already aimed, reachable activation. Prefer `interact` to manage aiming/reach. |
+
+Controls are released at the end. An attack may still have an unfinished animation: read `body.animation_busy`. The next `act` defaults to not sneaking, so include `sneak:true` on each intended sneaking step; `look` preserves an existing crouch. `stop` clears it.
+
+```sh
+./astra act '{"move":1,"run":true,"seconds":1}'
+./astra act '{"move":-1,"strafe":0.5,"seconds":0.5}'
+./astra act '{"trigger":"Jump","move":1,"seconds":0.8}'
+./astra act '{"sneak":true,"move":0.5,"seconds":1}'
+./astra act '{"seconds":0.5}'
+```
+
+The final example waits without input. Finite turns/settling can make actual elapsed time differ from the requested movement duration; use the reported `elapsed` and `motion`.
+
+## Local walking surface: JSON first, SVG optional
+
+`observe` returns `terrain.rays` and `terrain.passages` when available. Rays sample nearby directions; passages are candidate short moves with `ref`, `direction`, `bearing_deg`, `distance_m`, `height_change_m`, `slope` and `status`. The usual radius is 6 m. Gaps between samples are unknown.
+
+`local_map` is an SVG of those same public data. Its top is **forward relative to the character**. Blue indicates rising terrain, orange descending, green approximately level. The file is generated even when the agent does not open it.
+
+Use the numeric fields directly for simple decisions. For a confusing junction, view the rendered diagram alongside the actual game screenshot. Do not reconstruct world coordinates from diagram pixels or treat a ray as proof of a wide, unobstructed corridor.
+
+Example decision sequence:
+
+```sh
+./astra observe
+# Choose a current terrain.passages entry from its direction, clearance and height.
+./astra go PASSAGE_REF --seconds 5
+# Check action.reason, action.motion and the returned screenshot.
+```
+
+For a visibly reachable point not described well by a passage:
+
+```sh
+./astra ground
+# Select a ground_targets entry after checking its screen location and navigation status.
+./astra go GROUND_REF --seconds 8
+```
+
+`arrived` uses a tolerance reported by navigation. `partial`, `path_end_out_of_reach`, `blocked`, or `height_mismatch` do not mean the destination was reached. A bridge, stair or landing can be visible but not connected by the current navmesh. Choose another visible waypoint or a short direct action supported by the screenshot; do not force a hidden route.
+
+`endpoint_mismatch` means the native path ended on a different height from the requested destination; the motor does not walk that misleading partial route. A short route may instead use physically sampled floor support (`navigation.source: local_collision`). Native navigation remains the default (`navmesh`). All movement uses normal collision and controls.
+
+## Flight and water
+
+Use `status --player` to confirm the active effect and its remaining duration before moving.
+
+```sh
+./astra fly --vertical-m 4 --seconds 8
+./astra fly --forward-m 8 --sideways-m 2 --vertical-m -1 --seconds 10
+```
+
+`fly` follows a straight local segment using normal forward input and finite turns. It does not plan a three-dimensional route around buildings. Pure ascent/descent preserves horizontal heading while tolerating small physical sideways drift. Collisions, damage or timeout can stop it. A live target lock must be released first.
+
+While levitation is active, ground-oriented `go`, `walk`, `approach`, and `move-local` reject with `flight_requires_fly`. Use `fly` or short `act` inputs. Without levitation, `fly` rejects with `levitation_required`; expiration during flight reports `levitation_ended` and pauses. Falling may resume when the next action advances time.
+
+With water walking active, local paths and visible-point selection use the water surface, preserving bridges above it. `water_walking_ended` interrupts an affected route. An active effect does not by itself prove the feet are on the surface. Check `swimming`, `submerged`, `on_ground`, height changes and the image.
+
+Swimming uses normal movement plus view pitch, for example looking upward then advancing toward the surface. Walking-path navigation and ground combat maneuvers can reject swimming; they are not underwater autopilots.
+
+## Travel memory: JSON nodes plus optional diagram
+
+`atlas --radius-m R` returns recorded travel memory around the current pose. R=10…80 m, default 35. `observe` also includes this under `exploration`.
+
+Useful fields:
+
+- `nodes[]`: `ref`, display `label` (A1, A2…), distance/bearing/height relative to the player, `visits`, `can_revisit`, `route_distance_m`, observed landmarks, screenshot references and `untraversed_directions`. `distance_m` is horizontal straight-line distance; `route_distance_m` follows recorded travel. `can_revisit` means a connected recorded route exists, not that it is currently clear of doors or NPCs.
+- `current_node`: the currently recognized recorded node, if any.
+- `svg`, optional `png`: visualizations of the travelled path and observed local probes. PNG is generated only when `rsvg-convert` is available. Open it explicitly; returning a filename does not show it to the model.
+- `not_a_full_map`, `sampled_path`: reminders that the diagram is partial sampled memory.
+
+Travel-memory diagrams use **north up**, unlike the local walking surface. Cyan is sampled travel, grey a different height, green observed probe rays, dashed lines directions not traversed. A dashed direction is not knowledge of what lies beyond it.
+
+```sh
+./astra atlas --radius-m 35
+# Choose a nodes[].ref with can_revisit=true; A4 is a label, not the ref.
+./astra revisit NODE_REF --seconds 10
+```
+
+`revisit NODE_REF [--run] [--seconds S] [--under-fire]` asks the motor to return to that recorded point. It is movement, not teleportation, and can fail or produce a partial path. Map state is associated with a save/branch; a load must not import knowledge from a later, unvisited timeline.
+
+The motor first tries the engine's normal pathfinder. If that route is incomplete or crosses physical geometry, it can fall back to this branch's recorded travelled path (`navigation.source: recorded_trail`). This includes the actual stairs and doorway turns. It never connects different floors just because their XY positions match, or draws routes over missing samples. Expired motor handles do not erase a recorded route.
+
+Collision is checked during movement. For a blocking NPC the motor briefly waits, then attempts a short local detour with floor support and both legs checked; otherwise it returns `blocked`. A closed door can block an older route. A time limit returns `step_limit`; call `revisit` again to continue from the current pose. `recorded_route_unavailable` means the trace is disconnected, too far away, or exceeds the bounded route budget.
+
+## Semantic notes and route history
+
+These complement the automatically drawn travel path:
+
+| Syntax | Purpose |
+|---|---|
+| `remember "LABEL" --note "TEXT" --confidence observed` | Attach a grounded note to the latest observation/current place. Use `inferred` for a hypothesis. Reusing a label updates that place in the current branch. |
+| `remember "LABEL" --exits "DESCRIPTION" --exits "DESCRIPTION"` | Record observed exit descriptions; repeat `--exits` for each. |
+| `recall "QUERY"` | Search notes by label/ref/text in the current branch; omit query to list recent notes. |
+| `recall --archived` | Read notes from older branches too; treat them explicitly as historical, not current-state facts. |
+| `connect PLACE_REF_FROM PLACE_REF_TO --via "OBSERVED_ROUTE"` | Record an agent-reported route between two known notes. Does not move or prove a path. |
+| `route` | Recent actual movement steps and the status of the remembered anchor. Does not plan a route. |
+| `return-to PLACE_REF --seconds S --run --under-fire` | Return toward a note's recorded motor marker. Requires a current-branch reachable marker; otherwise may return `unknown_place`. |
+
+For `return-to`/`revisit`, time defaults to 12 s and is bounded like `go`. Always refresh `observe` before creating a note: `remember` uses the latest observation, not a fresh screenshot of its own.
+
+Record visible landmarks, how you entered, and decisions at junctions. If a point has multiple visits and little new progress, inspect its past screenshots and choose a different observed route. Avoid repeatedly issuing the same blocked movement without new evidence.

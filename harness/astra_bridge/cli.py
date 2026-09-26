@@ -1,0 +1,204 @@
+from __future__ import annotations
+
+import argparse
+import json
+import os
+from pathlib import Path
+import signal
+import socket
+import subprocess
+import sys
+import time
+
+from .protocol import BridgeError
+from .session import Session
+
+ROOT = Path(__file__).resolve().parents[1]
+RUNTIME = ROOT / "runtime"
+SOCKET = RUNTIME / "bridge.sock"
+
+
+def emit(value):
+    print(json.dumps(value, ensure_ascii=False, indent=2))
+
+
+def request(op, args=None, timeout=130):
+    with socket.socket(socket.AF_UNIX) as connection:
+        connection.settimeout(timeout)
+        try:
+            connection.connect(str(SOCKET))
+        except OSError as exc:
+            raise BridgeError("controller_not_running") from exc
+        connection.sendall(json.dumps({"op": op, "args": args or {}}, ensure_ascii=False).encode() + b"\n")
+        reader = connection.makefile("rb")
+        data = reader.readline(4_000_001)
+        if not data or len(data) > 4_000_000:
+            raise BridgeError("controller_disconnected")
+        return json.loads(data)
+
+
+def serve(options):
+    import fcntl
+    RUNTIME.mkdir(mode=0o700, exist_ok=True)
+    lock = open(RUNTIME / "controller.lock", "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        raise BridgeError("controller_already_running")
+    os.umask(0o077)
+    SOCKET.unlink(missing_ok=True)
+    session = Session(ROOT, Path(options.installation), headless=options.headless,
+                      display=options.display, sound=not options.no_sound, recordings_dir=options.recordings_dir)
+    server = socket.socket(socket.AF_UNIX)
+    server.bind(str(SOCKET))
+    server.listen(4)
+    def shutdown_signal(*_):
+        raise KeyboardInterrupt
+    signal.signal(signal.SIGTERM, shutdown_signal)
+    signal.signal(signal.SIGINT, shutdown_signal)
+    try:
+        session.start()
+        while True:
+            connection, _ = server.accept()
+            with connection:
+                connection.settimeout(5)
+                stopping = False
+                try:
+                    raw = connection.makefile("rb").readline(32769)
+                    if len(raw) > 32768:
+                        raise BridgeError("command_too_large")
+                    message = json.loads(raw)
+                    if type(message) is not dict or message.keys() - {"op", "args"}:
+                        raise BridgeError("invalid_arguments")
+                    if message.get("op") == "shutdown":
+                        session.close()
+                        stopping = True
+                        result = {"stopped": True}
+                    else:
+                        result = session.call(message.get("op"), message.get("args", {}))
+                    response = {"ok": True, "result": result}
+                except BridgeError as exc:
+                    response = {"ok": False, "error": str(exc)}
+                except Exception:
+                    import traceback
+                    traceback.print_exc()  # private controller log, never the gameplay response
+                    response = {"ok": False, "error": "controller_operation_failed"}
+                try:
+                    connection.sendall(json.dumps(response, ensure_ascii=False).encode() + b"\n")
+                except OSError:
+                    pass  # disconnect does not replay or abandon an already bounded action
+                if stopping:
+                    break
+    finally:
+        session.close()
+        server.close()
+        SOCKET.unlink(missing_ok=True)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="OpenMW player-visible harness")
+    commands = parser.add_subparsers(dest="command", required=True)
+    for name in ("start", "serve"):
+        p = commands.add_parser(name)
+        p.add_argument("--installation", default=str(ROOT.parent))
+        p.add_argument("--headless", action="store_true")
+        p.add_argument("--display")
+        p.add_argument("--no-sound", action="store_true")
+        p.add_argument("--recordings-dir")
+    for name in ("status", "observe", "stop", "saves", "new-game", "shutdown", "record-start", "record-stop", "record-status","scan","ui","route","map","unlock","survey","ground"):
+        p=commands.add_parser(name)
+        if name=='scan':p.add_argument('--pitch',dest='pitch_deg',type=float,default=0)
+        if name=='status':p.add_argument('--player',action='store_true')
+    p = commands.add_parser("act"); p.add_argument("json", help='e.g. {"move":1,"seconds":0.4}')
+    p = commands.add_parser('look');p.add_argument('--heading',dest='heading_deg',type=float);p.add_argument('--pitch',dest='pitch_deg',type=float)
+    p = commands.add_parser("chain"); p.add_argument("json", help='{"actions":[{"op":"strike"},{"op":"strike"}],"max_seconds":12}')
+    p = commands.add_parser('atlas'); p.add_argument('--radius-m',type=float,default=35)
+    p = commands.add_parser('revisit'); p.add_argument('ref'); p.add_argument('--run',action='store_true')
+    p.add_argument('--seconds',type=float,default=12); p.add_argument('--under-fire',action='store_true')
+    p = commands.add_parser("inspect"); p.add_argument("view", choices=["stats", "inventory", "spells", "journal","conversations","combat","effects","character"]); p.add_argument("--page", type=int, default=0);p.add_argument('--topic')
+    for name in ('strike','cast'):
+        p=commands.add_parser(name);p.add_argument('ref',nargs='?');p.add_argument('--air',action='store_true')
+        if name=='strike':p.add_argument('--charge',type=float,default=.8)
+    for name in ("use-item", "select-spell", "select-enchanted", "load","focus","approach","choose","lock","hover"):
+        p = commands.add_parser(name); p.add_argument("ref")
+        if name=='approach':p.add_argument('--reach',choices=['activate','melee','touch'],default='activate')
+        if name=='approach':p.add_argument('--run',action='store_true')
+        if name=='approach':p.add_argument('--under-fire',action='store_true')
+        if name=='focus':p.add_argument('--wait-ready',action='store_true')
+    p=commands.add_parser('walk');p.add_argument('x',nargs='?',type=int);p.add_argument('y',nargs='?',type=int)
+    p.add_argument('--observation',type=int);p.add_argument('--ref');p.add_argument('--run',action='store_true')
+    p.add_argument('--under-fire',action='store_true')
+    p=commands.add_parser('go');p.add_argument('ref');p.add_argument('--run',action='store_true');p.add_argument('--seconds',type=float,default=12)
+    p.add_argument('--under-fire',action='store_true')
+    p=commands.add_parser('return-to');p.add_argument('ref');p.add_argument('--run',action='store_true');p.add_argument('--seconds',type=float,default=12)
+    p.add_argument('--under-fire',action='store_true')
+    for name in ('evade','retreat'):
+        p=commands.add_parser(name)
+        if name=='evade':p.add_argument('direction',choices=['left','right','back'])
+        p.add_argument('ref',nargs='?');p.add_argument('--meters',type=float,default=2);p.add_argument('--seconds',type=float,default=4);p.add_argument('--run',action='store_true')
+        p.add_argument('--actions',type=json.loads)
+    p = commands.add_parser("save"); p.add_argument("description")
+    p = commands.add_parser("edit"); p.add_argument("ref"); p.add_argument("text")
+    p = commands.add_parser("adjust"); p.add_argument("ref"); p.add_argument("position",type=int)
+    p = commands.add_parser("trigger"); p.add_argument("name")
+    p = commands.add_parser("restart"); p.add_argument("--load-latest", action="store_true")
+    p=commands.add_parser('interact');p.add_argument('ref');p.add_argument('--approach',action='store_true')
+    p=commands.add_parser('move-local');p.add_argument('forward_m',type=float);p.add_argument('--sideways-m',type=float,default=0)
+    p.add_argument('--under-fire',action='store_true')
+    p=commands.add_parser('fly');p.add_argument('--forward-m',type=float,default=0);p.add_argument('--sideways-m',type=float,default=0)
+    p.add_argument('--vertical-m',type=float,default=0);p.add_argument('--seconds',type=float,default=10);p.add_argument('--under-fire',action='store_true')
+    p=commands.add_parser('fov');p.add_argument('degrees',type=float)
+    p=commands.add_parser('track');p.add_argument('ref');p.add_argument('--seconds',type=float,default=1);p.add_argument('--attack',action='store_true')
+    p=commands.add_parser('remember');p.add_argument('label');p.add_argument('--note',default='');p.add_argument('--exits',action='append',default=[]);p.add_argument('--confidence',choices=['observed','inferred'],default='observed')
+    p=commands.add_parser('recall');p.add_argument('query',nargs='?',default='');p.add_argument('--archived',action='store_true')
+    p=commands.add_parser('connect');p.add_argument('from');p.add_argument('to');p.add_argument('--via',required=True)
+    p = commands.add_parser("click"); p.add_argument("x", type=int); p.add_argument("y", type=int); p.add_argument("--button", type=int, default=1); p.add_argument("--observation", type=int, required=True)
+    for name, field in (("key", "key"), ("text", "text"), ("scroll", "steps")):
+        p = commands.add_parser(name); p.add_argument(field, type=int if name == "scroll" else str); p.add_argument("--observation", type=int, required=True)
+    options = parser.parse_args()
+    try:
+        if options.command == "serve":
+            serve(options)
+            return
+        if options.command == "start":
+            try:
+                existing = request("status", timeout=2)
+                if existing.get("ok"):
+                    emit(existing); return
+            except (BridgeError, OSError):
+                pass
+            RUNTIME.mkdir(mode=0o700, exist_ok=True)
+            cmd = [sys.executable, "-m", "astra_bridge.cli", "serve", "--installation", options.installation]
+            if options.headless: cmd.append("--headless")
+            if options.display: cmd += ["--display", options.display]
+            if options.no_sound: cmd.append("--no-sound")
+            if options.recordings_dir: cmd += ['--recordings-dir',options.recordings_dir]
+            with open(RUNTIME / "controller-private.log", "ab") as log:
+                process = subprocess.Popen(cmd, cwd=ROOT, stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
+            deadline = time.monotonic()+75
+            while time.monotonic() < deadline:
+                if process.poll() is not None:
+                    raise BridgeError("startup_failed_see_private_controller_log")
+                if SOCKET.exists():
+                    try:
+                        emit(request("status", timeout=70)); return
+                    except (BridgeError, OSError):
+                        pass
+                time.sleep(.1)
+            raise BridgeError("startup_timeout")
+        op = options.command.replace("-", "_")
+        args = vars(options).copy(); args.pop("command")
+        args={k:v for k,v in args.items() if v is not None}
+        if op in {"act","chain"}:
+            args = json.loads(args["json"])
+        response = request(op, args)
+        emit(response)
+        if not response["ok"]:
+            sys.exit(1)
+    except (BridgeError, OSError, ValueError) as exc:
+        emit({"ok": False, "error": str(exc) if isinstance(exc, BridgeError) else "invalid_request_or_connection"})
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

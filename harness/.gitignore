@@ -1,0 +1,8 @@
+.venv/
+tools/
+runtime/
+__pycache__/
+.pytest_cache/
+*.log
+*.pid
+local-settings.json

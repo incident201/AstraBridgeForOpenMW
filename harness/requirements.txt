@@ -1,0 +1,2 @@
+mss==10.2.0
+imageio-ffmpeg==0.6.0

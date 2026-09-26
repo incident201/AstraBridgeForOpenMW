@@ -1,0 +1,368 @@
+"""A map of travelled paths and observed local probes, never a level-map reader."""
+from __future__ import annotations
+
+from html import escape
+from copy import deepcopy
+import hashlib
+import json
+import math
+import heapq
+from pathlib import Path
+import shutil
+import subprocess
+
+
+def distance(a, b):
+    return math.hypot(a[0]-b[0], a[1]-b[1])
+
+
+def bearing(a, b):
+    return math.degrees(math.atan2(b[0]-a[0], b[1]-a[1])) % 360
+
+
+class ExplorationAtlas:
+    def __init__(self, path: Path):
+        self.path = path
+        self.data = json.loads(path.read_text()) if path.exists() else {'segments': [], 'markers': []}
+        self.segment = None
+        self.sequence = 0
+        self.restore_pending = None
+
+    @staticmethod
+    def save_key(slot):
+        # Public save-list metadata; never parse game state from the save file.
+        identity = slot.get('checkpoint_key') or [slot.get(k) for k in ('created', 'description', 'player_name', 'player_level')]
+        return hashlib.sha256(json.dumps(identity, ensure_ascii=False).encode()).hexdigest()
+
+    def checkpoint(self, slot):
+        s = self.current()
+        if not s or 'pose' not in s: return
+        directory = self.path.parent / 'exploration-checkpoints'
+        directory.mkdir(exist_ok=True)
+        path = directory / (self.save_key(slot)+'.json')
+        snapshot = {'version': 1, 'save': slot, 'segment': s}
+        tmp = path.with_suffix('.tmp')
+        tmp.write_text(json.dumps(snapshot, ensure_ascii=False, separators=(',', ':')))
+        tmp.replace(path)
+
+    def restore(self, slot):
+        self.reset_runtime()
+        if not slot: return
+        path = self.path.parent / 'exploration-checkpoints' / (self.save_key(slot)+'.json')
+        if path.exists():
+            snapshot = json.loads(path.read_text())
+            saved = snapshot.get('save', {})
+            same_metadata = all(saved.get(k) == slot.get(k) for k in ('description','player_name','player_level'))
+            if 'time_played_seconds' in saved and 'time_played_seconds' in slot:
+                close_timestamp = saved['time_played_seconds'] == slot['time_played_seconds']
+            else:
+                close_timestamp = abs(saved.get('created',0)-slot.get('created',0)) < 1
+            if snapshot.get('version') == 1 and same_metadata and close_timestamp: self.restore_pending = snapshot
+
+    def persist(self):
+        tmp = self.path.with_suffix('.tmp')
+        tmp.write_text(json.dumps(self.data, ensure_ascii=False, separators=(',', ':')))
+        tmp.replace(self.path)
+
+    def reset_runtime(self):
+        self.segment, self.sequence = None, 0
+        self.restore_pending = None
+        self.data['markers'] = []
+
+    def current(self):
+        return next((s for s in self.data['segments'] if s['ref'] == self.segment), None)
+
+    def ingest(self, observation):
+        trace = observation.get('trajectory')
+        if not trace or not trace.get('samples') and trace['ref'] != self.segment:
+            return
+        if trace['ref'] != self.segment:
+            self.segment, self.sequence = trace['ref'], 0
+            snapshot, self.restore_pending = self.restore_pending, None
+            if snapshot and snapshot['segment']['location'] == observation.get('location'):
+                restored = deepcopy(snapshot['segment'])
+                restored['ref'] = self.segment
+                restored['origin_offset'] = list(restored['pose'])
+                restored['restored_from_save'] = snapshot['save']['description']
+                refs = {}
+                for node in restored['nodes']:
+                    old_ref = node['ref']
+                    node['ref'] = f"node_{self.segment}_{node['label']}"
+                    refs[old_ref] = node['ref']
+                    node['restored'] = bool(node.get('walkable') or node.get('motor_ref') or node.get('restored'))
+                    node.pop('motor_ref', None)
+                restored['current_node'] = refs.get(restored.get('current_node'))
+                self.data['segments'] = [s for s in self.data['segments'] if s['ref'] != self.segment]
+                self.data['segments'].append(restored)
+            if not self.current():
+                self.data['segments'].append({'ref': self.segment, 'points': [], 'nodes': [],
+                                             'current_node': None, 'location': observation.get('location', '')})
+            self.data['segments'] = self.data['segments'][-12:]
+        s = self.current()
+        angle = math.radians(trace['start_heading_deg'])
+        for row in trace['samples']:
+            if row['sequence'] <= self.sequence:
+                continue
+            f, r = row['forward_m'], row['sideways_m']
+            point = [f*math.sin(angle)+r*math.cos(angle), f*math.cos(angle)-r*math.sin(angle), row['vertical_m']]
+            point = [x+y for x,y in zip(point, s.get('origin_offset', [0,0,0]))]
+            gap = self.sequence > 0 and row['sequence'] != self.sequence+1
+            s['points'].append({'p': point, 'sequence': row['sequence'], 'gap': gap})
+            s['pose'], s['heading'] = point, row['heading_deg']
+            self.sequence = row['sequence']
+        s['points'] = s['points'][-5000:]
+        if s['points']:
+            s['points'][0]['gap'] = True
+        s['location'] = observation.get('location', s['location'])
+        self.persist()
+
+    def note_marker(self, ref):
+        self.data['markers'].append(ref)
+        self.data['markers'] = self.data['markers'][-64:]
+        active = set(self.data['markers'])
+        for s in self.data['segments']:
+            for node in s['nodes']:
+                if node.get('motor_ref') not in active:
+                    node.pop('motor_ref', None)
+
+    def annotate(self, observation):
+        """Returns a new node that needs a private motor marker, or None."""
+        s = self.current()
+        body = observation.get('body', {})
+        if not s or 'pose' not in s or observation.get('ui_mode') != 'Gameplay' or not body.get('on_ground') or body.get('swimming') or body.get('dead'):
+            return None
+        pose = s['pose']
+        nearby = [n for n in s['nodes'] if distance(n['p'], pose) < 1.5 and abs(n['p'][2]-pose[2]) < .75]
+        node = min(nearby, key=lambda n: distance(n['p'], pose)) if nearby else None
+        created = False
+        if node is None and (not s['nodes'] or distance(s['nodes'][-1]['p'], pose) >= 3
+                             or abs(s['nodes'][-1]['p'][2]-pose[2]) >= 1):
+            index = s.get('node_serial', 0)+1
+            s['node_serial'] = index
+            node = {'ref': f"node_{self.segment}_{index}", 'label': f'A{index}', 'p': list(pose),
+                    'visits': 0, 'views': [], 'probes': [], 'options': [], 'walkable': True}
+            s['nodes'].append(node)
+            s['nodes'] = s['nodes'][-256:]
+            created = True
+        if node is None:
+            s['current_node'] = None
+            return None
+        if s.get('current_node') != node['ref']:
+            node['visits'] += 1
+        s['current_node'] = node['ref']
+        node['views'] = (node['views']+[observation.get('screenshot')])[-3:]
+        node['landmarks'] = [o['name'] for o in observation.get('scene', {}).get('objects', [])
+                             if o['kind'] == 'door' and o['distance_m'] < 10][:3]
+        terrain = observation.get('terrain', {})
+        if terrain.get('supported'):
+            # Probes are observations at this pose, not a filled polygon between rays.
+            rays = []
+            for ray in terrain.get('rays', []):
+                angle = math.radians(s['heading']+ray['bearing_deg'])
+                end = [pose[0]+math.sin(angle)*ray['clear_m'], pose[1]+math.cos(angle)*ray['clear_m'],
+                       pose[2]+ray['height_change_m']]
+                rays.append({'a': list(pose), 'b': end, 'status': ray['status']})
+            node['probes'] = rays
+            node['option_origin'] = list(pose)
+            node['options'] = [{'heading': (s['heading']+p['bearing_deg']) % 360,
+                                'meters': p['distance_m'], 'height': p['height_change_m']} for p in terrain.get('passages', [])]
+        self.persist()
+        return node if created or not node.get('motor_ref') else None
+
+    def untraversed(self, node):
+        """Directions not crossed by any recorded path near this observation."""
+        s = self.current()
+        remaining = []
+        origin = node.get('option_origin', node['p'])
+        local = [(row['p'], distance(origin, row['p'])) for row in s['points']
+                 if abs(row['p'][2]-origin[2]) < 1.5]
+        local = [(p, d) for p, d in local if .8 <= d <= 3]
+        for option in node['options']:
+            travelled = False
+            for point, d in local:
+                if d <= min(3, option['meters']+.5):
+                    delta = (bearing(origin, point)-option['heading']+180) % 360-180
+                    if abs(delta) < 25:
+                        travelled = True
+                        break
+            if not travelled:
+                remaining.append(option)
+        return remaining
+
+    def resolve(self, ref):
+        s = self.current()
+        if not s:
+            return None
+        matches = [n for n in s['nodes'] if n['ref'] == ref or n['label'] == ref]
+        return matches[0] if len(matches) == 1 else None
+
+    def travelled_routes(self):
+        """Shortest routes along this branch's actual samples, including their Z.
+
+        Only consecutive samples and repeat visits to the same small foot pose
+        connect. Nearby map nodes, probes, and missing samples never create edges.
+        The motor still collision-checks each segment against the current world.
+        """
+        s = self.current()
+        if not s or not s.get('points'):
+            return {}, [], []
+        points = [row['p'] for row in s['points']]
+        edges = [[] for _ in points]
+        buckets = {}
+        def connect(i, j):
+            d = math.dist(points[i], points[j])
+            edges[i].append((j, d))
+            edges[j].append((i, d))
+        for i, row in enumerate(s['points']):
+            p = row['p']
+            if i and not row['gap']:
+                # Do not turn a recorded fall, teleport or large sampling gap
+                # into an instruction to walk back up it.
+                prev = points[i-1]
+                if math.dist(prev, p) < 2 and abs(prev[2]-p[2]) <= distance(prev, p)*1.1+.15:
+                    connect(i-1, i)
+            key = tuple(math.floor(v/.075) for v in p)
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    for dz in (-1, 0, 1):
+                        for j in buckets.get((key[0]+dx, key[1]+dy, key[2]+dz), ()):
+                            if math.dist(points[j], p) <= .075:
+                                connect(i, j)
+            buckets.setdefault(key, []).append(i)
+        start = len(points)-1
+        costs, parents = {start: 0.0}, {start: None}
+        queue = [(0.0, start)]
+        while queue:
+            cost, i = heapq.heappop(queue)
+            if cost != costs[i]:
+                continue
+            for j, length in edges[i]:
+                candidate = cost+max(length, .00001)
+                if candidate < costs.get(j, math.inf):
+                    costs[j], parents[j] = candidate, i
+                    heapq.heappush(queue, (candidate, j))
+        routes = {}
+        for n in s['nodes']:
+            matches = [i for i in costs if math.dist(points[i], n['p']) <= .04]
+            if matches and math.dist(s['pose'], n['p']) < 100:
+                end = min(matches, key=lambda i: costs[i]+math.dist(points[i], n['p']))
+                routes[n['ref']] = (end, costs[end]+math.dist(points[end], n['p']))
+        return routes, parents, points
+
+    def travelled_route(self, node):
+        routes, parents, points = self.travelled_routes()
+        if node['ref'] not in routes:
+            return None
+        index = routes[node['ref']][0]
+        route = [list(node['p'])]
+        while index is not None:
+            if math.dist(route[-1], points[index]) > .025:
+                route.append(points[index])
+            index = parents[index]
+        route.reverse()
+        # Keep recorded corners and height changes. Remove only points lying
+        # within 3 cm of the next segment, with a bounded one metre segment.
+        reduced = []
+        for p in route:
+            while len(reduced) >= 2:
+                a, b = reduced[-2:]
+                d = [y-x for x,y in zip(a,p)]
+                length2 = sum(v*v for v in d)
+                t = sum((x-y)*v for x,y,v in zip(b,a,d))/length2 if length2 else 0
+                closest = [x+max(0,min(1,t))*v for x,v in zip(a,d)]
+                if length2 > 1 or math.dist(b, closest) > .03:
+                    break
+                reduced.pop()
+            reduced.append(p)
+        if len(reduced) > 800 or any(math.dist(p, self.current()['pose']) >= 100 for p in reduced):
+            return None
+        return reduced
+
+    def present(self, path: Path, radius=35):
+        s = self.current()
+        if not s or 'pose' not in s:
+            return {'supported': False}
+        pose = s['pose']
+        nodes = sorted([n for n in s['nodes'] if distance(n['p'], pose) <= radius],
+                       key=lambda n: distance(n['p'], pose))[:20]
+        rows = []
+        routes, _, _ = self.travelled_routes()
+        for n in nodes:
+            directions = self.untraversed(n)
+            relative_bearing = (bearing(pose, n['p'])-s['heading']+180) % 360-180 if distance(n['p'],pose)>.05 else 0
+            rows.append({'ref': n['ref'], 'label': n['label'], 'distance_m': round(distance(n['p'], pose), 2),
+                         'bearing_deg': round(relative_bearing, 1),
+                         'height_change_m': round(n['p'][2]-pose[2], 2), 'visits': n['visits'],
+                         'can_revisit': n['ref'] in routes,
+                         'revisit_source': 'recorded_trail' if n['ref'] in routes else 'unavailable',
+                         'route_distance_m': round(routes[n['ref']][1], 2) if n['ref'] in routes else None,
+                         'untraversed_directions': [{'heading_deg': round(d['heading'], 1), 'meters': d['meters']} for d in directions],
+                         'landmarks': n.get('landmarks', []), 'screenshots': [self.portable_view(v) for v in n['views']]})
+        self.render(path, radius, nodes, rows)
+        result = {'supported': True, 'segment': self.segment, 'source': 'travelled_path_and_observed_probes',
+                  'location': s['location'], 'radius_m': radius, 'nodes': rows, 'svg': str(path),
+                  'not_a_full_map': True, 'sampled_path': True,
+                  'recorded_points': len(s['points']), 'current_node': s.get('current_node')}
+        if s.get('restored_from_save'): result['restored_from_save'] = s['restored_from_save']
+        converter = shutil.which('rsvg-convert')
+        if converter:
+            png = path.with_suffix('.png')
+            completed = subprocess.run([converter, '-o', str(png), str(path)], capture_output=True, timeout=5)
+            if completed.returncode == 0:
+                result['png'] = str(png)
+        return result
+
+    def portable_view(self, value):
+        if not value or Path(value).exists(): return value
+        local = self.path.parent / 'screenshots' / Path(value).name
+        return str(local) if local.exists() else value
+
+    def render(self, path, radius, nodes, public):
+        s = self.current(); pose = s['pose']; scale = 650/(radius*2)
+        def point(p): return 360+(p[0]-pose[0])*scale, 370-(p[1]-pose[1])*scale
+        def xy(p):
+            x, y = point(p); return f'{x:.1f},{y:.1f}'
+        svg = ['<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="740" viewBox="0 0 1100 740">',
+               '<rect width="1100" height="740" fill="#101923"/>',
+               '<defs><clipPath id="map"><rect x="20" y="50" width="680" height="645"/></clipPath></defs>',
+               '<g font-family="DejaVu Sans,sans-serif" font-size="13" fill="#d6e3ed">',
+               f'<text x="20" y="28">Travel memory · {escape(s["location"])} · North is up</text>',
+               '<g clip-path="url(#map)">']
+        for metres in range(5, int(radius)+1, 5):
+            svg.append(f'<circle cx="360" cy="370" r="{metres*scale:.1f}" fill="none" stroke="#253545"/>')
+            svg.append(f'<text x="365" y="{370-metres*scale+14:.1f}" fill="#657c8d">{metres} m</text>')
+        for n in nodes:
+            for ray in n['probes']:
+                if abs(ray['a'][2]-pose[2]) > 1.5: continue
+                svg.append(f'<polyline points="{xy(ray["a"])} {xy(ray["b"])}" fill="none" stroke="#587768" opacity=".24"/>')
+        previous = None
+        for row in s['points']:
+            p = row['p']
+            if previous is not None and not row['gap'] and min(distance(previous, pose), distance(p, pose)) <= radius:
+                color = '#5bd5ea' if abs(p[2]-pose[2]) < 1.5 else '#6c7286'
+                svg.append(f'<polyline points="{xy(previous)} {xy(p)}" fill="none" stroke="{color}" stroke-width="2"/>')
+            previous = p
+        for n, row in zip(nodes, public):
+            x, y = point(n['p'])
+            other_floor = abs(row['height_change_m']) > 1.5
+            color = '#8b95aa' if other_floor else '#ffc777' if row['untraversed_directions'] else '#b6ced8'
+            fill = '#101923' if other_floor else color
+            label = n['label'] + (f" ({row['height_change_m']:+.1f}m)" if other_floor else '')
+            svg.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="5" fill="{fill}" stroke="{color}"/>')
+            svg.append(f'<text x="{x+7:.1f}" y="{y-6:.1f}" fill="{color}">{escape(label)}</text>')
+            for option in row['untraversed_directions']:
+                angle = math.radians(option['heading_deg']); length = min(2, option['meters'])*scale
+                ox, oy = point(n.get('option_origin', n['p']))
+                svg.append(f'<path d="M {ox:.1f},{oy:.1f} l {math.sin(angle)*length:.1f},{-math.cos(angle)*length:.1f}" stroke="#ffc777" stroke-dasharray="3 3"/>')
+        svg.extend(['</g>', f'<g transform="translate(360 370) rotate({s["heading"]:.2f})"><path d="M 0,-14 L -8,9 L 0,5 L 8,9 Z" fill="white" stroke="#101923"/></g>',
+                    '<text x="710" y="55">Visited observations</text>'])
+        for i, row in enumerate(public[:16]):
+            y = 83+i*35
+            label = f"{row['label']} · {row['distance_m']:.1f} m · height {row['height_change_m']:+.1f} · visits {row['visits']}"
+            svg.append(f'<text x="710" y="{y}">{escape(label)}</text>')
+            detail = f"Recorded route: {row['route_distance_m']:.1f} m" if row['can_revisit'] else 'No connected recorded route'
+            svg.append(f'<text x="720" y="{y+16}" fill="#92a4b4" font-size="11">{escape(detail)}</text>')
+        svg.extend(['<text x="20" y="716">Cyan: sampled path · grey: other height · green: observed rays · dashed: directions not traversed</text>',
+                    '<text x="710" y="685" fill="#92a4b4">No surface is inferred between rays.</text>',
+                    '</g></svg>'])
+        path.write_text('\n'.join(svg), encoding='utf-8')

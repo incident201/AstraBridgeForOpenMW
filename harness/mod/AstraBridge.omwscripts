@@ -1,0 +1,3 @@
+MENU: scripts/astrabridge/menu.lua
+GLOBAL: scripts/astrabridge/global.lua
+PLAYER: scripts/astrabridge/player.lua

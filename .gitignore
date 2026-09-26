@@ -1,0 +1,20 @@
+# Local installation and playthrough data
+/config/
+/userdata/
+/local-data/
+/recordings/
+/AstraOpenMW/
+/harness/runtime/
+/harness/.venv/
+/harness/local-settings.json
+/harness/*.log
+*.pyc
+__pycache__/
+.pytest_cache/
+
+# Generated source builds and locally unpacked dependencies
+/openmw-source/engine/
+/openmw-source/deps/
+/openmw-source/packages/
+/openmw-source/*.tar.gz
+/openmw-source/dependencies.json

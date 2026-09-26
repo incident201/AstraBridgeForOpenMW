@@ -1,0 +1,20 @@
+package.path='mod/?.lua;'..package.path
+local P=require('scripts.astrabridge.pursuit')
+local function c(m)return {margin=m,in_reach=m>=0,can_move=true,swimming=false,moved_m=.1}end
+local s=P.new()
+assert(P.step(s,c(-.5),.2),'close the range before attacking')
+assert(P.step(s,c(.3),.2),'do not stop at the very edge of weapon reach')
+assert(not P.step(s,c(.5),.2) and s.status=='holding_range')
+assert(not P.step(s,c(.3),.2),'hysteresis avoids movement chatter')
+assert(P.step(s,c(.1),.2),'resume movement when the opponent retreats')
+assert(math.abs(s.travelled-.5)<.001)
+local ctx=c(-2);ctx.ranged=true
+assert(not P.step(P.new(),ctx,.2),'ranged attacks must not run into melee range')
+ctx=c(.5);ctx.target_lost=true;s=P.new()
+assert(not P.step(s,ctx,.2) and s.reason=='target_lost')
+ctx=c(.5);ctx.target_down=true;s=P.new()
+assert(not P.step(s,ctx,.2) and P.report(s).reason=='target_down')
+ctx=c(.5);ctx.swimming=true;s=P.new()
+assert(not P.step(s,ctx,.2) and s.reason=='swimming_requires_manual_control')
+assert(P.report(P.new(),'completed').reason=='following_finished')
+print('Pursuit: approach, reserve, retreating target, hysteresis, ranged stance and interruption passed')
