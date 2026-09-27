@@ -64,8 +64,11 @@ namespace MWGui
         getWidget(mHourText, "HourText");
         getWidget(mUntilHealedButton, "UntilHealedButton");
         getWidget(mWaitButton, "WaitButton");
+        mWaitButton->setUserString("AstraControl", "rest_confirm");
         getWidget(mCancelButton, "CancelButton");
+        mCancelButton->setUserString("AstraControl", "rest_cancel");
         getWidget(mHourSlider, "HourSlider");
+        mHourSlider->setUserString("AstraControl", "rest_hours");
 
         mCancelButton->eventMouseButtonClick += MyGUI::newDelegate(this, &WaitDialog::onCancelButtonClicked);
         mUntilHealedButton->eventMouseButtonClick += MyGUI::newDelegate(this, &WaitDialog::onUntilHealedButtonClicked);

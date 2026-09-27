@@ -79,18 +79,10 @@ local function uiState()
         e.ref='ui_'..namespace()..'_'..e.ref:sub(4)
         if e.instance then e.instance='instance_'..namespace()..'_'..e.instance end
     end
-    local notices={sMagicSkillFail='spell_failed',sLockSuccess='lock_opened',sLockFail='lock_failed',
-        sLockImpossible='lock_impossible',sTrapSuccess='trap_disarmed',sTrapFail='trap_failed'}
-    if I.UI.getMode()=='Alchemy' then
-        notices.sNotifyMessage45='missing_mortar';notices.sNotifyMessage37='potion_name_required'
-        notices.sNotifyMessage6a='ingredients_required';notices.sNotifyMessage8='potion_failed';notices.sPotionSuccess='potion_created'
-    end
+    -- Codes come from the message's original GMST token before translation.
+    -- A generic name-entry warning is a potion warning only in the alchemy UI.
     for _,e in ipairs(result.elements) do
-        if e.role=='text' then
-            for setting,notice in pairs(notices) do
-                if e.text==core.getGMST(setting) then e.notice=notice;break end
-            end
-        end
+        if e.notice=='potion_name_required' and I.UI.getMode()~='Alchemy' then e.notice=nil end
     end
     local runs={}
     for _,e in ipairs(result.elements) do
@@ -268,6 +260,7 @@ local function observation(args)
         orientation=Scene.orientation(),location=Space.label(self.cell,core.regions and core.regions.records),ui=uiState(),target_lock=lockState(),messages=uiMessages}
     if out.ui.supported then out.text_source='native_ui' end
     out.simulation_seconds=core.getSimulationTime()
+    out.game_time_seconds=core.getGameTime()
     if windowAllowed('Inventory') then
         out._inventory_counts={}
         for _,obj in ipairs(A.inventory(self):getAll()) do
@@ -680,6 +673,9 @@ local function dispatch(cmd)
     if op == 'observe' or op == 'inspect' or op == 'stop' then
         if op=='stop' then pausedSneak=false end
         pause(cmd, {paused=true})
+    elseif op=='target_info' then
+        if I.UI.getMode() then pause(cmd,nil,'ui_open');return end
+        pause(cmd,Scene.interactionInfo(args.ref))
     elseif op=='read' then
         if not ui._astraReadDocument then pause(cmd,nil,'native_ui_unavailable');return end
         local ref=args.ref or ''
@@ -890,27 +886,39 @@ local function dispatch(cmd)
             kind='evade',evade=Evasion.new(args.direction,meters,seconds),evadePosition=self.position,
             evadeRun=args.run or false,evadeFaceTarget=true,evadeTarget=target}
         invalidate();core.sendGlobalEvent('AstraResume',{id=cmd.id})
-    elseif op=='fly' then
+    elseif op=='fly' or op=='swim' then
         if I.UI.getMode() then pause(cmd,nil,'ui_open');return end
         if not controlsAllowed() or not Player.getControlSwitch(self,Player.CONTROL_SWITCH.Looking) then pause(cmd,nil,'action_unavailable');return end
-        if not Mobility.has('Levitate') then pause(cmd,nil,'levitation_required');return end
+        if op=='fly' and not Mobility.has('Levitate') then pause(cmd,nil,'levitation_required');return end
+        if op=='swim' and not A.isSwimming(self) then pause(cmd,nil,'swimming_required');return end
         if targetLock and targetLock.status~='down' then pause(cmd,nil,'target_locked_unlock_first');return end
         local f=P.number(args.forward_m,-math.huge,math.huge,0)
         local s=P.number(args.sideways_m,-math.huge,math.huge,0)
         local z=P.number(args.vertical_m,-math.huge,math.huge,0)
-        assert(f*f+s*s+z*z>.01)
+        assert(args.ref or f*f+s*s+z*z>.01)
         local yaw=camera.getYaw()
         local delta=util.vector3(f*math.sin(yaw)+s*math.cos(yaw),f*math.cos(yaw)-s*math.sin(yaw),z)*Scene.unitsPerMeter
+        local goal={groundPoint=self.position+delta,freeDestination=true}
+        if args.ref then
+            local point=Terrain and Terrain.resolve(args.ref) or Scene.resolveGround(args.ref)
+            if point then goal={groundPoint=point,freeDestination=true}
+            else
+                goal=Scene.resolve(args.ref)
+                if not goal then pause(cmd,nil,'target_not_visible');return end
+                goal.freeDestination=true
+            end
+        end
+        local N=require('scripts.astrabridge.navigation')
+        local nav=N.new(goal);N.begin(nav);nav.inputDelayFrames=directMovement and 0 or 2
         active={move=0,strafe=0,run=false,sneak=pausedSneak}
         walkingRoute=nil
         pending={cmd=cmd,phase='resuming',start=Scene.pose(),elapsed=0,deadline=core.getRealTime()+P.actionTimeout(op,args,60),
-            kind='fly',flight=require('scripts.astrabridge.flight').new(P.number(args.seconds,.2,math.huge,10),f==0 and s==0),
-            destination=self.position+delta,previousPosition=self.position,lastHealth=not args.under_fire and ownHealth() or nil}
+            kind='walk',navigator=nav,requiredMode=op=='fly' and 'air' or 'swim',
+            maxSeconds=P.number(args.seconds,.2,math.huge,op=='swim' and 30 or 10),lastHealth=not args.under_fire and ownHealth() or nil}
         invalidate();core.sendGlobalEvent('AstraResume',{id=cmd.id})
     elseif op=='walk' or op=='go' then
         if I.UI.getMode() then pause(cmd,nil,'ui_open');return end
         if not controlsAllowed() then pause(cmd,nil,'action_unavailable');return end
-        if Mobility.has('Levitate') then pause(cmd,nil,'flight_requires_fly');return end
         if targetLock and targetLock.status~='down' then pause(cmd,nil,'target_locked_unlock_first');return end
         local N=require('scripts.astrabridge.navigation')
         if op=='go' and (not walkingRoute or walkingRoute.ref~=args.ref) then
@@ -943,7 +951,7 @@ local function dispatch(cmd)
     elseif op=='focus' or op=='approach' or op=='interact' or op=='move_local' or op=='track' or op=='lock' then
         local interaction=op=='interact'
         if interaction then op=args.approach and 'approach' or 'focus' end
-        if (op=='approach' or op=='move_local') and Mobility.has('Levitate') then pause(cmd,nil,'flight_requires_fly');return end
+        if op=='move_local' and Mobility.has('Levitate') then pause(cmd,nil,'flight_requires_fly');return end
         if op=='approach' or op=='move_local' then walkingRoute=nil end
         if I.UI.getMode() then pause(cmd,nil,'ui_open');return end
         if not controlsAllowed() then pause(cmd,nil,'action_unavailable');return end
@@ -1436,7 +1444,7 @@ local function onFrame(dt)
             elseif I.UI.getMode() then pause(p.cmd,{paused=true,elapsed=p.elapsed,reason='ui_open'})
             elseif damage>.01 then pause(p.cmd,{paused=true,reason=A.isDead(self) and 'player_down' or 'player_hurt',damage_taken=math.floor(damage*100+.5)/100})
             elseif p.navigator and p.navigator.waterWalking and not Mobility.has('WaterWalking') then pause(p.cmd,{paused=true,reason='water_walking_ended'})
-            elseif p.navigator and A.isSwimming and A.isSwimming(self) then pause(p.cmd,{paused=true,reason='swimming_requires_manual_control'})
+            elseif p.navigator and p.navigator.mode=='air' and not Mobility.has('Levitate') and not A.isOnGround(self) and not A.isSwimming(self) then pause(p.cmd,{paused=true,reason='levitation_ended'})
             elseif core.getRealTime() > p.deadline then pause(p.cmd,{paused=true,elapsed=p.elapsed,reason='wall_time_limit'})
             elseif core.isWorldPaused() then
                 -- Native message boxes do not necessarily appear in I.UI.modes.
@@ -1473,25 +1481,6 @@ local function onFrame(dt)
                     if not p.kind then active.move=p.requestedMove;active.strafe=p.requestedStrafe end
                 end
                 if p.kind then
-                    if p.kind=='fly' then
-                        local delta=p.destination-self.position
-                        local travelled=(self.position-p.previousPosition):length()
-                        p.previousPosition=self.position
-                        local c=require('scripts.astrabridge.flight').step(p.flight,{
-                            x=delta.x,y=delta.y,z=delta.z,yaw=camera.getYaw(),pitch=camera.getPitch(),
-                            levitation=Mobility.has('Levitate'),travelled=travelled,
-                            speed=math.max(600,A.getWalkSpeed and A.getWalkSpeed(self) or 0)},dt)
-                        p.elapsed=p.flight.elapsed
-                        if c.reason then
-                            local remaining=p.flight.verticalOnly and math.abs(delta.z) or delta:length()
-                            pause(p.cmd,{paused=true,reason=c.reason,remaining_m=math.floor(remaining/Scene.unitsPerMeter*100+.5)/100});return
-                        end
-                        self.controls.yawChange=Turning.delta(camera.getYaw(),c.yaw,dt)
-                        self.controls.pitchChange=Turning.delta(camera.getPitch(),c.pitch,dt)
-                        active.move=c.move;active.strafe=0
-                        if active.move==0 then stopMovement() end
-                        return
-                    end
                     if p.kind=='evade' then
                         driveEvasion(p,lockGoal,dt)
                         p.elapsed=p.evade.elapsed
@@ -1510,14 +1499,12 @@ local function onFrame(dt)
                             if p.elapsed>=(p.maxSeconds or 8) then pause(p.cmd,{paused=true,reason='step_limit'}) end
                             return
                         end
-                        local direction=waypoint-self.position
-                        local yaw=math.atan2(direction.x,direction.y)
+                        local yaw,pitch,fraction=N.motion(p.navigator,waypoint,dt,active.run,camera.getYaw())
                         self.controls.yawChange=Turning.delta(camera.getYaw(),yaw,dt)
-                        self.controls.pitchChange=Turning.delta(camera.getPitch(),0,dt)
+                        self.controls.pitchChange=Turning.delta(camera.getPitch(),pitch,dt)
                         local turnTolerance=p.navigator.detour and 5 or 20
                         active.move=math.abs(Scene.angle(yaw-camera.getYaw()))<math.rad(turnTolerance)
-                            and require('scripts.astrabridge.navigation').moveFraction(waypoint,dt,active.run,p.navigator)
-                            *require('scripts.astrabridge.navigation').clearance(p.navigator,waypoint) or 0
+                            and math.abs(pitch-camera.getPitch())<math.rad(8) and fraction or 0
                         if active.move==0 then stopMovement() end
                         p.elapsed=p.elapsed+dt
                         local stall=N.stalled(p.navigator,p.elapsed)
@@ -1574,10 +1561,7 @@ local function onFrame(dt)
                                 pause(p.cmd,{paused=true,reason='path_end_out_of_reach'});return
                             end
                             if not reached and waypoint then
-                                local d=waypoint-self.position
-                                yaw,pitch=math.atan2(d.x,d.y),0
-                                moveFraction=require('scripts.astrabridge.navigation').moveFraction(waypoint,dt,active.run,p.navigator)
-                                    *require('scripts.astrabridge.navigation').clearance(p.navigator,waypoint)
+                                yaw,pitch,moveFraction=require('scripts.astrabridge.navigation').motion(p.navigator,waypoint,dt,active.run,camera.getYaw())
                             elseif not visible then pause(p.cmd,{paused=true,reason='target_lost'});return end
                         end
                     end
@@ -1615,7 +1599,7 @@ local function onFrame(dt)
                         end
                         pause(p.cmd,{paused=true,reason='focused'});return
                     elseif p.kind=='approach' then
-                        if math.abs(ye)<math.rad(20) and not reached then active.move=moveFraction end
+                        if math.abs(ye)<math.rad(20) and math.abs(pe)<math.rad(8) and not reached then active.move=moveFraction end
                     elseif p.kind=='move_local' then
                         local d=p.destination-self.position
                         if math.sqrt(d.x*d.x+d.y*d.y)<4 then pause(p.cmd,{paused=true,reason='arrived'});return end

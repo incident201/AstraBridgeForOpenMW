@@ -13,7 +13,7 @@ package.preload['openmw.core']=function()return {magic={EFFECT_TYPE={WaterWalkin
 local nearby={NAVIGATOR_FLAGS={Walk=1,Swim=2,OpenDoor=4,UsePathgrid=8},FIND_PATH_STATUS={Success=1,PartialPath=2}}
 nearby.findPath=function(source,dest,options)
     calls=calls+1
-    assert(options.includeFlags==9,'must not route into water or through closed doors')
+    assert(options.includeFlags==11,'may route into water but never through closed doors')
     assert(options.agentBounds=='player_bounds')
     return 1,{V.new(0,0,0),V.new(0,0,140),V.new(140,0,140),dest}
 end
@@ -119,7 +119,7 @@ for _,point in ipairs(waterRoute.path)do assert(point.z==0)end
 local mobility=require('scripts.astrabridge.mobility')
 assert(mobility.surface(V.new(0,0,120)).z==120,'a dry bridge must stay above water')
 waterWalking=false
-assert(mobility.flags(nearby.NAVIGATOR_FLAGS)==1 and mobility.surface(V.new(0,0,-80)).z==-80)
+assert(mobility.flags(nearby.NAVIGATOR_FLAGS)==3 and mobility.surface(V.new(0,0,-80)).z==-80)
 
 -- Recorded travel is a fallback to native navigation, not a replacement.
 self.cell=nil;self.position=V.new(0,0,0)

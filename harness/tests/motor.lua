@@ -30,7 +30,7 @@ package.preload['openmw.types']=function()return {
     Player={CONTROL_SWITCH={Controls=1,Looking=2},getControlSwitch=function()return true end,isCharGenFinished=function()return true end}
 }end
 package.preload['openmw.core']=function()return {isWorldPaused=function()return paused end,getRealTime=function()return now end,
-    getSimulationTime=function()return simulation end,
+    getGameTime=function()return 0 end, getSimulationTime=function()return simulation end,
     sendGlobalEvent=function(n,d)events[#events+1]={n,d}end}end
 package.preload['scripts.astrabridge.scene']=function()return {
     unitsPerMeter=70,angle=angle,reset=function()end,fov=function()end,

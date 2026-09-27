@@ -135,12 +135,15 @@ namespace MWGui
 
         getWidget(mMaxSaleButton, "MaxSaleButton");
         getWidget(mCancelButton, "CancelButton");
+        mCancelButton->setUserString("AstraControl", "trade_cancel");
         getWidget(mOfferButton, "OfferButton");
+        mOfferButton->setUserString("AstraControl", "trade_offer");
         getWidget(mPlayerGold, "PlayerGold");
         getWidget(mMerchantGold, "MerchantGold");
         getWidget(mIncreaseButton, "IncreaseButton");
         getWidget(mDecreaseButton, "DecreaseButton");
         getWidget(mTotalBalance, "TotalBalance");
+        mTotalBalance->setUserString("AstraControl", "trade_balance");
         getWidget(mTotalBalanceLabel, "TotalBalanceLabel");
         getWidget(mBottomPane, "BottomPane");
         getWidget(mFilterEdit, "FilterEdit");
@@ -577,6 +580,7 @@ namespace MWGui
 
     void TradeWindow::updateLabels()
     {
+        mTotalBalance->setUserString("AstraValue", std::to_string(mCurrentBalance));
         MWWorld::Ptr player = MWMechanics::getPlayer();
         int playerGold = player.getClass().getContainerStore(player).count(MWWorld::ContainerStore::sGoldId);
         mPlayerGold->setCaptionWithReplacing("#{sYourGold} " + MyGUI::utility::toString(playerGold));

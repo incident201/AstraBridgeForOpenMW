@@ -7,21 +7,29 @@ import time
 
 
 class AtlasRoutes:
+    def retry_remaining(self, row):
+        if row.get('clock_epoch') != self.clock_epoch or self.simulation_seconds is None:
+            return 0
+        return max(0, row.get('retry_at_simulation', 0) - self.simulation_seconds)
+
     def route_outcomes(self, active=False):
         rows=[json.loads(r[0]) for r in self.db.execute('SELECT payload FROM route_outcomes WHERE profile=? ORDER BY id DESC',(self.profile,))]
         if not active:return rows
         recent=[];succeeded=[]
         for row in rows:
+            if row.get('clock_epoch') != self.clock_epoch:continue
             if row['success']:succeeded.append(row)
-            elif row.get('retry_after',0)>time.time() and not any(s['kind']==row['kind'] and s['space']==row['space'] and s['destination']==row['destination'] and math.dist(s['origin'],row['origin'])<2 for s in succeeded):recent.append(row)
+            elif self.retry_remaining(row)>0 and not any(s['kind']==row['kind'] and s['space']==row['space'] and s['destination']==row['destination'] and math.dist(s['origin'],row['origin'])<2 for s in succeeded):recent.append(row)
         return recent
 
     def outcome_history(self,args):
         from .information import page_rows
         rows=[]
         for row in self.route_outcomes():
-            public={k:v for k,v in row.items() if k not in {'origin','position','retry_after'}}
-            public['retry_in_seconds']=max(0,round(row.get('retry_after',0)-time.time(),1))
+            public={k:v for k,v in row.items() if k not in {'origin','position','retry_after','clock_epoch','retry_at_simulation'}}
+            if 'approach' in public:public['approach']={k:v for k,v in public['approach'].items() if k!='anchor'}
+            public['retry_in_seconds']=round(self.retry_remaining(row),1)
+            public['retry_clock']='simulation'
             space,node=self.find_node(row['destination'])
             if node:public['names']=node.get('names',[])
             rows.append(public)
@@ -35,9 +43,10 @@ class AtlasRoutes:
              'space':origin['space'],'origin':origin['pose'],'position':list(current['pose']) if current else None,
              'reason':reason,'success':success,'time':time.time(),'navigation':action.get('navigation',{}),
              'elapsed':action.get('elapsed',0),'turned_deg':action.get('motion',{}).get('turned_deg',0)}
+        row['clock_epoch']=self.clock_epoch
         if not success and reason in {'blocked','no_progress','no_route_progress','repeated_positions','repeated_obstruction','no_path','endpoint_mismatch','height_mismatch','known_door_not_visible','activation_unconfirmed','out_of_reach','target_not_aimed'}:
             # Temporary actors must not permanently poison a learned route.
-            row['retry_after']=row['time']+(8 if row['navigation'].get('blocked_by')=='actor' else 90)
+            row['retry_at_simulation']=(self.simulation_seconds or 0)+(8 if row['navigation'].get('blocked_by')=='actor' else 90)
         if success and step['kind']=='door':row['approach']=step.get('door',{})
         with self.db:self.db.execute('INSERT INTO route_outcomes(profile,payload) VALUES (?,?)',(self.profile,json.dumps(row,ensure_ascii=False)))
         self._route_cache=None
@@ -113,15 +122,18 @@ class AtlasRoutes:
         return {'nodes':rows[start:start+limit],'total':len(rows),'page':page,'limit':limit,
                 'has_more':start+limit<len(rows),'source':'observed_places'}
 
-    def transitions(self):
-        return [json.loads(row[0]) for row in self.db.execute('SELECT payload FROM transitions WHERE profile=?',(self.profile,))]
+    def transitions(self, private=False):
+        rows=[json.loads(row[0]) for row in self.db.execute('SELECT payload FROM transitions WHERE profile=?',(self.profile,))]
+        if not private:
+            for row in rows:row.get('door',{}).pop('anchor',None)
+        return rows
 
     def add_transition(self,origin,destination,door):
         a,an=self.find_node(origin);b,bn=self.find_node(destination)
         if not an or not bn or a['ref']==b['ref']:return None
         key=origin+'>'+destination
         link={'from':origin,'to':destination,'from_space':a['ref'],'to_space':b['ref'],
-              'door':{k:door[k] for k in ('name','description','heading_deg') if door.get(k) is not None},'source':'observed_door_transition'}
+              'door':{k:door[k] for k in ('name','description','heading_deg','bearing_deg','distance_m','height_change_m','anchor') if door.get(k) is not None},'source':'observed_door_transition'}
         with self.db:self.db.execute('INSERT OR REPLACE INTO transitions VALUES (?,?,?)',(key,self.profile,json.dumps(link,ensure_ascii=False)))
         return link
 
@@ -145,7 +157,7 @@ class AtlasRoutes:
     def route_to(self,ref):
         target_space,target=self.find_node(ref)
         if not target or not self.current():return None
-        links=self.transitions();nodes={target['ref']:(target_space,target)}
+        links=self.transitions(private=True);nodes={target['ref']:(target_space,target)}
         failures=self.route_outcomes(active=True)
         for link in links:
             for key in ('from','to'):

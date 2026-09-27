@@ -64,6 +64,7 @@ namespace MWLua::AstraUI
         bool enabled = false;
         std::function<void()> action;
         std::string panel, description, unavailableReason, instance;
+        std::string control, value, destination, notice;
         int count = 0;
         int conditionCurrent = -1, conditionMax = -1;
         bool equipped = false, pendingTrade = false;
@@ -75,6 +76,17 @@ namespace MWLua::AstraUI
         Entry(std::string label,std::string type,MyGUI::IntRect bounds,bool available,std::function<void()> callback)
             : text(std::move(label)),role(std::move(type)),rect(bounds),enabled(available),action(std::move(callback)) {}
     };
+    inline void semanticControl(Entry& entry, MyGUI::Widget* widget)
+    {
+        entry.control=widget->getUserString("AstraControl");
+        entry.value=widget->getUserString("AstraValue");
+        entry.notice=widget->getUserString("AstraNotice");
+        if (entry.control=="travel_destination")
+        {
+            entry.value=widget->getUserString("price");
+            entry.destination=widget->getUserString("AstraDestination");
+        }
+    }
     struct Snapshot
     {
         std::vector<Entry> entries;
@@ -164,6 +176,7 @@ namespace MWLua::AstraUI
                 Entry e{plain(item->getCaption()),"button",rect,
                     enabled && item->getInheritedEnabled(),[item]{item->eventMouseButtonClick(item);}};
                 e.panel=inDialogue(w,wm)?"dialogue_topics":"list";
+                semanticControl(e,item);
                 e.screenVisible=!empty(rect);
                 out.entries.push_back(std::move(e));
             }
@@ -396,8 +409,9 @@ namespace MWLua::AstraUI
         else if (auto* slider=w->castType<MyGUI::ScrollBar>(false))
         {
             const auto range=slider->getScrollRange();
-            Entry e{"Ползунок","slider",clip,enabled && range>1,{}};
+            Entry e{"slider","slider",clip,enabled && range>1,{}};
             e.sliderPosition=slider->getScrollPosition();e.sliderMax=range?range-1:0;
+            semanticControl(e,w);
             e.adjust=[slider](std::size_t position) {
                 slider->setScrollPosition(position);
                 slider->eventScrollChangePosition(slider,slider->getScrollPosition());
@@ -438,6 +452,7 @@ namespace MWLua::AstraUI
                 Entry e{label,button?"button":input?"input":"text",clip,enabled && (button || input),
                     button ? std::function<void()>([w]{w->eventMouseButtonClick(w);}) : std::function<void()>()};
                 e.unavailableReason=w->getUserString("AstraUnavailableReason");
+                semanticControl(e,w);
                 if (root(w)->getLayer() && root(w)->getLayer()->getName()=="Notification") e.panel="notification";
                 if (button && wm->containsMode(MWGui::GM_Alchemy)
                     && (w->getName().ends_with("IncreaseButton") || w->getName().ends_with("DecreaseButton")))
@@ -506,6 +521,7 @@ namespace MWLua::AstraUI
             if (e.role=="list_item") feed(e.selected?"selected":"unselected");
             feed(e.unavailableReason);
             feed(e.panel);feed(e.description);feed(std::to_string(e.count));
+            feed(e.control);feed(e.value);feed(e.destination);feed(e.notice);
             feed(std::to_string(e.conditionCurrent)+"/"+std::to_string(e.conditionMax));
             if (e.role=="slider") feed(std::to_string(e.sliderPosition)+"/"+std::to_string(e.sliderMax));
             feed(e.equipped?"equipped":"unequipped");feed(e.pendingTrade?"pending":"normal");
@@ -542,6 +558,10 @@ namespace MWLua::AstraUI
             if (e.role=="list_item") row["selected"]=e.selected;
             if (!e.unavailableReason.empty()) row["unavailable_reason"]=e.unavailableReason;
             if (!e.panel.empty()) row["panel"]=e.panel;
+            if (!e.control.empty()) row["control"]=e.control;
+            if (!e.value.empty()) row["value"]=e.value;
+            if (!e.destination.empty()) row["destination"]=e.destination;
+            if (!e.notice.empty()) row["notice"]=e.notice;
             if (e.role=="slider")
             {row["slider_position"]=e.sliderPosition;row["slider_max"]=e.sliderMax;}
             if (e.role=="item" || e.role=="item_slot")

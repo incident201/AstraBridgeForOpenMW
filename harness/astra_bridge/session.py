@@ -452,8 +452,15 @@ class Session:
                 door=next((x for x in (before or {}).get('scene',{}).get('objects',[]) if x.get('ref')==ref and x.get('kind')=='door'),None)
                 if door:
                     node=self.atlas.anchor_node()
-                    if node:portal=(node['ref'],{**door,'heading_deg':before.get('orientation',{}).get('heading_deg')})
+                    if node:
+                        from .doors import observed_anchor
+                        heading=before.get('orientation',{}).get('heading_deg',0)
+                        portal=(node['ref'],{**door,'heading_deg':heading,
+                                            'anchor':observed_anchor(door,self.atlas.current()['pose'],heading)})
             if op=='sequence':return workflows.sequence(self,args)
+            if op in {'rest','buy','travel'}:
+                from .services import perform
+                return perform(self,op,args)
             if op=='repair':return workflows.repair(self,args)
             if op=='read' and (args.get('all') or args.get('search')):
                 result=workflows.read_document(self,args);self.knowledge.ingest('read',result);return result
@@ -616,10 +623,10 @@ class Session:
                         result = self.command(op, args)
                         time.sleep(.12)
                 else:
-                    timeout=100 if op in {"load", "new_game"} else 70 if op=='fly' else 60 if op in {'act','look','focus','approach','move_local','walk','go','evade','track','lock','strike','cast','chain','interact','wait_until'} else 25
+                    timeout=100 if op in {"load", "new_game"} else 70 if op in {'fly','swim'} else 60 if op in {'act','look','focus','approach','move_local','walk','go','evade','track','lock','strike','cast','chain','interact','wait_until'} else 25
                     result = self.command(op, args, timeout=timeout)
                 if op in {"act", "look", "trigger", "use_item", "select_spell", "select_enchanted", "load", "new_game", "stop",
-                          "focus","approach","interact","wait_until","move_local","walk","go","fly","evade","survey","fov","choose","edit","adjust","map","track","lock","unlock","strike","cast","chain","resetNPC"}:
+                          "focus","approach","interact","wait_until","move_local","walk","go","fly","swim","evade","survey","fov","choose","edit","adjust","map","track","lock","unlock","strike","cast","chain","resetNPC"}:
                     if op in {'load','new_game'}:self.memory.branch(op)
                     if op in {'load','new_game'}:self.latest_observation = None
                     # Return one canonical observation instead of embedded stale data.

@@ -1,6 +1,6 @@
 ---
 name: openmw-play
-description: "Play Morrowind through a configured AstraBridge/OpenMW installation: navigate, talk, fight, read opened books and scrolls, repair equipment, and maintain persistent named travel memory and recordings. Supports guarded action sequences, targeted information queries, persistent task/evidence memory, recoverable command results, autosaves and emergency recovery of displaced NPCs. Use for gameplay, not harness or engine development."
+description: "Play Morrowind through a configured AstraBridge/OpenMW installation: navigate, talk, fight, read opened books and scrolls, repair equipment, and maintain persistent named travel memory and recordings. Supports fresh selectors and postconditions, language-independent service controls, rest/buy/travel helpers, air/water navigation, targeted information queries, persistent task/evidence memory, recoverable command results, autosaves and emergency recovery of displaced NPCs. Use for gameplay, not harness or engine development."
 ---
 
 # Play OpenMW through AstraBridge
@@ -44,15 +44,19 @@ cd "$ASTRA_HOME"
 | Walk through a nearby opening | Choose `terrain.passages[].ref`, then `go` |
 | Walk to a point visible on screen | `ground`, then `go` with a returned ground ref |
 | Approach/talk to a visible NPC, open a door, pick up an item | `interact REF --approach` |
-| Combine ordinary actions | `sequence` with a JSON action list and explicit time budget |
+| Check an interaction before moving | `target-info REF` |
+| Combine ordinary actions | `sequence` with fresh `select`, optional `bind` and `expect`, and explicit time budget |
 | Wait for fatigue, animation or clear passage | `wait-until` with condition and time budget |
+| Rest, buy a quantity or pay for travel | `rest HOURS`, `buy NAME --quantity N --max-total GOLD`, `travel DEST --max-cost GOLD`; open the relevant service first |
 | Select a menu response or item | `ui --query "TEXT"` / `ui --panel PANEL`, then `choose` using its ref or exact caption |
 | Read an open book or scroll | `read` for a chunk, `read --search "TEXT"` for targeted passages, `read --all` when the full text is needed |
 | Repair gear with a hammer | `use-item` the hammer, then `repair "NAME" --instance INSTANCE --attempts N`; instance distinguishes identical names |
 | Attack a moving target repeatedly | `chain` with the actor ref and `pursue:true` |
 | Retreat or strafe while keeping a target in view | `retreat` or `evade` |
-| Fly while a levitation effect is active | `fly` with relative distances |
+| Fly or swim | `fly` / `swim` with an observed `--ref` or relative distances |
 | Return to an already visited location | `atlas --query "NAME"` → `revisit`, or `recall` → `return-to` |
+
+Use returned `control` identifiers for service buttons and sliders; they are the same in every game language. Item, topic and destination names remain the actual localized labels. Never translate an observed label to guess an input.
 
 Read the reference relevant to the next action:
 

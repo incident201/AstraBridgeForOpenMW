@@ -100,7 +100,7 @@ class Control:
                 return {'replayed':False,**previous}
             try:
                 result=s.call(op,args)
-                if hasattr(s,'autosave') and op not in {'load','new_game','restart','save','autosave','details','knowledge','inspect','ui','read'}:
+                if hasattr(s,'autosave') and op not in {'load','new_game','restart','save','autosave','details','knowledge','inspect','ui','read','target_info'}:
                     saved=s.autosave.maybe_save(s)
                     if saved:result['autosave']=saved
                 self.receipts.finish(request_id,result)

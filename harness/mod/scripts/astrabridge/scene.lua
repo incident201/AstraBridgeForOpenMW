@@ -171,6 +171,25 @@ function M.aimedAt(g)
     local ray=nearby.castRenderingRay(from,from+dir*(g.distance+g.half:length()*2+8),{ignore=self.object})
     return ray.hitObject and ray.hitObject==g.obj
 end
+function M.interactionInfo(ref)
+    local g=M.resolve(ref)
+    if not g then return {ref=ref,ready=false,reason='target_not_visible'} end
+    local yaw,pitch=M.lookAngles(g)
+    local reach=M.reach(g)
+    local aimed=M.crosshair(g)
+    local ready=M.lootReady(g)
+    local result={ref=ref,name=g.obj.type.record(g.obj).name,distance_m=round(g.distance/M.unitsPerMeter),
+        in_reach=reach,aimed=aimed,ready=reach and aimed and ready~=false,
+        bearing_deg=round(math.deg(M.angle(yaw-camera.getYaw()))),pitch_deg=round(math.deg(pitch-camera.getPitch())),
+        activation_distance_m=round(core.getGMST('iMaxActivateDist')/M.unitsPerMeter),
+        aim_point=P.array(g.screen),reason=not reach and 'out_of_reach' or not aimed and 'target_not_aimed' or ready==false and 'animation_busy' or 'ready'}
+    local origin=camera.getPosition()
+    local ray=nearby.castRenderingRay(origin,origin+camera.viewportToWorldVector(util.vector2(.5,.5)):normalize()*core.getGMST('iMaxActivateDist'),{ignore=self.object})
+    if ray.hitObject and ray.hitObject~=g.obj then
+        result.blocked_by=types.Actor.objectIsInstance(ray.hitObject) and 'actor' or 'geometry'
+    end
+    return result
+end
 local function publicObject(g,v)
             local rec=g.obj.type.record(g.obj)
             if rec and rec.name and rec.name~='' then
@@ -182,6 +201,9 @@ local function publicObject(g,v)
                 local yaw=M.lookAngles(g)
                 local row={ref=ref,name=rec.name,kind=g.kind,rect=P.array(),aim_point=P.array(v.screen),
                     distance_m=round(v.distance/M.unitsPerMeter),bearing_deg=round(math.deg(M.angle(yaw-camera.getYaw()))),
+                    horizontal_distance_m=round(math.sqrt((g.center.x-self.position.x)^2+(g.center.y-self.position.y)^2)/M.unitsPerMeter),
+                    center_bearing_deg=round(math.deg(M.angle(math.atan2(g.center.x-self.position.x,g.center.y-self.position.y)-camera.getYaw()))),
+                    height_change_m=round((g.center.z-self.position.z)/M.unitsPerMeter),
                     in_reach=M.reach(g),actions=P.array({'focus','approach','interact'})}
                 if g.kind=='actor' then
                     row.status=types.Actor.isDead(g.obj) and 'down' or 'active'
@@ -353,8 +375,8 @@ function M.groundTargets()
                 groundTargets[ref]={point=g.point,origin=self.position,cell=Space.key(self.cell),time=core.getSimulationTime()}
                 local d=g.point-self.position
                 local level=require('scripts.astrabridge.mobility').waterLevel()
-                local label=level and math.abs(g.point.z-level)<1 and 'Вода' or ({'Пол ниже','Пол','Пол выше'})[g.band]
-                result[#result+1]={ref=ref,name=label..' '..({'слева','впереди','справа'})[g.side],
+                local label=level and math.abs(g.point.z-level)<1 and 'water' or ({'ground_below','ground','ground_above'})[g.band]
+                result[#result+1]={ref=ref,name=label..' '..({'left','front','right'})[g.side],
                     aim_point=P.array({g.x,g.y}),distance_m=round(g.distance),height_change_m=round(g.height),
                     bearing_deg=round(math.deg(M.angle(math.atan2(d.x,d.y)-camera.getYaw()))),
                     target_adjustment_m=round(adjustment),navigation=N.report(nav),actions=P.array({'walk'})}

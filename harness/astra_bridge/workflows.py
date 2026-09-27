@@ -3,11 +3,12 @@ import math
 import re
 
 from .protocol import BridgeError, number, validate, ACTION_DEFAULTS
+from . import selectors
 
 
 SEQUENCE_OPS = {'act','look','go','walk','revisit','return_to','approach','interact','move_local',
                 'use_item','select_spell','select_enchanted','cast','strike','chain','wait_until',
-                'trigger','choose','unlock','lock'}
+                'trigger','choose','edit','adjust','focus','fly','swim','target_info','rest','buy','travel','unlock','lock'}
 
 
 def validate_sequence(args):
@@ -17,9 +18,13 @@ def validate_sequence(args):
     number(args.get('max_seconds',60),.02,math.inf)
     number(args.get('stop_health_pct',0),0,100)
     if type(args.get('stop_on_damage',True)) is not bool: raise BridgeError('invalid_arguments')
+    bindings=set()
     for step in steps:
         if not isinstance(step,dict) or step.get('op') not in SEQUENCE_OPS: raise BridgeError('invalid_sequence_step')
-        op=step['op']; params={k:v for k,v in step.items() if k!='op'}
+        op=step['op']; params=selectors.validate_step(step,bindings)
+        if op in {'rest','buy','travel'}:
+            from .services import validate_service
+            validate_service(op,params);continue
         if op in {'use_item','select_spell','select_enchanted'} and 'name' in params:
             if params.keys()!={'name'} or not isinstance(params['name'],str) or not params['name']: raise BridgeError('invalid_arguments')
         elif op in {'revisit','return_to'}:
@@ -39,7 +44,7 @@ def resolve_owned(session, op, params):
 
 def sequence(session, args):
     validate_sequence(args)
-    steps=[];elapsed=0.;reason='completed';completed=0;events=[]
+    steps=[];elapsed=0.;reason='completed';completed=0;events=[];bindings={}
     observation=session.observe(capture=False)
     health=observation.get('stats',{}).get('health',{}).get('current')
     start_clock=observation.get('simulation_seconds')
@@ -53,19 +58,24 @@ def sequence(session, args):
             remaining=args.get('max_seconds',60)-elapsed
             if remaining<.02: reason='sequence_time_limit';break
             session.control.progress({'phase':'sequence','completed_actions':completed,'total_actions':len(args['actions']),'step_index':index+1,'sequence_elapsed':elapsed})
-            op=step['op'];params={k:v for k,v in step.items() if k!='op'}
-            minimum=.5 if op in {'go','walk','chain','revisit','return_to'} else .02
+            op=step['op']
+            minimum=.5 if op in {'go','walk','chain','revisit','return_to'} else .2 if op in {'fly','swim','rest','buy','travel'} else .02
             if remaining<minimum:reason='sequence_time_limit';break
-            if op in ACTION_DEFAULTS:
-                field='max_seconds' if op=='chain' else 'seconds'
-                params[field]=min(params.get(field,ACTION_DEFAULTS[op]),remaining)
             try:
+                expectation=step.get('expect',{})
+                initial_count=selectors.inventory_count(session,expectation['inventory_delta']['name']) if 'inventory_delta' in expectation else None
+                params,selected=selectors.resolve_step(session,step,bindings)
+                if op in ACTION_DEFAULTS:
+                    field='max_seconds' if op=='chain' else 'seconds'
+                    params[field]=min(params.get(field,ACTION_DEFAULTS[op]),remaining)
                 if op in {'use_item','select_spell','select_enchanted'}: params=resolve_owned(session,op,params)
+                before_step=observation
                 r=session.call(op,params)
             except BridgeError as exc:
                 reason=str(exc);steps.append({'operation':op,'reason':reason,'submitted':False});break
             a=r.get('action',{});elapsed+=a.get('elapsed',0)
             steps.append({'operation':op,**a})
+            if selected:steps[-1]['selected']=selected
             observation=r.get('observation',observation)
             events.extend(observation.get('events',[]))
             if start_clock is not None:elapsed=max(elapsed,observation.get('simulation_seconds',start_clock)-start_clock)
@@ -73,6 +83,9 @@ def sequence(session, args):
             status=r.get('feedback',{}).get('status')
             if status in {'blocked','failed','rejected','partial','interrupted'}:
                 reason=r['feedback'].get('reason') or a.get('reason') or status;break
+            checks=selectors.check_expectation(session,expectation,before_step,observation,a,initial_count)
+            if checks:steps[-1]['checks']=checks
+            if any(not c['met'] for c in checks):reason='expectation_failed';break
             completed+=1
             h=observation.get('stats',{}).get('health',{})
             if h and args.get('stop_health_pct',0) and h['current']<=h['maximum']*args['stop_health_pct']/100:
@@ -83,13 +96,13 @@ def sequence(session, args):
             session.sequence_guard['health']=health
             # A planned interaction may open UI. Other steps may not silently
             # continue into an unexpected menu or a different cell.
-            if observation.get('ui_mode')!='Gameplay' and op not in {'interact','choose','trigger','use_item'}:
+            if observation.get('ui_mode')!='Gameplay' and op not in {'interact','choose','trigger','use_item','edit','adjust','rest','buy','travel'}:
                 reason='ui_open';break
     finally:
         session.batch_depth-=1
         session.sequence_guard=previous_guard
     return {'action':{'reason':reason,'elapsed':elapsed,'steps':steps,'completed_actions':completed,
-                      'total_actions':len(args['actions']),'paused':True},
+                      'total_actions':len(args['actions']),'paused':True,'bindings':bindings},
             'observation':session.observe(),'feedback':{'status':'succeeded' if reason=='completed' else 'interrupted','reason':reason,'events':events}}
 
 
@@ -165,6 +178,7 @@ def atlas_query(session,args):
     if args.get('route'):
         route=atlas.route_to(args['route'])
         if not route:raise BridgeError('recorded_route_unavailable')
+        for step in route['steps']:step.get('door',{}).pop('anchor',None)
         return route
     page=args.get('page',0);limit=args.get('limit',20)
     number(page,0,1000000);number(limit,1,1000)
@@ -249,20 +263,14 @@ def _navigate_once(session,args):
             else:
                 remaining=budget-elapsed
                 if remaining<.1:reason='step_limit';break
-                o=session.latest_observation
-                door=step['door']
-                if door.get('heading_deg') is not None:
-                    r=session.call('look',{'heading_deg':door['heading_deg'],'pitch_deg':0})
-                    elapsed+=r['action'].get('elapsed',0)
-                    o=r['observation']
-                    remaining=budget-elapsed
-                    if remaining<.1:reason='step_limit';break
-                matches=[x for x in o.get('scene',{}).get('objects',[]) if x.get('kind')=='door' and x.get('name')==door.get('name')
-                         and x.get('description')==door.get('description')]
-                if len(matches)!=1:
-                    reason='known_door_not_visible' if not matches else 'door_ambiguous'
+                from .doors import reacquire
+                door,spent,matching=reacquire(session,step,remaining)
+                elapsed+=spent;remaining=budget-elapsed
+                if not door:
+                    reason=matching
                     session.atlas.record_outcome(step,origin,{'reason':reason});break
-                r=session.call('interact',{'ref':matches[0]['ref'],'approach':True,'seconds':remaining,
+                if remaining<.1:reason='step_limit';break
+                r=session.call('interact',{'ref':door['ref'],'approach':True,'seconds':remaining,
                                           **{k:v for k,v in args.items() if k in {'run','under_fire'}}})
                 a=r['action'];results.append(a);elapsed+=a.get('elapsed',0)
                 session.atlas.record_outcome(step,origin,a)

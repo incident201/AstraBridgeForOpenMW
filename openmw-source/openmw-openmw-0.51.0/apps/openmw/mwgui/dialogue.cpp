@@ -593,31 +593,31 @@ namespace MWGui
             = MWBase::Environment::get().getESMStore()->get<ESM::GameSetting>();
 
         if (mPtr.getType() == ESM::NPC::sRecordId)
-            mTopicsList->addItem(gmst.find("sPersuasion")->mValue.getString());
+            mTopicsList->addItem(gmst.find("sPersuasion")->mValue.getString(), 0, "service_persuasion");
 
         if (services & ESM::NPC::AllItems)
-            mTopicsList->addItem(gmst.find("sBarter")->mValue.getString());
+            mTopicsList->addItem(gmst.find("sBarter")->mValue.getString(), 0, "service_barter");
 
         if (services & ESM::NPC::Spells)
-            mTopicsList->addItem(gmst.find("sSpells")->mValue.getString());
+            mTopicsList->addItem(gmst.find("sSpells")->mValue.getString(), 0, "service_spells");
 
         if (travel)
-            mTopicsList->addItem(gmst.find("sTravel")->mValue.getString());
+            mTopicsList->addItem(gmst.find("sTravel")->mValue.getString(), 0, "service_travel");
 
         if (services & ESM::NPC::Spellmaking)
-            mTopicsList->addItem(gmst.find("sSpellmakingMenuTitle")->mValue.getString());
+            mTopicsList->addItem(gmst.find("sSpellmakingMenuTitle")->mValue.getString(), 0, "service_spellmaking");
 
         if (services & ESM::NPC::Enchanting)
-            mTopicsList->addItem(gmst.find("sEnchanting")->mValue.getString());
+            mTopicsList->addItem(gmst.find("sEnchanting")->mValue.getString(), 0, "service_enchanting");
 
         if (services & ESM::NPC::Training)
-            mTopicsList->addItem(gmst.find("sServiceTrainingTitle")->mValue.getString());
+            mTopicsList->addItem(gmst.find("sServiceTrainingTitle")->mValue.getString(), 0, "service_training");
 
         if (services & ESM::NPC::Repair)
-            mTopicsList->addItem(gmst.find("sRepair")->mValue.getString());
+            mTopicsList->addItem(gmst.find("sRepair")->mValue.getString(), 0, "service_repair");
 
         if (isCompanion())
-            mTopicsList->addItem(gmst.find("sCompanionShare")->mValue.getString());
+            mTopicsList->addItem(gmst.find("sCompanionShare")->mValue.getString(), 0, "service_companion");
 
         if (mTopicsList->getItemCount() > 0)
             mTopicsList->addSeparator();

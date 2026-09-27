@@ -23,6 +23,11 @@ function M.surface(point)
     return point
 end
 function M.flags(flags)
-    return flags.Walk+(M.has('WaterWalking') and (flags.Swim or 0) or 0)
+    return flags.Walk+(flags.Swim or 0)
+end
+function M.mode()
+    if M.has('Levitate') then return 'air' end
+    if types.Actor.isSwimming and types.Actor.isSwimming(self) then return 'swim' end
+    return 'walk'
 end
 return M

@@ -1,4 +1,5 @@
 #include "travelwindow.hpp"
+#include <MyGUI_LanguageManager.h>
 
 #include <MyGUI_Button.h>
 #include <MyGUI_Gui.h>
@@ -95,6 +96,9 @@ namespace MWGui
 
         const std::string& nameString = name.getRefIdString();
         toAdd->setUserString("price", std::to_string(price));
+        toAdd->setUserString("AstraControl", "travel_destination");
+        toAdd->setUserString("AstraDestination",
+            MyGUI::LanguageManager::getInstance().replaceTags("#{sCell=" + nameString + "}").asUTF8());
         toAdd->setCaptionWithReplacing("#{sCell=" + nameString + "}  - " + MyGUI::utility::toString(price) + "#{sgp}");
         toAdd->setSize(mDestinationsView->getWidth(), lineHeight);
         toAdd->eventMouseWheel += MyGUI::newDelegate(this, &TravelWindow::onMouseWheel);

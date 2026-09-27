@@ -35,7 +35,7 @@ package.preload['openmw.nearby']=function()return {
         return {hitObject=wall,hitPos=V.new(0,20,10)}
     end,
 }end
-package.preload['openmw.self']=function()return {cell=room,object={}}end
+package.preload['openmw.self']=function()return {cell=room,object={},position=V.new(0,0,0)}end
 package.preload['openmw.types']=function()return {Actor={objectIsInstance=function(o)return o.npc end,
     activeEffects=function()return {getEffect=function()return nil end}end}}end
 package.preload['openmw.util']=function()return {vector3=V.new,vector2=V.new}end

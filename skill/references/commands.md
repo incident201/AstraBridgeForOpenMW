@@ -12,7 +12,7 @@ Notation:
 
 - `ACTOR_REF`, `UI_REF`, `ITEM_REF`, `NODE_REF`, etc. mean an actual opaque `ref` returned by the matching query. Replace them before execution.
 - `OBS` means the integer `observation` from the latest screenshot-bearing observation, not a frame number or filename.
-- Names and captions must match the game's language exactly. English documentation does **not** make a Russian UI accept English labels.
+- Stable `control` identifiers (such as `service_barter`, `trade_offer`, `rest_confirm`) are language independent. Names and captions must match the game's language exactly. English documentation does **not** make a Russian UI accept English labels.
 - JSON arguments use JSON booleans (`true`/`false`) and double-quoted keys. Shell examples wrap the whole JSON in single quotes.
 - Examples are individual decisions, not scripts to execute blindly. Inspect each result before its dependent step.
 
@@ -92,7 +92,8 @@ Do not pass an NPC ref to `go` or an inventory `item_…` ref to `choose`. Prefe
 | `inspect journal --page N` | Journal entries already received; zero-based pages. |
 | `inspect conversations` | Topics already known by the character. |
 | `inspect conversations --topic "EXACT_TOPIC" --page N` | Recorded dialogue for that known topic; not an interaction with an NPC. |
-| `ui` | Current structured UI, including visible item tooltips. |
+| `ui [--control CONTROL]` | Current structured UI, including visible item tooltips; filter by stable control ID. |
+| `target-info REF` | Read-only diagnostic for a currently visible object: aim correction, reach, readiness and current crosshair obstruction. Does not move or activate. |
 | `read [--ref DOCUMENT_REF] [--offset N] [--limit N]` | Text of the currently open book/scroll. Default 4000 characters, maximum 8000 per chunk; no page turning or scrolling required. |
 | `read --all` / `read --search "TEXT"` | Assemble the opened document internally, or return matching passages with Unicode offsets. |
 
@@ -126,7 +127,17 @@ UI roles: `button`, `link`, `list_item`, `input`, `slider`, `item`, `item_slot`,
 
 **Trading/containers:** inspect `panel` to distinguish `inventory`, `merchant`, and `container`. Choosing an item may open a quantity dialog or begin a drag. Resolve the actual dialog, then choose the destination `drop_target` if a drag is active. `pending_trade` means a proposal; use the merchant's real confirmation button and verify ownership/gold afterward. Closed-container contents are not exposed.
 
-**Spellmaking, enchanting, alchemy, training, rest, level-up and character creation:** there are no separate high-level service commands. Use these same UI operations and the controls actually displayed. For example, rest opens via `trigger Rest`; then inspect its slider/buttons instead of assuming keyboard shortcuts or a particular caption.
+**Service shortcuts:**
+
+- `rest HOURS [--seconds 30]` opens the ordinary rest/wait menu, sets its hours slider, confirms, and reports the actual game hours passed. Legal rest/wait restrictions and interruptions still apply.
+- `buy "EXACT_ITEM_NAME" --quantity N --max-total GOLD [--instance INSTANCE] [--seconds 30]` requires an open barter menu with an empty proposal. It chooses the quantity, checks the actual quoted total, submits one offer, then verifies ownership and gold. A price/funds limit cancels the proposal through the real cancel button; an unconfirmed/rejected offer is not repeated.
+- `travel "EXACT_DESTINATION" [--max-cost GOLD] [--seconds 30]` requires the open travel menu. It uses that menu's structured destination and price, then verifies location change and payment. It does not infer destinations from remembered names.
+
+The service `seconds` limit bounds waiting for UI completion in wall time. A sequence's simulation deadline and damage guard also apply. These shortcuts use ordinary game callbacks; they do not bypass costs or requirements.
+
+Current UI rows expose stable controls when applicable: `service_barter`, `service_travel`, `service_repair`, `service_training`, `service_spells`, `service_spellmaking`, `service_enchanting`, `service_persuasion`, `service_companion`; `rest_hours`, `rest_confirm`, `rest_cancel`; `quantity_slider`, `quantity_value`, `quantity_confirm`, `quantity_cancel`; `trade_offer`, `trade_cancel`, `trade_balance`; `travel_destination`. IDs are identical in Russian, English and other translations. Captions remain in the game's language. Numeric service quotes use `value`; travel rows also include `destination`.
+
+**Spellmaking, enchanting, alchemy, training, level-up and character creation:** use ordinary UI operations on the controls actually displayed.
 
 ### Books, scrolls and manual repair
 
@@ -166,7 +177,17 @@ If saving is unavailable during the tutorial or a modal UI, do not bypass it. Pr
 ./astra sequence '{"actions":[{"op":"use_item","name":"EXACT_OWNED_ITEM_NAME"},{"op":"wait_until","condition":"animation","seconds":5},{"op":"act","move":1,"seconds":3}],"max_seconds":15,"stop_on_damage":true,"stop_health_pct":35}'
 ```
 
-Steps use API names with underscores: `act`, `look`, `go`, `walk`, `revisit`, `return_to`, `approach`, `interact`, `move_local`, `use_item`, `select_spell`, `select_enchanted`, `cast`, `strike`, `chain`, `wait_until`, `trigger`, `choose`, `lock`, `unlock`. Each step contains `op` plus that operation's normal fields. Item/spell selection also accepts an exact unique `name`. Every step is validated before execution; stale UI/scene refs still require stopping and reacquiring. Do not preselect replies from dialogue that has not been opened/read.
+Steps use API names with underscores: `act`, `look`, `go`, `walk`, `revisit`, `return_to`, `approach`, `interact`, `move_local`, `use_item`, `select_spell`, `select_enchanted`, `cast`, `strike`, `chain`, `wait_until`, `trigger`, `choose`, `edit`, `adjust`, `focus`, `target_info`, `fly`, `swim`, `rest`, `buy`, `travel`, `lock`, `unlock`. Each step contains `op` plus that operation's normal fields. Item/spell selection also accepts an exact unique `name`. Every step is validated before execution. Do not preselect replies from dialogue that has not been opened/read.
+
+A `select` object resolves a fresh handle immediately before its step. Filters: exact `name`, substring `contains`, `kind`, `panel`, `role`, `control`, `instance`, and scene-only `nearest:true`. Source is inferred from the operation (`scene`, `ui`, `inventory`, `spells`). Disabled, unavailable or ambiguous choices stop the sequence. `bind:"npc"` stores the selected handle; `ref:"$npc"` reuses it later, with normal visibility/freshness checks. For UI that changes, use a fresh selector at each step.
+
+`expect` can check `ui_mode`, `location`, `location_changed`, action `outcome`, `gold_delta`, or `inventory_delta:{"name":"EXACT_NAME","delta":N}`. A failed check returns `expectation_failed` and skips all remaining actions. It cannot undo the completed step.
+
+Example for an already opened dialogue offering barter:
+
+```sh
+./astra sequence '{"actions":[{"op":"choose","select":{"control":"service_barter"},"expect":{"ui_mode":"Barter"}},{"op":"buy","name":"OBSERVED_ITEM_NAME","quantity":2,"max_total":50}],"max_seconds":30}'
+```
 
 Default total simulation budget is 60 seconds; it has no fixed upper cap. The total simulation deadline and health/damage guards are checked at dispatch and every motor frame, including long `act`, turns and individual casts/strikes. Frame timing and the final pause can add roughly a frame to the measured limit; submitted atomic UI operations cannot be undone. A combat `chain` uses its own continuous motor deadline. `stop_on_damage` defaults to true and `stop_health_pct` to 0 (disabled). Interruptions stop the remaining sequence; already consumed items are not replayed. Only the final observation captures a screenshot. Sequence boundaries retain ordinary brief command pauses; use a combat `chain` for continuous concurrent movement/casting, and `interact --approach` for uninterrupted approach/aim/activation.
 

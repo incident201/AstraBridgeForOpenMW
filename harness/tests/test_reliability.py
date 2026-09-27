@@ -105,7 +105,7 @@ def test_autosave_ring_overwrites_only_owned_slot_and_preserves_manual(tmp_path)
 
 
 def enter(atlas,points):
-    atlas.ingest({'state':'running','location':'Room','ui_mode':'Gameplay','body':{'on_ground':True},
+    atlas.ingest({'state':'running','location':'Room','ui_mode':'Gameplay','simulation_seconds':100,'body':{'on_ground':True},
                  'trajectory':{'ref':'visit','start_heading_deg':0,'samples':[{'sequence':i+1,'forward_m':p[1],'sideways_m':p[0],'vertical_m':p[2],'heading_deg':0} for i,p in enumerate(points)]}},
                 {'space':'Room','origin':[0,0,0]})
 
@@ -122,10 +122,14 @@ def test_route_failure_persists_expires_and_can_use_a_known_alternative(tmp_path
     atlas.record_outcome({'kind':'walk','ref':target['ref']},{'space':atlas.segment,'pose':[0,0,0]}, {'reason':'blocked','navigation':{'blocked_by':'actor'}})
     route=atlas.route_to(target['ref'])
     assert route and route['steps'][0]['ref']==alternate['ref']
-    atlas.db.close();atlas=ExplorationAtlas(tmp_path/'atlas.json')
-    assert len(atlas.route_outcomes(active=True))==1
-    now[0]=109
+    now[0]=10000
+    assert len(atlas.route_outcomes(active=True))==1, 'thinking on pause does not age obstructions'
+    atlas.simulation_seconds=109
     assert not atlas.route_outcomes(active=True)
+    atlas.simulation_seconds=100
+    atlas.db.close();atlas=ExplorationAtlas(tmp_path/'atlas.json')
+    assert not atlas.route_outcomes(active=True), 'restart revalidates old obstructions'
+    assert atlas.route_outcomes(), 'failure evidence remains persistent'
 
 
 def test_native_guard_and_progress_algorithms():

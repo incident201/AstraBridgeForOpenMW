@@ -55,7 +55,7 @@ package.preload['openmw.interfaces']=function() return {UI={
 package.preload['openmw.core']=function() return {
     getGMST=function(name)return name end,
     isWorldPaused=function() return paused end,
-    getRealTime=function() return now end, getSimulationTime=function()return now end,
+    getRealTime=function() return now end, getGameTime=function()return 0 end, getSimulationTime=function()return now end,
     sendGlobalEvent=function(name,data) events[#events+1]={name,data} end,
 } end
 player=require('scripts.astrabridge.player')

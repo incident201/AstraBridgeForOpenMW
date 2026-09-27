@@ -8,7 +8,7 @@ def compact(observation, before=None):
             'target_lock','messages','events','screenshot','local_map','screen')
     result = {k: observation[k] for k in keys if k in observation}
     scene = observation.get('scene', {})
-    result['scene'] = {'objects': [{k: v for k,v in o.items() if k not in {'rect','aim_point','actions'}}
+    result['scene'] = {'objects': [{k: v for k,v in o.items() if k not in {'rect','aim_point','actions','center_bearing_deg','horizontal_distance_m'}}
                                   for o in scene.get('objects', [])],
                        'sampling_limited': scene.get('sampling_limited', False)}
     ui = observation.get('ui', {})

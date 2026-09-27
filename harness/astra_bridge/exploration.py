@@ -68,6 +68,8 @@ class ExplorationAtlas(AtlasRoutes):
         self.sequence = 0
         self.restore_pending = None
         self._route_cache = None
+        self.clock_epoch = uuid.uuid4().hex
+        self.simulation_seconds = None
 
     def _meta(self, key):
         row = self.db.execute('SELECT value FROM meta WHERE key=?', (key,)).fetchone()
@@ -150,11 +152,18 @@ class ExplorationAtlas(AtlasRoutes):
         self.visit = None
         self.restore_pending = None
         self.data['markers'] = []
+        self.clock_epoch = uuid.uuid4().hex
+        self.simulation_seconds = None
 
     def current(self):
         return next((s for s in self.data['segments'] if s['ref'] == self.segment), None)
 
     def ingest(self, observation, frame=None):
+        clock = observation.get('simulation_seconds')
+        if isinstance(clock, (int, float)) and math.isfinite(clock):
+            if self.simulation_seconds is not None and clock < self.simulation_seconds - .01:
+                self.clock_epoch = uuid.uuid4().hex
+            self.simulation_seconds = clock
         if frame is not None:
             return self._ingest_anchored(observation, frame)
         return self._ingest_legacy(observation)

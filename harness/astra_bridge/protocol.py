@@ -107,6 +107,12 @@ LEAF_KEYS = {
 DICT_KEYS = {"stats", "attributes", "health", "magicka", "fatigue", "observation", "orientation", "scene", "ui", "motion", "movement", "target_lock", "body", "navigation", "combat", "weapon_info", "castable", "resources", "changes", "terrain", "trajectory"}
 LIST_KEYS = {"items", "spells", "entries", "saves", "available", "objects", "actions", "skills", "topics", "elements", "messages", "effects", "steps", "rays", "passages", "samples", "ground_targets"}
 LIST_KEYS.add('attribute_details')
+LEAF_KEYS.add('horizontal_distance_m')
+LEAF_KEYS.update({'ready','activation_distance_m'})
+LEAF_KEYS.add('aimed')
+LEAF_KEYS.update({'control','destination'})
+LEAF_KEYS.add('game_time_seconds')
+LEAF_KEYS.update({'movement_mode','center_bearing_deg'})
 DICT_KEYS.add('dialogue')
 DICT_KEYS.add('document')
 ERRORS = {"save_unavailable", "stale_save_ref", "operation_failed", "invalid_arguments", "no_player",
@@ -123,6 +129,7 @@ ERRORS.add('ui_control_disabled')
 ERRORS.update({'ui_element_offscreen', 'ui_scroll_unavailable'})
 ERRORS.add('movement_conflicts_with_target')
 ERRORS.update({'levitation_required','flight_requires_fly'})
+ERRORS.add('swimming_required')
 ERRORS.update({'document_not_open', 'stale_document_ref'})
 
 
@@ -162,6 +169,7 @@ def number(value, low, high):
 ACTION_DEFAULTS = {'act':.25, 'track':1, 'go':12, 'walk':8, 'approach':30,
                    'interact':30, 'move_local':30, 'fly':10, 'evade':4, 'chain':12,
                    'wait_until':30, 'sequence':60, 'revisit':60, 'return_to':60}
+ACTION_DEFAULTS.update(rest=30,buy=30,travel=30,swim=30)
 
 
 def action_timeout(op, args, base):
@@ -189,14 +197,15 @@ def validate(op: str, args: dict) -> None:
         "act": {"seconds", "move", "strafe", "yaw", "pitch", "attack", "run", "sneak", "trigger", "target"},
         "look":{"heading_deg","pitch_deg"},
         "ui":set(),"map":set(),"choose":{"ref"},"focus":{"ref","wait_ready"},"approach":{"ref","reach","run","under_fire","seconds"},"interact":{"ref","approach","run","seconds","under_fire","adjust_viewpoint"},
-        "pick":{"x","y","radius","observation"},
+        "pick":{"x","y","radius","observation"},"target_info":{"ref"},
         "walk":{"x","y","ref","observation","run","under_fire","seconds"},
         "survey":set(),"ground":set(),"mark":set(),"go":{"ref","run","seconds","under_fire"},
         "evade":{"direction","ref","meters","seconds","run","actions"},
         "edit":{"ref","text"},"adjust":{"ref","position"},
         "ui_hover":{"ref"},"ui_scroll":{"steps"},
         "move_local":{"forward_m","sideways_m","under_fire","run","seconds"},"wait_until":{"condition","percent","ui_mode","seconds","bearing_deg","meters"},"fov":{"degrees"},
-        "fly":{"forward_m","sideways_m","vertical_m","seconds","under_fire"},
+        "fly":{"ref","forward_m","sideways_m","vertical_m","seconds","under_fire"},
+        "swim":{"ref","forward_m","sideways_m","vertical_m","seconds","under_fire"},
         "track":{"ref","seconds","attack"},
         "lock":{"ref"},"unlock":set(),
         "strike":{"ref","charge","air"},"cast":{"ref","air"},
@@ -246,7 +255,7 @@ def validate(op: str, args: dict) -> None:
                 raise BridgeError("invalid_arguments")
         if 'topic' in args and (not isinstance(args['topic'],str) or len(args['topic'])>200):
             raise BridgeError('invalid_arguments')
-    if op in {"load", "use_item", "select_spell", "select_enchanted", "focus", "approach", "interact", "choose", "edit", "adjust", "track", "lock", "ui_hover"}:
+    if op in {"load", "use_item", "select_spell", "select_enchanted", "focus", "approach", "interact", "choose", "edit", "adjust", "track", "lock", "ui_hover", "target_info"}:
         if not isinstance(args.get("ref"), str) or len(args["ref"]) > 100:
             raise BridgeError("invalid_arguments")
     if op=='edit' and (not isinstance(args.get('text'),str) or len(args['text'])>1000 or '\x00' in args['text']):
@@ -260,9 +269,11 @@ def validate(op: str, args: dict) -> None:
     if op=='move_local':
         for k,v in args.items():
             if k in {'forward_m','sideways_m'}:number(v,-math.inf,math.inf)
-    if op=='fly':
+    if op in {'fly','swim'}:
         values=[number(args.get(k,0),-math.inf,math.inf) for k in ('forward_m','sideways_m','vertical_m')]
-        if not .01<sum(v*v for v in values):raise BridgeError('invalid_arguments')
+        if 'ref' in args:
+            if any(values) or not isinstance(args['ref'],str) or not 1<=len(args['ref'])<=100:raise BridgeError('invalid_arguments')
+        elif not .01<sum(v*v for v in values):raise BridgeError('invalid_arguments')
         if 'seconds' in args:number(args['seconds'],.2,math.inf)
     if 'under_fire' in args and type(args['under_fire']) is not bool:raise BridgeError('invalid_arguments')
     if op=='fov': number(args.get('degrees'),70,115)

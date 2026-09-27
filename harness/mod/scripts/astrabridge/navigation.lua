@@ -7,9 +7,17 @@ local util=require('openmw.util')
 local Space=require('scripts.astrabridge.space')
 local Mobility=require('scripts.astrabridge.mobility')
 local M={}
+local function mode()return Mobility.mode and Mobility.mode() or 'walk' end
 local function horizontal(v)return math.sqrt(v.x*v.x+v.y*v.y)end
 local function destination(g)
-    if g.groundPoint then return Mobility.surface(g.groundPoint) end
+    if g.groundPoint then return g.freeDestination and g.groundPoint or Mobility.surface(g.groundPoint) end
+    if mode()=='air' or mode()=='swim' then
+        local point=g.point or g.center
+        local d=point-self.position
+        local reach=require('openmw.core').getGMST('iMaxActivateDist')*.55
+        local height=types.Actor.getPathfindingAgentBounds(self).halfExtents.z
+        return point-util.vector3(0,0,height)-(d:length()>1 and d:normalize()*reach or util.vector3(0,0,0))
+    end
     if types.Actor.objectIsInstance(g.obj) then return g.obj.position end
     return util.vector3(g.center.x,g.center.y,g.center.z-g.half.z)
 end
@@ -23,7 +31,15 @@ local function plan(n,g)
     if n.recorded then return end
     n.waterWalking=Mobility.has('WaterWalking')
     if g then n.lastGoal=g;n.goal=destination(g) end
+    n.mode=mode()
+    n.volume=n.mode=='air' or n.lastGoal and n.lastGoal.freeDestination and n.mode=='swim'
     n.replans=n.replans+1
+    if n.volume then
+        n.recorded=false;n.localPath=nil;n.endpointMismatch=nil;n.index=1
+        n.path=require('scripts.astrabridge.volume').plan(self.position,n.goal,n.mode=='swim',self.cell and self.cell.waterLevel)
+        n.status=n.path and 'planned' or 'no_path';n.pathStatus=n.status
+        return
+    end
     local flags=nearby.NAVIGATOR_FLAGS
     local ok,status,path=pcall(nearby.findPath,self.position,n.goal,{
         agentBounds=types.Actor.getPathfindingAgentBounds(self),
@@ -107,16 +123,19 @@ function M.new(g)
     return n
 end
 function M.step(n,g,dt)
+    if n.mode and n.mode~=mode() then
+        n.recorded=false;n.recordedPath=nil;n.detour=nil;n.mode=mode();plan(n,g)
+    end
     local previous=n.previousPosition or self.position
     n.previousPosition=self.position
-    n.lastMovement=horizontal(self.position-previous)
+    n.lastMovement=(n.volume or n.mode=='swim') and (self.position-previous):length() or horizontal(self.position-previous)
     if n.waitRemaining then
         n.waitRemaining=n.waitRemaining-dt
         if n.waitRemaining>0 then n.status='waiting';return self.position end
         n.waitRemaining=nil;n.status=n.pathStatus or 'planned'
     end
     if n.detour then
-        if horizontal(n.detour-self.position)>24 then n.status='detour';return n.detour end
+        if (n.volume and (n.detour-self.position):length() or horizontal(n.detour-self.position))>24 then n.status='detour';return n.detour end
         if n.detourJoin then n.detour=n.detourJoin;n.detourJoin=nil;return n.detour end
         n.detour=nil
         if n.rejoinIndex then n.index=n.rejoinIndex;n.rejoinIndex=nil;n.status=n.pathStatus
@@ -141,7 +160,7 @@ function M.step(n,g,dt)
             if gap<tolerance-1 then radius=math.max(1,math.min(radius,tolerance-gap-1)) end
         end
         local reached=horizontal(d)<radius and math.abs(d.z)<35
-        if n.index==#n.path and horizontal(d)<radius and math.abs(d.z)>=35 then
+        if not n.volume and n.mode~='swim' and n.index==#n.path and horizontal(d)<radius and math.abs(d.z)>=35 then
             -- There is no horizontal direction left to follow. Do not spin on
             -- an endpoint below/above the feet until the command budget expires.
             n.status='height_mismatch';return nil
@@ -162,6 +181,9 @@ function M.step(n,g,dt)
         if reached then n.index=n.index+1 else break end
     end
     if n.index>#n.path then
+        if n.volume and not M.reached(n) then
+            plan(n,g);return n.path and n.path[1]
+        end
         -- Navmesh endpoints can stop a few decimetres short of a previously
         -- occupied waypoint. Finish only over physically sampled clear floor.
         if not n.finalApproach and n.lastGoal and n.lastGoal.groundPoint
@@ -205,6 +227,7 @@ function M.reached(n)
     return horizontal(d)<(n.arrivalTolerance or 25) and math.abs(d.z)<35
 end
 function M.canFinish(n)
+    if n.volume then return not require('scripts.astrabridge.volume').contact(self.position,n.goal) end
     if (n.arrivalTolerance or 25)<=25 or horizontal(n.goal-self.position)<25 then return true end
     -- A loose passage tolerance must not claim arrival through a thin wall or
     -- on the other side of a corner. The nearby goal must be directly reachable.
@@ -223,7 +246,7 @@ function M.clearance(n,point)
         local d=point-self.position
         local length=d:length()
         if length<1 then return nil end
-        return require('scripts.astrabridge.terrain').contact(self.position,self.position+d*math.min(1,65/length))
+        return require((n.volume or n.mode=='swim') and 'scripts.astrabridge.volume' or 'scripts.astrabridge.terrain').contact(self.position,self.position+d*math.min(1,65/length))
     end)
     if not ok then n.blockedBy='probe_unavailable';return 0 end
     if hit then n.blockedBy=hit.kind;return 0 end
@@ -233,6 +256,7 @@ function M.recover(n,yaw)
     local limit=n.blockedBy=='actor' and 4 or 2
     if (n.attempts or 0)>=limit then return false end
     n.attempts=(n.attempts or 0)+1;n.recoveryCount=(n.recoveryCount or 0)+1
+    if n.volume then plan(n,nil);return n.path~=nil end
     n.recoveryPositions=n.recoveryPositions or {}
     local key=string.format('%d:%d:%d',math.floor(self.position.x/20),math.floor(self.position.y/20),math.floor(self.position.z/20))
     n.recoveryPositions[key]=(n.recoveryPositions[key] or 0)+1
@@ -304,6 +328,8 @@ function M.report(n)
         source=n.recorded and 'recorded_trail' or n.localPath and 'local_collision' or 'navmesh',reason=n.failureReason or n.fallbackReason,
         standing_point=n.standingPoint or false,waypoint=n.index,waypoints=n.path and #n.path,
         stalled_seconds=n.stalledSeconds and math.floor(n.stalledSeconds*10)/10}
+    out.movement_mode=n.mode or 'walk'
+    if n.volume then out.source='local_collision_3d' end
     if n.goal then
         out.goal_distance_m=math.floor(horizontal(n.goal-self.position)/70*100+.5)/100
         out.goal_height_change_m=math.floor((n.goal.z-self.position.z)/70*100+.5)/100
@@ -333,10 +359,17 @@ end
 function M.moveFraction(waypoint,dt,run,n)
     local getter=run and types.Actor.getRunSpeed or types.Actor.getWalkSpeed
     local speed=getter and getter(self) or 200
-    local remaining=horizontal(waypoint-self.position)
+    local remaining=n and (n.volume or n.mode=='swim') and (waypoint-self.position):length() or horizontal(waypoint-self.position)
     local delay=n and n.inputDelayFrames or 2
     local queued=(n and n.lastMovement or 0)*delay
     local horizon=math.max(dt,delay==0 and .2 or .02)*math.max(1,delay)
     return math.min(1,math.max(0,remaining-queued)/math.max(24,speed*horizon))
+end
+function M.motion(n,waypoint,dt,run,yawNow)
+    local d=waypoint-self.position
+    local h=horizontal(d)
+    local yaw=h>14 and math.atan2(d.x,d.y) or yawNow
+    local pitch=(n.volume or n.mode=='swim') and math.max(-math.rad(89),math.min(math.rad(89),-math.atan2(d.z,h))) or 0
+    return yaw,pitch,M.moveFraction(waypoint,dt,run,n)*M.clearance(n,waypoint)
 end
 return M

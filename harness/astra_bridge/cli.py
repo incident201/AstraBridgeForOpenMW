@@ -120,7 +120,7 @@ def main():
             p.add_argument('--no-screenshot',action='store_true');p.add_argument('--map',action='store_true')
         if name=='ui':
             p.add_argument('--query');p.add_argument('--page',type=int,default=0);p.add_argument('--limit',type=int,default=20)
-            p.add_argument('--panel');p.add_argument('--role')
+            p.add_argument('--panel');p.add_argument('--role');p.add_argument('--control')
     p=commands.add_parser('details');p.add_argument('section');p.add_argument('--observation',type=int)
     p.add_argument('--query');p.add_argument('--page',type=int,default=0);p.add_argument('--limit',type=int,default=20)
     p=commands.add_parser('action-result');p.add_argument('ref',nargs='?')
@@ -142,6 +142,10 @@ def main():
     p = commands.add_parser('look');p.add_argument('--heading',dest='heading_deg',type=float);p.add_argument('--pitch',dest='pitch_deg',type=float)
     p = commands.add_parser("chain"); p.add_argument("json", help='{"actions":[{"op":"strike"},{"op":"strike"}],"max_seconds":12}')
     p=commands.add_parser('sequence');p.add_argument('json')
+    p=commands.add_parser('rest');p.add_argument('hours',type=int);p.add_argument('--seconds',type=float,default=30)
+    p=commands.add_parser('buy');p.add_argument('name');p.add_argument('--quantity',type=int,default=1)
+    p.add_argument('--max-total',type=int,required=True);p.add_argument('--instance');p.add_argument('--seconds',type=float,default=30)
+    p=commands.add_parser('travel');p.add_argument('destination');p.add_argument('--max-cost',type=int);p.add_argument('--seconds',type=float,default=30)
     p=commands.add_parser('wait-until');p.add_argument('condition',choices=['fatigue','animation','passage','ui'])
     p.add_argument('--percent',type=float,default=100);p.add_argument('--ui-mode');p.add_argument('--seconds',type=float,default=30)
     p.add_argument('--bearing-deg',type=float,default=0);p.add_argument('--meters',type=float,default=1)
@@ -157,7 +161,7 @@ def main():
     for name in ('strike','cast'):
         p=commands.add_parser(name);p.add_argument('ref',nargs='?');p.add_argument('--air',action='store_true')
         if name=='strike':p.add_argument('--charge',type=float,default=.8)
-    for name in ("use-item", "select-spell", "select-enchanted", "load","focus","approach","choose","lock","hover"):
+    for name in ("use-item", "select-spell", "select-enchanted", "load","focus","approach","choose","lock","hover","target-info"):
         p = commands.add_parser(name); p.add_argument("ref")
         if name=='approach':p.add_argument('--reach',choices=['activate','melee','touch'],default='activate')
         if name=='approach':p.add_argument('--run',action='store_true')
@@ -190,8 +194,9 @@ def main():
     p=commands.add_parser('move-local');p.add_argument('forward_m',type=float);p.add_argument('--sideways-m',type=float,default=0)
     p.add_argument('--under-fire',action='store_true')
     p.add_argument('--run',action='store_true');p.add_argument('--seconds',type=float,default=30)
-    p=commands.add_parser('fly');p.add_argument('--forward-m',type=float,default=0);p.add_argument('--sideways-m',type=float,default=0)
-    p.add_argument('--vertical-m',type=float,default=0);p.add_argument('--seconds',type=float,default=10);p.add_argument('--under-fire',action='store_true')
+    for mode in ('fly','swim'):
+        p=commands.add_parser(mode);p.add_argument('--ref');p.add_argument('--forward-m',type=float,default=0);p.add_argument('--sideways-m',type=float,default=0)
+        p.add_argument('--vertical-m',type=float,default=0);p.add_argument('--seconds',type=float,default=30 if mode=='swim' else 10);p.add_argument('--under-fire',action='store_true')
     p=commands.add_parser('fov');p.add_argument('degrees',type=float)
     p=commands.add_parser('track');p.add_argument('ref');p.add_argument('--seconds',type=float,default=1);p.add_argument('--attack',action='store_true')
     p=commands.add_parser('remember');p.add_argument('label');p.add_argument('--note',default='');p.add_argument('--exits',action='append',default=[]);p.add_argument('--confidence',choices=['observed','inferred'],default='observed')
@@ -210,12 +215,19 @@ def main():
             serve(options)
             return
         if options.command == "start":
-            try:
-                existing = request("status", timeout=2)
-                if existing.get("ok"):
+            # shutdown closes the game before the server socket disappears.
+            # Do not report that dying controller as a successful new start.
+            deadline = time.monotonic()+5
+            while True:
+                try:
+                    existing = request("status", timeout=2)
+                except (BridgeError, OSError):
+                    break
+                if existing.get("ok") and existing.get("result",{}).get("running"):
                     emit(existing); return
-            except (BridgeError, OSError):
-                pass
+                if time.monotonic()>=deadline:
+                    raise BridgeError("controller_without_game_use_restart")
+                time.sleep(.1)
             RUNTIME.mkdir(mode=0o700, exist_ok=True)
             cmd = [sys.executable, "-m", "astra_bridge.cli", "serve", "--installation", options.installation]
             if options.headless: cmd.append("--headless")

@@ -3,7 +3,7 @@
 from pathlib import Path
 from urllib.request import urlopen, urlretrieve
 from concurrent.futures import ThreadPoolExecutor
-import argparse, hashlib, json, subprocess, tarfile
+import argparse, hashlib, json, shlex, subprocess, tarfile
 
 parser=argparse.ArgumentParser()
 parser.add_argument('--work',type=Path,default=Path.cwd()/'openmw-source')
@@ -38,8 +38,12 @@ if a.arch_deps:
     (work/'dependencies.json').write_text(json.dumps([x for _,x in downloads],indent=2)+'\n')
 subprocess.run(['python3',str(Path(__file__).with_name('patch_engine.py')),str(source)],check=True)
 prefix=work/'deps/usr'
+portable_paths=shlex.quote('-ffile-prefix-map='+str(work)+'=astra-build')
 args=['cmake','-S',str(source),'-B',str(work/'engine'),'-G','Ninja','-DCMAKE_BUILD_TYPE=Release',
       '-DCMAKE_CXX_FLAGS_RELEASE=-O1 -DNDEBUG','-DCMAKE_POLICY_VERSION_MINIMUM=3.5',
+      # __FILE__ and debug diagnostics must not publish the builder's home/workspace.
+      '-DCMAKE_CXX_FLAGS='+portable_paths,
+      '-DCMAKE_C_FLAGS='+portable_paths,
       '-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON','-DCMAKE_INSTALL_RPATH=$ORIGIN/lib',
       '-DOPENMW_USE_SYSTEM_RECASTNAVIGATION=ON']
 if prefix.exists():

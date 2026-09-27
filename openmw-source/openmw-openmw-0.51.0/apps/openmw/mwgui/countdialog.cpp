@@ -15,11 +15,15 @@ namespace MWGui
         : WindowModal("openmw_count_window.layout")
     {
         getWidget(mSlider, "CountSlider");
+        mSlider->setUserString("AstraControl", "quantity_slider");
         getWidget(mItemEdit, "ItemEdit");
+        mItemEdit->setUserString("AstraControl", "quantity_value");
         getWidget(mItemText, "ItemText");
         getWidget(mLabelText, "LabelText");
         getWidget(mOkButton, "OkButton");
+        mOkButton->setUserString("AstraControl", "quantity_confirm");
         getWidget(mCancelButton, "CancelButton");
+        mCancelButton->setUserString("AstraControl", "quantity_cancel");
 
         mCancelButton->eventMouseButtonClick += MyGUI::newDelegate(this, &CountDialog::onCancelButtonClicked);
         mOkButton->eventMouseButtonClick += MyGUI::newDelegate(this, &CountDialog::onOkButtonClicked);

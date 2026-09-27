@@ -84,7 +84,7 @@ function M.number(v, lo, hi, default)
     assert(type(v) == 'number' and v == v and v > -math.huge and v < math.huge and v >= lo and v <= hi, 'invalid number')
     return v
 end
-local defaults={act=.25,track=1,go=12,walk=8,approach=30,interact=30,move_local=30,fly=10,evade=4,chain=12,wait_until=30}
+local defaults={act=.25,track=1,go=12,walk=8,approach=30,interact=30,move_local=30,fly=10,swim=30,evade=4,chain=12,wait_until=30}
 function M.actionSeconds(op,args)
     return M.number(op=='chain' and args.max_seconds or args.seconds,.02,math.huge,defaults[op] or 8)
 end

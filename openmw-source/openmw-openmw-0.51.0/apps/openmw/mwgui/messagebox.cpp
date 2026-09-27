@@ -195,6 +195,17 @@ namespace MWGui
         getWidget(mMessageWidget, "message");
 
         mMessageWidget->setCaptionWithReplacing(mMessage);
+        if (mMessage.starts_with("#{sMagicSkillFail}")) mMessageWidget->setUserString("AstraNotice", "spell_failed");
+        if (mMessage.starts_with("#{sLockSuccess}")) mMessageWidget->setUserString("AstraNotice", "lock_opened");
+        if (mMessage.starts_with("#{sLockFail}")) mMessageWidget->setUserString("AstraNotice", "lock_failed");
+        if (mMessage.starts_with("#{sLockImpossible}")) mMessageWidget->setUserString("AstraNotice", "lock_impossible");
+        if (mMessage.starts_with("#{sTrapSuccess}")) mMessageWidget->setUserString("AstraNotice", "trap_disarmed");
+        if (mMessage.starts_with("#{sTrapFail}")) mMessageWidget->setUserString("AstraNotice", "trap_failed");
+        if (mMessage.starts_with("#{sNotifyMessage45}")) mMessageWidget->setUserString("AstraNotice", "missing_mortar");
+        if (mMessage.starts_with("#{sNotifyMessage37}")) mMessageWidget->setUserString("AstraNotice", "potion_name_required");
+        if (mMessage.starts_with("#{sNotifyMessage6a}")) mMessageWidget->setUserString("AstraNotice", "ingredients_required");
+        if (mMessage.starts_with("#{sNotifyMessage8}")) mMessageWidget->setUserString("AstraNotice", "potion_failed");
+        if (mMessage.starts_with("#{sPotionSuccess}")) mMessageWidget->setUserString("AstraNotice", "potion_created");
     }
 
     void MessageBox::update(int height)

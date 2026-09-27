@@ -18,6 +18,58 @@ def replace(path,old,new):
 def copy_header(name):
     source=Path(__file__).with_name(name);target=root/'apps/openmw/mwlua'/name
     if not target.exists() or target.read_bytes()!=source.read_bytes():shutil.copyfile(source,target)
+# Stable roles on existing, displayed controls. Values are the same visible
+# prices/amounts the ordinary callbacks act on; no service bypass is exposed.
+for filename, fields in {
+    'waitdialog.cpp': {'mHourSlider':('HourSlider','rest_hours'), 'mWaitButton':('WaitButton','rest_confirm'),
+                       'mCancelButton':('CancelButton','rest_cancel')},
+    'countdialog.cpp': {'mSlider':('CountSlider','quantity_slider'), 'mItemEdit':('ItemEdit','quantity_value'),
+                        'mOkButton':('OkButton','quantity_confirm'), 'mCancelButton':('CancelButton','quantity_cancel')},
+    'tradewindow.cpp': {'mOfferButton':('OfferButton','trade_offer'), 'mCancelButton':('CancelButton','trade_cancel'),
+                        'mTotalBalance':('TotalBalance','trade_balance')},
+}.items():
+    for member, (widget, role) in fields.items():
+        line=f'        getWidget({member}, "{widget}");'
+        replace('apps/openmw/mwgui/'+filename,line,line+f'\n        {member}->setUserString("AstraControl", "{role}");')
+replace('apps/openmw/mwgui/tradewindow.cpp','    void TradeWindow::updateLabels()\n    {',
+'''    void TradeWindow::updateLabels()
+    {
+        mTotalBalance->setUserString("AstraValue", std::to_string(mCurrentBalance));''')
+replace('apps/openmw/mwgui/travelwindow.cpp','        toAdd->setUserString("price", std::to_string(price));',
+'''        toAdd->setUserString("price", std::to_string(price));
+        toAdd->setUserString("AstraControl", "travel_destination");''')
+replace('apps/openmw/mwgui/travelwindow.cpp','#include "travelwindow.hpp"',
+        '#include "travelwindow.hpp"\n#include <MyGUI_LanguageManager.h>')
+replace('apps/openmw/mwgui/travelwindow.cpp','        toAdd->setUserString("AstraControl", "travel_destination");',
+'''        toAdd->setUserString("AstraControl", "travel_destination");
+        toAdd->setUserString("AstraDestination",
+            MyGUI::LanguageManager::getInstance().replaceTags("#{sCell=" + nameString + "}").asUTF8());''')
+# Carry semantics from the service's construction to the rendered list item.
+# Labels remain localized; neither the adapter nor the harness parses them.
+notice_codes={'sMagicSkillFail':'spell_failed','sLockSuccess':'lock_opened','sLockFail':'lock_failed',
+    'sLockImpossible':'lock_impossible','sTrapSuccess':'trap_disarmed','sTrapFail':'trap_failed',
+    'sNotifyMessage45':'missing_mortar','sNotifyMessage37':'potion_name_required',
+    'sNotifyMessage6a':'ingredients_required','sNotifyMessage8':'potion_failed','sPotionSuccess':'potion_created'}
+notice_lines='\n'.join(f'        if (mMessage.starts_with("#{{{setting}}}")) mMessageWidget->setUserString("AstraNotice", "{code}");'
+                       for setting,code in notice_codes.items())
+replace('apps/openmw/mwgui/messagebox.cpp','        mMessageWidget->setCaptionWithReplacing(mMessage);',
+        '        mMessageWidget->setCaptionWithReplacing(mMessage);\n'+notice_lines)
+replace('components/widgets/list.hpp','void addItem(std::string_view name, int verticalPadding = 0);',
+        'void addItem(std::string_view name, int verticalPadding = 0, std::string_view astraControl = {});')
+replace('components/widgets/list.hpp','            std::string mName;',
+        '            std::string mName;\n            std::string mAstraControl;')
+replace('components/widgets/list.hpp','ListItemData(std::string_view name, int verticalPadding)\n                : mName(name)',
+        'ListItemData(std::string_view name, int verticalPadding, std::string_view astraControl)\n                : mName(name)\n                , mAstraControl(astraControl)')
+replace('components/widgets/list.cpp','void MWList::addItem(std::string_view name, int verticalPadding)\n    {\n        mItems.emplace_back(name, verticalPadding);',
+        'void MWList::addItem(std::string_view name, int verticalPadding, std::string_view astraControl)\n    {\n        mItems.emplace_back(name, verticalPadding, astraControl);')
+replace('components/widgets/list.cpp','                button->setCaption(item.mName);',
+        '                button->setCaption(item.mName);\n                button->setUserString("AstraControl", item.mAstraControl);')
+for setting, control in {'sPersuasion':'service_persuasion','sBarter':'service_barter',
+        'sSpells':'service_spells','sTravel':'service_travel','sSpellmakingMenuTitle':'service_spellmaking',
+        'sEnchanting':'service_enchanting','sServiceTrainingTitle':'service_training',
+        'sRepair':'service_repair','sCompanionShare':'service_companion'}.items():
+    replace('apps/openmw/mwgui/dialogue.cpp',f'mTopicsList->addItem(gmst.find("{setting}")->mValue.getString());',
+            f'mTopicsList->addItem(gmst.find("{setting}")->mValue.getString(), 0, "{control}");')
 replace('apps/openmw/mwlua/uibindings.cpp','#include "../mwbase/windowmanager.hpp"',
 '''#include "../mwbase/windowmanager.hpp"
 #include "astraui.hpp"''')

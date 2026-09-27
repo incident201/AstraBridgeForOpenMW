@@ -40,17 +40,17 @@ def details(session, args):
 
 
 def query_ui(session, args):
-    if args.keys()-{'query','page','limit','panel','role'}: raise BridgeError('invalid_arguments')
+    if args.keys()-{'query','page','limit','panel','role','control'}: raise BridgeError('invalid_arguments')
     value = session.command('ui')
-    if getattr(session,'full_observations',False) and not any(args.get(k) for k in ('query','page','panel','role')):return value
+    if getattr(session,'full_observations',False) and not any(args.get(k) for k in ('query','page','panel','role','control')):return value
     rows = value.get('elements', [])
-    for key in ('panel','role'):
+    for key in ('panel','role','control'):
         if key in args: rows = [e for e in rows if e.get(key)==args[key]]
     value['elements'], meta = page_rows(rows,args)
     value.update(meta)
     # Avoid the same dialogue sidebar appearing twice.
     if 'dialogue' in value: value['dialogue'] = {k:v for k,v in value['dialogue'].items() if k!='topics'}
-    if args.get('query') or args.get('page') or args.get('panel') or args.get('role'):
+    if args.get('query') or args.get('page') or args.get('panel') or args.get('role') or args.get('control'):
         value.pop('text',None)
         if 'dialogue' in value:value['dialogue']={k:v for k,v in value['dialogue'].items() if k!='text'}
         value['text_details']='details ui'
