@@ -20,7 +20,7 @@ The CLI returns `{ "ok": true, "result": ... }` or `{ "ok": false, "error": "...
 
 ## Read responses correctly
 
-**Read/query:** `observe` returns the observation directly inside `result`. `status --player` returns character data there. `inspect inventory` returns `result.items`, `carried_weight`, and `capacity`. `ui` returns `result.elements`.
+**Read/query:** `observe` returns the observation directly inside `result`. `status --player` returns character data there. `inspect inventory` returns a searchable page in `result.items`, plus weight/capacity; `ui` returns a searchable page in `result.elements`. Both report total/has_more. Use `--full` when every row is needed.
 
 **Most actions:** `result` contains `action`, `feedback`, and a new `observation` object. Some lifecycle/memory commands return other shapes. Do not assume every result has a nested observation.
 
@@ -64,8 +64,8 @@ In a real observation, use:
 | Value | Obtain from | Use with | Refresh rule |
 |---|---|---|---|
 | `visible_…` | `observe` → `scene.objects[].ref` | `focus`, `approach`, `interact`; actor refs also `lock`, `strike`, `cast`, `chain` | Targets must remain valid/visible. Reobserve after movement or target loss. A remembered actor is not permission to track it through walls. |
-| `item_…` | `inspect inventory` → `items[].ref` | `use-item`, `select-enchanted` | Inventory/spell queries share an ephemeral handle table. Either query replaces that table; many actions invalidate it too. Obtain the needed ref immediately before use. |
-| `spell_…` | `inspect spells` → `spells[].ref` | `select-spell` | Same rule as items. Selection remains after its handle expires. |
+| `item_…` | `inspect inventory` → `items[].ref` | `use-item`, `select-enchanted` | Stable while that instance remains owned in the same game epoch. Refresh after load/restart, removal or a changed stack. |
+| `spell_…` | `inspect spells` → `spells[].ref` | `select-spell` | Spell queries/actions can invalidate spell refs. Selection remains after its handle expires; refresh before a new selection. |
 | `ui_…` | `ui` → `elements[].ref`, or observation's `ui.elements` | `choose`, `edit`, `adjust`, `hover` | Bound to the current UI revision. Refresh after a UI change. |
 | `document_…` | `ui.document.ref` or `read` | `read --ref` | Valid only for that opened book/scroll instance. Refresh after reopening or loading. |
 | `passage_…` | `observe` → `terrain.passages[].ref` | `go` | Short-lived local sample; refresh after moving. |
@@ -100,7 +100,7 @@ Character summary includes identity, sign, level, health/magicka/fatigue, eight 
 
 `body.levitation`, `water_walking`, `water_breathing`, and `slow_fall` mean the effect is active. They do not prove that the character is airborne, on the water surface, or safe from drowning. Check `on_ground`, `swimming`, `submerged` and observed movement.
 
-Reading inventory does not open the inventory UI. `use-item` is for **owned** items; world pickups need `interact`. For fuller item descriptions, open Inventory and inspect its visible `role:item` elements; undiscovered ingredient effects remain unknown.
+Reading inventory does not open the inventory UI. `use-item` is for **owned** items; world pickups need `interact`. `inspect inventory` includes normal tooltip details, condition, charges/uses and known effects without opening the menu. Undiscovered ingredient/potion effects remain question marks.
 
 ## Menus and dialogue
 
@@ -108,7 +108,7 @@ Reading inventory does not open the inventory UI. `use-item` is for **owned** it
 |---|---|
 | `trigger NAME` | Exact allowed names: `Activate`, `ToggleWeapon`, `ToggleSpell`, `Jump`, `Inventory`, `Journal`, `GameMenu`, `Rest`. Toggle names toggle state; check current stance/menu first. |
 | `map` | Open the game's Map window; this is distinct from `atlas`. |
-| `choose UI_REF` | Invoke an enabled visible control. |
+| `choose UI_REF` | Invoke an enabled control in the currently open menu, including list rows outside the viewport. |
 | `choose "EXACT_CAPTION"` | Resolve a current caption. Prefer a ref for ambiguity; same-caption buttons are preferred over other control types. |
 | `edit UI_REF "TEXT"` | Replace a visible input's contents, up to 1000 characters. It does not press its confirmation button. |
 | `adjust UI_REF N` | Set a slider to integer position N, within its reported `slider_max`. This is a position, not an assumed percentage. |
@@ -120,7 +120,7 @@ Reading inventory does not open the inventory UI. `use-item` is for **owned** it
 
 Use named gameplay commands instead of raw clicks/keys for movement. For mouse/keyboard fallbacks, obtain a current observation first; another `observe` makes its earlier number stale. Structured `choose/edit/adjust/hover` use refs and **do not take** `--observation`.
 
-UI roles: `button`, `link`, `list_item`, `input`, `slider`, `item`, `item_slot`, `drop_target`, `text`. Respect `enabled` and modals. Check `selected` after choosing a list row. In dialogue, all currently available sidebar topics/services are exposed in `ui.dialogue.topics` and `ui.elements`, including entries outside the viewport. Use `choose` directly; scrolling is unnecessary. `ui.dialogue.text` and `ui.text` contain the complete already displayed conversation history, never responses to unselected topics. `screen_visible:false` entries have no `rect` and cannot be hovered or clicked by coordinates, but can be chosen by ref. Other lists still expose their rendered rows. Close tutorial messages through their actual controls before retrying an interaction that did not execute.
+UI roles: `button`, `link`, `list_item`, `input`, `slider`, `item`, `item_slot`, `drop_target`, `text`. Respect `enabled` and modals. Check `selected` after choosing a list row. All currently populated list rows are available independently of scrolling: dialogue topics/services, item views and ordinary selection lists. The default response is paginated; use search or `ui --full` for all rows. Full dialogue data include `ui.dialogue.topics` and `ui.elements`. Use `choose` directly; scrolling is unnecessary. `details ui` and `ui --full` contain the complete displayed conversation history; compact previews report truncation. Responses to unselected topics are not exposed. `screen_visible:false` entries have no `rect` and cannot be hovered or clicked by coordinates, but can be chosen by ref. Close tutorial messages through their actual controls before retrying an interaction that did not execute.
 
 **Dialogue:** approach/interact with a visible NPC → inspect `ui` → choose an actual topic/reply ref → read the new text → choose the game's farewell control when finished. Do not assume the window closed just because a reply was selected.
 
@@ -130,9 +130,9 @@ UI roles: `button`, `link`, `list_item`, `input`, `slider`, `item`, `item_slot`,
 
 ### Books, scrolls and manual repair
 
-Open an owned book with `use-item`, or a book in the world with `interact`. `ui.document` reports its title, kind, ref and total character count. Use `read --all` for the whole text or `read --search "TEXT"` for excerpts with offsets. For bounded replies, call `read` and continue with `read --ref DOCUMENT_REF --offset NEXT_OFFSET` until `eof:true`. Offsets count Unicode characters, not UTF-8 bytes. The text covers the whole opened document; observations carry metadata only, so long books do not overflow replies. The ref also works after turning pages. Closing/reopening the book invalidates it. `document_not_open` means no book/scroll is open; `stale_document_ref` requires a new query. Images remain available in the screenshot.
+Open an owned book with `use-item`, or a book in the world with `interact`. `ui.document` reports its title, kind, ref and total character count. Use `read` for consecutive chunks, `read --search "TEXT"` for relevant excerpts, or `read --all` when the whole text is needed. For bounded replies, call `read` and continue with `read --ref DOCUMENT_REF --offset NEXT_OFFSET` until `eof:true`. Offsets count Unicode characters, not UTF-8 bytes. The text covers the whole opened document; observations carry metadata only, so long books do not overflow replies. The ref also works after turning pages. Closing/reopening the book invalidates it. `document_not_open` means no book/scroll is open; `stale_document_ref` requires a new query. Images remain available in the screenshot.
 
-Use an owned repair hammer to open Repair. `ui.elements` includes the actual repairable rows as `role:item`, `panel:repair`, with `condition_current`, `condition_max` and the normal tooltip. Rows outside the viewport can be chosen semantically. Choosing one performs **one normal repair attempt**, consuming tool use and applying the game's skill/RNG rules. Refresh the UI after every attempt; failure is possible, and fully repaired items disappear. The `repair tool: …` slot shows the selected hammer and opens the game's tool selector when chosen. `repair "EXACT_ITEM_NAME" --attempts N --condition-pct P` repeats these normal attempts with fresh refs, stopping at the requested percentage, exhausted attempts, a changed menu, ambiguity or cancellation. Defaults are one attempt and 100%. Each attempt reports before/after condition when the row remains; fully repaired rows disappear. Identically named items require manual selection with `choose`; the helper never guesses.
+Use an owned repair hammer to open Repair. `ui.elements` includes the actual repairable rows as `role:item`, `panel:repair`, with `condition_current`, `condition_max` and the normal tooltip. Rows outside the viewport can be chosen semantically. Choosing one performs **one normal repair attempt**, consuming tool use and applying the game's skill/RNG rules. Refresh the UI after every attempt; failure is possible, and fully repaired items disappear. The `repair tool: …` slot shows the selected hammer and opens the game's tool selector when chosen. `repair "EXACT_ITEM_NAME" --attempts N --condition-pct P` repeats these normal attempts with fresh refs, stopping at the requested percentage, exhausted attempts, a changed menu, ambiguity or cancellation. Defaults are one attempt and 100%. Each attempt reports before/after condition when the row remains; fully repaired rows disappear. For identical names, pass `--instance INSTANCE` from inventory or repair rows. The helper never guesses; a removed/merged instance requires a fresh selection.
 
 ## Saves and process lifecycle
 
@@ -141,15 +141,18 @@ Use an owned repair hammer to open Repair. `ui.elements` includes the actual rep
 | `start` | Start a normal window with sound in the graphical session; preserve an already running controller. |
 | `start --display DISPLAY --recordings-dir PATH` | Optional X display/recording-directory overrides. Use the user's configured environment, not a new virtual display. |
 | `new-game` | Start the actual introduction/character-creation flow. Discards unsaved current progress. |
-| `save "DESCRIPTION"` | Create a new save slot, description 1…160 UTF-8 bytes. Only when the game permits saving. |
+| `save "DESCRIPTION"` | Create a new save slot, description 1…160 UTF-8 bytes. Returns `saved` and `total_saves`. Only when the game permits saving. |
 | `saves` | List slots with descriptions, player names and fresh refs. |
 | `load SAVE_REF` | Load that slot; unsaved progress is lost and transient refs must be refreshed. |
 | `stop` | Interrupt immediately through an independent control channel, clear inputs and pause. The interrupted command retains its elapsed time/result. Does not save or quit. |
 | `restart` | Stop/relaunch the game, normally to the menu. Does not autosave. |
 | `restart --load-latest` | Load the newest available slot after restarting; use only if that is actually desired. |
+| `autosave [--enabled/--no-enabled] [--interval S] [--slots N]` | Configure or inspect the persistent autosave ring. Default: enabled, 300 simulation seconds, three slots. Saves only at a legal paused command boundary; long actions are not forcibly paused. Failed saves are reported/deferred. Manual slots are preserved. |
+| `finish-session --description "TEXT"` | Interrupt the active command, save, finalize recording and close. Reports each stage; keeps the game open if saving or recording finalization fails. |
+| `action-result [REQUEST_ID] [--full]` | Retrieve a durable command receipt; see [information](information.md#recover-a-command-result). |
 | `shutdown` | Close controller/game and recording. Does not autosave. |
 
-One gameplay command owns the controller at a time. While it runs, use `status` or `stop`; another gameplay command returns `controller_busy_use_status_or_stop`. `status --player` reads the engine and also needs the gameplay owner. After `stop`, follow the user's requested save/record-stop/shutdown sequence.
+One gameplay command owns the controller at a time. While it runs, use `status` or `stop`; another gameplay command returns `controller_busy_use_status_or_stop`. `status --player` reads the engine and also needs the gameplay owner. For the complete save/record-stop/close request, use `finish-session`; use individual operations when the user requests only part of that lifecycle.
 
 If saving is unavailable during the tutorial or a modal UI, do not bypass it. Preserve the paused session or reach a normal save opportunity. Do not treat a developer/test slot as a legitimate gameplay start unless the user explicitly requests that scenario.
 
@@ -165,7 +168,7 @@ If saving is unavailable during the tutorial or a modal UI, do not bypass it. Pr
 
 Steps use API names with underscores: `act`, `look`, `go`, `walk`, `revisit`, `return_to`, `approach`, `interact`, `move_local`, `use_item`, `select_spell`, `select_enchanted`, `cast`, `strike`, `chain`, `wait_until`, `trigger`, `choose`, `lock`, `unlock`. Each step contains `op` plus that operation's normal fields. Item/spell selection also accepts an exact unique `name`. Every step is validated before execution; stale UI/scene refs still require stopping and reacquiring. Do not preselect replies from dialogue that has not been opened/read.
 
-Default total simulation budget is 60 seconds; it has no fixed upper cap. Remaining time limits timed steps; atomic UI operations, finite turns and individual casts/strikes finish normally and can overrun the remaining budget. A combat `chain` uses its own continuous motor deadline. `stop_on_damage` defaults to true and `stop_health_pct` to 0 (disabled). Interruptions stop the remaining sequence; already consumed items are not replayed. Only the final observation captures a screenshot. Sequence boundaries retain ordinary brief command pauses; use a combat `chain` for continuous concurrent movement/casting, and `interact --approach` for uninterrupted approach/aim/activation.
+Default total simulation budget is 60 seconds; it has no fixed upper cap. The total simulation deadline and health/damage guards are checked at dispatch and every motor frame, including long `act`, turns and individual casts/strikes. Frame timing and the final pause can add roughly a frame to the measured limit; submitted atomic UI operations cannot be undone. A combat `chain` uses its own continuous motor deadline. `stop_on_damage` defaults to true and `stop_health_pct` to 0 (disabled). Interruptions stop the remaining sequence; already consumed items are not replayed. Only the final observation captures a screenshot. Sequence boundaries retain ordinary brief command pauses; use a combat `chain` for continuous concurrent movement/casting, and `interact --approach` for uninterrupted approach/aim/activation.
 
 ## Screenshot storage
 
@@ -193,7 +196,7 @@ The timeline includes active gameplay and UI work, excludes thinking pauses, and
 | `target_locked_unlock_first`, `locked_camera` | Inspect the lock; explicitly `lock` a different visible actor or `unlock` before independent turning/navigation. |
 | `spell_failed`, unavailable magic/ammunition | Read messages, effects and own resources; change the gameplay decision. |
 | `levitation_ended`, `water_walking_ended` | Effect-dependent route stopped. Inspect support/height/water state before continuing. |
-| Controller timeout/disconnection/uncertain state | Do not automatically replay a mutation. Query status/observe after reconnecting, stop if needed, then decide whether restart/load is necessary. |
+| Controller timeout/disconnection/uncertain state | Do not automatically replay a mutation. Query `action-result REQUEST_ID` and status after reconnecting, stop if needed, then decide whether restart/load is necessary. |
 
 ### Emergency actor placement recovery
 

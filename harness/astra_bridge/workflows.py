@@ -39,16 +39,20 @@ def resolve_owned(session, op, params):
 
 def sequence(session, args):
     validate_sequence(args)
-    steps=[];elapsed=0.;reason='completed';completed=0
+    steps=[];elapsed=0.;reason='completed';completed=0;events=[]
     observation=session.observe(capture=False)
     health=observation.get('stats',{}).get('health',{}).get('current')
+    start_clock=observation.get('simulation_seconds')
+    previous_guard=getattr(session,'sequence_guard',None)
+    session.sequence_guard={'stop_on_damage':args.get('stop_on_damage',True),'stop_health_pct':args.get('stop_health_pct',0),'health':health}
+    if start_clock is not None:session.sequence_guard['deadline']=start_clock+args.get('max_seconds',60)
     session.batch_depth=getattr(session,'batch_depth',0)+1
     try:
         for index,step in enumerate(args['actions']):
             if session.control.cancelled.is_set(): reason='cancelled';break
             remaining=args.get('max_seconds',60)-elapsed
             if remaining<.02: reason='sequence_time_limit';break
-            session.control.progress({'phase':'sequence','completed_actions':completed,'total_actions':len(args['actions'])})
+            session.control.progress({'phase':'sequence','completed_actions':completed,'total_actions':len(args['actions']),'step_index':index+1,'sequence_elapsed':elapsed})
             op=step['op'];params={k:v for k,v in step.items() if k!='op'}
             minimum=.5 if op in {'go','walk','chain','revisit','return_to'} else .02
             if remaining<minimum:reason='sequence_time_limit';break
@@ -63,6 +67,9 @@ def sequence(session, args):
             a=r.get('action',{});elapsed+=a.get('elapsed',0)
             steps.append({'operation':op,**a})
             observation=r.get('observation',observation)
+            events.extend(observation.get('events',[]))
+            if start_clock is not None:elapsed=max(elapsed,observation.get('simulation_seconds',start_clock)-start_clock)
+            if a.get('reason') in {'health_low','player_hurt','sequence_time_limit'}:reason=a['reason'];break
             status=r.get('feedback',{}).get('status')
             if status in {'blocked','failed','rejected','partial','interrupted'}:
                 reason=r['feedback'].get('reason') or a.get('reason') or status;break
@@ -73,15 +80,17 @@ def sequence(session, args):
             if health is not None and h and args.get('stop_on_damage',True) and h['current']<health:
                 reason='player_hurt';break
             health=h.get('current',health)
+            session.sequence_guard['health']=health
             # A planned interaction may open UI. Other steps may not silently
             # continue into an unexpected menu or a different cell.
             if observation.get('ui_mode')!='Gameplay' and op not in {'interact','choose','trigger','use_item'}:
                 reason='ui_open';break
     finally:
         session.batch_depth-=1
+        session.sequence_guard=previous_guard
     return {'action':{'reason':reason,'elapsed':elapsed,'steps':steps,'completed_actions':completed,
                       'total_actions':len(args['actions']),'paused':True},
-            'observation':session.observe(),'feedback':{'status':'succeeded' if reason=='completed' else 'interrupted','reason':reason,'events':[]}}
+            'observation':session.observe(),'feedback':{'status':'succeeded' if reason=='completed' else 'interrupted','reason':reason,'events':events}}
 
 
 def read_document(session,args):
@@ -98,6 +107,7 @@ def read_document(session,args):
         part=session.command('read',{'ref':ref,'offset':part['next_offset'],'limit':8000})
         text+=part['text']
     result={**part,'offset':offset,'text':text}
+    if hasattr(session,'knowledge'):session.knowledge.ingest('read',result)
     if args.get('search'):
         query=args['search']
         if not isinstance(query,str) or not query:raise BridgeError('invalid_arguments')
@@ -108,7 +118,8 @@ def read_document(session,args):
 
 
 def repair(session,args):
-    if args.keys()-{'name','attempts','condition_pct'} or not isinstance(args.get('name'),str):raise BridgeError('invalid_arguments')
+    if args.keys()-{'name','attempts','condition_pct','instance'} or not isinstance(args.get('name'),str):raise BridgeError('invalid_arguments')
+    if 'instance' in args and (not isinstance(args['instance'],str) or not args['instance'].startswith('instance_')):raise BridgeError('invalid_arguments')
     attempts=args.get('attempts',1);number(attempts,1,math.inf)
     if type(attempts) is not int:raise BridgeError('invalid_arguments')
     threshold=number(args.get('condition_pct',100),0,100)
@@ -119,6 +130,7 @@ def repair(session,args):
             if session.control.cancelled.is_set():reason='cancelled';break
             ui=session.command('ui')
             rows=[e for e in ui.get('elements',[]) if e.get('panel')=='repair' and e.get('role')=='item' and e.get('text')==args['name']]
+            if args.get('instance'):rows=[e for e in rows if e.get('instance')==args['instance']]
             if not any(e.get('panel')=='repair' for e in ui.get('elements',[])):reason='repair_ui_closed';break
             if not rows:reason='item_not_in_repair_list';break
             if len(rows)!=1:reason='selection_ambiguous';break
@@ -129,6 +141,7 @@ def repair(session,args):
             r=session.call('choose',{'ref':row['ref']})
             after=session.command('ui')
             remaining=[e for e in after.get('elements',[]) if e.get('panel')=='repair' and e.get('role')=='item' and e.get('text')==args['name']]
+            if args.get('instance'):remaining=[e for e in remaining if e.get('instance')==args['instance']]
             last_condition=remaining[0].get('condition_current') if len(remaining)==1 else None
             results.append({'before':before,'after':last_condition,'reason':r.get('feedback',{}).get('reason')})
             if last_condition is not None and last_condition>=row.get('condition_max',1)*threshold/100:
@@ -144,8 +157,9 @@ def repair(session,args):
 
 
 def atlas_query(session,args):
-    if args.keys()-{'radius_m','list','space','query','page','limit','level','map','route'}:raise BridgeError('invalid_arguments')
+    if args.keys()-{'radius_m','list','space','query','page','limit','level','map','route','history'}:raise BridgeError('invalid_arguments')
     atlas=session.atlas
+    if args.get('history'):return atlas.outcome_history(args)
     if args.get('list'):return {'spaces':atlas.catalog(),'transitions':atlas.transitions()}
     session.observe(capture=False)
     if args.get('route'):
@@ -172,6 +186,23 @@ def atlas_query(session,args):
 
 
 def navigate(session,args):
+    """Try at most three different learned legs within one total action budget."""
+    total=0;steps=[];replans=0
+    budget=number(args.get('seconds',60),.02,math.inf)
+    while True:
+        try:result=_navigate_once(session,{**args,'seconds':budget-total})
+        except BridgeError as exc:
+            if not replans:raise
+            result['action']['reason']=str(exc);result['feedback'].update(status='interrupted',reason=str(exc));break
+        total+=result['action'].get('elapsed',0);steps.extend(result['action'].get('steps',[]))
+        if result['action']['reason'] not in {'blocked','no_route_progress','repeated_positions','repeated_obstruction','no_progress','no_path','known_door_not_visible','activation_unconfirmed'} or replans>=2 or budget-total<.5:break
+        if not session.atlas.route_to(args['ref']):break
+        replans+=1
+    result['action'].update(elapsed=total,steps=steps,replans=replans)
+    return result
+
+
+def _navigate_once(session,args):
     if args.keys()-{'ref','run','seconds','under_fire'} or not isinstance(args.get('ref'),str):raise BridgeError('invalid_arguments')
     budget=number(args.get('seconds',60),.02,math.inf)
     validate('go',{'ref':'waypoint_validation','seconds':max(.5,budget),
@@ -184,6 +215,7 @@ def navigate(session,args):
     try:
         for step in plan['steps']:
             if session.control.cancelled.is_set():reason='cancelled';break
+            origin={'space':session.atlas.segment,'pose':list(session.atlas.current()['pose'])}
             if step['kind']=='walk':
                 while True:
                     if session.control.cancelled.is_set():reason='cancelled';break
@@ -210,6 +242,7 @@ def navigate(session,args):
                     marker=session.command('mark',_atlas_offset=offset,_atlas_route=offsets)['ref']
                     r=session.call('go',{'ref':marker,'seconds':remaining,**{k:v for k,v in args.items() if k in {'run','under_fire'}}})
                     a=r['action'];results.append(a);elapsed+=a.get('elapsed',0)
+                    session.atlas.record_outcome(step,origin,a)
                     if a.get('reason')!='arrived':reason=a.get('reason','interrupted');break
                     if math.dist(goal,node['p'])<.04:break
                 if reason!='arrived':break
@@ -227,10 +260,12 @@ def navigate(session,args):
                 matches=[x for x in o.get('scene',{}).get('objects',[]) if x.get('kind')=='door' and x.get('name')==door.get('name')
                          and x.get('description')==door.get('description')]
                 if len(matches)!=1:
-                    reason='known_door_not_visible' if not matches else 'door_ambiguous';break
+                    reason='known_door_not_visible' if not matches else 'door_ambiguous'
+                    session.atlas.record_outcome(step,origin,{'reason':reason});break
                 r=session.call('interact',{'ref':matches[0]['ref'],'approach':True,'seconds':remaining,
                                           **{k:v for k,v in args.items() if k in {'run','under_fire'}}})
                 a=r['action'];results.append(a);elapsed+=a.get('elapsed',0)
+                session.atlas.record_outcome(step,origin,a)
                 if a.get('outcome')!='location_changed':reason='activation_unconfirmed' if a.get('reason')=='completed' else a.get('reason','activation_unconfirmed');break
                 if session.atlas.segment!=step['to_space']:reason='unexpected_location';break
     finally:session.batch_depth-=1

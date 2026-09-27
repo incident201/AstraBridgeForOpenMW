@@ -11,7 +11,7 @@ local bus = {
 }
 local controls = {}
 local object = {controls=controls, ATTACK_TYPE={NoAttack=0}, object={},cell={id='private',displayName='Room'}}
-local item = {count=2, id='SECRET_REFERENCE', position={x=99}, type={}}
+local item = {isValid=function()return true end,count=2, id='SECRET_REFERENCE', position={x=99}, type={}}
 item.type.record=function() return {name='Зелье',id='SECRET_RECORD',effects={'SECRET_EFFECT'}} end
 local bindings={}
 package.preload['openmw.camera']=function() return {getYaw=function()return 0 end,getPitch=function()return 0 end} end
@@ -42,7 +42,7 @@ package.preload['openmw.types']=function() return {
         hasEquipped=function() return false end,getEncumbrance=function() return 2 end,getCapacity=function() return 100 end},
     Player={CONTROL_SWITCH={Looking=1,Controls=2},getControlSwitch=function() return true end,
         getBirthSign=function()return 'secret_sign'end,birthSigns={records={secret_sign={name='Воин'}}},
-        getCrimeLevel=function()return 0 end,
+        getCrimeLevel=function()return 0 end,journal=function()return {journalTextEntries={}}end,
         isCharGenFinished=function() return true end},
     NPC={record=function()return {name='Test',race='secret_race',class='secret_class'}end,
         races={records={secret_race={name='Данмер'}}},classes={records={secret_class={name='Воин'}}},
@@ -55,7 +55,7 @@ package.preload['openmw.interfaces']=function() return {UI={
 package.preload['openmw.core']=function() return {
     getGMST=function(name)return name end,
     isWorldPaused=function() return paused end,
-    getRealTime=function() return now end,
+    getRealTime=function() return now end, getSimulationTime=function()return now end,
     sendGlobalEvent=function(name,data) events[#events+1]={name,data} end,
 } end
 player=require('scripts.astrabridge.player')
@@ -99,7 +99,8 @@ local old=result.items[1].ref
 local action=command('act',{move=1,seconds=.12})
 assert(not action.error and paused and controls.movement==0)
 assert(action.result.elapsed>=.12 and action.result.elapsed<.18)
-assert(command('use_item',{ref=old}).error=='stale_ref')
+assert(not command('use_item',{ref=old}).error,'owned item refs survive actions and repeated inspection')
+assert(command('inspect',{view='inventory'}).result.items[1].ref==old)
 assert(command('act',{seconds=math.huge}).error=='operation_failed' and paused)
 assert(not command('act',{seconds=.2,sneak=true}).error)
 assert(controls.sneak and bindings.Sneak(0,false),'crouch posture must survive the thinking pause')

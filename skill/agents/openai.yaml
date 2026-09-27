@@ -1,4 +1,4 @@
 interface:
   display_name: "OpenMW Gameplay"
-  short_description: "Play through AstraBridge without cheats or metagaming"
+  short_description: "Play Morrowind with navigation and persistent memory"
   default_prompt: "Use $openmw-play to play Morrowind through the configured AstraBridge harness."

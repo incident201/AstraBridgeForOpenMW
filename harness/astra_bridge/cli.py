@@ -75,6 +75,7 @@ def serve(options):
                     stopping.set()
                 else:
                     result = session.control.execute(message.get("op"), message.get("args", {}))
+                    if message.get('op')=='finish_session' and result.get('closed'):stopping.set()
                 response = {"ok": True, "result": result}
             except BridgeError as exc:
                 response = {"ok": False, "error": str(exc)}
@@ -117,11 +118,24 @@ def main():
         if name=='status':p.add_argument('--player',action='store_true')
         if name=='observe':
             p.add_argument('--no-screenshot',action='store_true');p.add_argument('--map',action='store_true')
+        if name=='ui':
+            p.add_argument('--query');p.add_argument('--page',type=int,default=0);p.add_argument('--limit',type=int,default=20)
+            p.add_argument('--panel');p.add_argument('--role')
+    p=commands.add_parser('details');p.add_argument('section');p.add_argument('--observation',type=int)
+    p.add_argument('--query');p.add_argument('--page',type=int,default=0);p.add_argument('--limit',type=int,default=20)
+    p=commands.add_parser('action-result');p.add_argument('ref',nargs='?')
+    p=commands.add_parser('autosave');p.add_argument('--enabled',action=argparse.BooleanOptionalAction,default=None)
+    p.add_argument('--interval',type=float);p.add_argument('--slots',type=int)
+    p=commands.add_parser('finish-session');p.add_argument('--description',default='Astra session end')
+    p=commands.add_parser('knowledge');p.add_argument('action',choices=['list','add','update','evidence','events'])
+    for field in ('kind','text','ref','status','evidence','quote','query'):p.add_argument('--'+field)
+    for field in ('page','limit','offset'):p.add_argument('--'+field,type=int)
     p = commands.add_parser('read', help='Read the currently open book or scroll in bounded text chunks')
     p.add_argument('--ref'); p.add_argument('--offset', type=int, default=0); p.add_argument('--limit', type=int, default=4000)
     reading=p.add_mutually_exclusive_group();reading.add_argument('--all',action='store_true');reading.add_argument('--search')
     p=commands.add_parser('repair',help='Repeat normal hammer repair in the currently open repair menu')
     p.add_argument('name');p.add_argument('--attempts',type=int,default=1);p.add_argument('--condition-pct',type=float,default=100)
+    p.add_argument('--instance')
     p = commands.add_parser('resetNPC', help='Emergency RA/ResetActors recovery of displaced actors in active cells')
     p.add_argument('--reason', required=True, help='Observed malfunction requiring this last-resort recovery')
     p = commands.add_parser("act"); p.add_argument("json", help='e.g. {"move":1,"seconds":0.4}')
@@ -133,11 +147,13 @@ def main():
     p.add_argument('--bearing-deg',type=float,default=0);p.add_argument('--meters',type=float,default=1)
     p = commands.add_parser('atlas'); p.add_argument('--radius-m',type=float,default=35)
     p.add_argument('--list', action='store_true'); p.add_argument('--space')
+    p.add_argument('--history',action='store_true')
     p.add_argument('--query');p.add_argument('--page',type=int,default=0);p.add_argument('--limit',type=int,default=20)
     p.add_argument('--level');p.add_argument('--map',action='store_true');p.add_argument('--route')
     p = commands.add_parser('revisit'); p.add_argument('ref'); p.add_argument('--run',action='store_true')
     p.add_argument('--seconds',type=float,default=60); p.add_argument('--under-fire',action='store_true')
     p = commands.add_parser("inspect"); p.add_argument("view", choices=["stats", "inventory", "spells", "journal","conversations","combat","effects","character"]); p.add_argument("--page", type=int, default=0);p.add_argument('--topic')
+    p.add_argument('--query');p.add_argument('--limit',type=int)
     for name in ('strike','cast'):
         p=commands.add_parser(name);p.add_argument('ref',nargs='?');p.add_argument('--air',action='store_true')
         if name=='strike':p.add_argument('--charge',type=float,default=.8)
@@ -152,6 +168,8 @@ def main():
     p.add_argument('--observation',type=int);p.add_argument('--ref');p.add_argument('--run',action='store_true')
     p.add_argument('--under-fire',action='store_true')
     p.add_argument('--seconds',type=float,default=8)
+    p=commands.add_parser('pick');p.add_argument('x',type=int);p.add_argument('y',type=int)
+    p.add_argument('--radius',type=float,default=0);p.add_argument('--observation',type=int,required=True)
     p=commands.add_parser('go');p.add_argument('ref');p.add_argument('--run',action='store_true');p.add_argument('--seconds',type=float,default=12)
     p.add_argument('--under-fire',action='store_true')
     p=commands.add_parser('return-to');p.add_argument('ref');p.add_argument('--run',action='store_true');p.add_argument('--seconds',type=float,default=60)
@@ -167,6 +185,7 @@ def main():
     p = commands.add_parser("trigger"); p.add_argument("name")
     p = commands.add_parser("restart"); p.add_argument("--load-latest", action="store_true")
     p=commands.add_parser('interact');p.add_argument('ref');p.add_argument('--approach',action='store_true')
+    p.add_argument('--adjust-viewpoint',action=argparse.BooleanOptionalAction,default=True)
     p.add_argument('--run',action='store_true');p.add_argument('--seconds',type=float,default=30);p.add_argument('--under-fire',action='store_true')
     p=commands.add_parser('move-local');p.add_argument('forward_m',type=float);p.add_argument('--sideways-m',type=float,default=0)
     p.add_argument('--under-fire',action='store_true')
@@ -182,7 +201,9 @@ def main():
     for name, field in (("key", "key"), ("text", "text"), ("scroll", "steps")):
         p = commands.add_parser(name); p.add_argument(field, type=int if name == "scroll" else str); p.add_argument("--observation", type=int, required=True)
     for name,command_parser in commands.choices.items():
-        if name not in {'start','serve'}:command_parser.add_argument('--full',action='store_true',default=argparse.SUPPRESS)
+        if name not in {'start','serve'}:
+            command_parser.add_argument('--full',action='store_true',default=argparse.SUPPRESS)
+            command_parser.add_argument('--request-id',default=argparse.SUPPRESS)
     options = parser.parse_args()
     try:
         if options.command == "serve":
@@ -219,8 +240,10 @@ def main():
         args={k:v for k,v in args.items() if v is not None}
         if op in {"act","chain","sequence"}:
             full=args.get('full',False)
+            request_id=args.get('request_id')
             args = json.loads(args["json"])
             if full:args['full']=True
+            if request_id:args['request_id']=request_id
         if op=='read' and not args.get('all'):args.pop('all',None)
         response = request(op, args)
         emit(response)

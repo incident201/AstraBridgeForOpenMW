@@ -35,7 +35,7 @@ local actor={stats=stats,objectIsInstance=function(o)return o==enemy end,getPath
     inventory=function()return {countOf=function()return ammo end}end,
     getSelectedSpell=function()end,getSelectedEnchantedItem=function()return ring end,activeSpells=function()return {}end}
 package.preload['openmw.types']=function()return {Actor=actor,Weapon=ranged and weaponType or nil,Player={CONTROL_SWITCH={Controls=1,Magic=2},
-    getControlSwitch=function()return true end,isCharGenFinished=function()return true end}}end
+    getControlSwitch=function()return true end,isCharGenFinished=function()return true end,journal=function()return {journalTextEntries={}}end}}end
 package.preload['openmw.storage']=function()return {playerSection=function()return bus end}end
 package.preload['openmw.self']=function()return object end
 package.preload['openmw.async']=function()return {callback=function(_,f)return f end}end
@@ -58,7 +58,7 @@ package.preload['openmw.ui']=function()return {
         unavailable_reason=charge<4 and 'insufficient_charge' or nil,cost=4,charge_current=charge}}end,
 }end
 package.preload['openmw.core']=function()return {
-    isWorldPaused=function()return paused end,getRealTime=function()return now end,
+    isWorldPaused=function()return paused end,getRealTime=function()return now end,getSimulationTime=function()return now end,
     sendGlobalEvent=function(n,d)events[#events+1]={n,d}end,
     magic={enchantments={records={private_enchantment={effects={{effect={name='Heal'},range=0,duration=1,magnitudeMin=3,magnitudeMax=3,area=0}}}}}},
 }end
@@ -107,6 +107,20 @@ local function tick()
     player.engineHandlers.onFrame(paused and 0 or .2)
 end
 player.eventHandlers.AstraReset();for _=1,10 do tick()end
+if arg[1]=='sequence_guard' then
+    data.request={session='adapter',id=1,op='act',args={seconds=50,move=1,_guard={health=50,stop_on_damage=true,deadline=now+100}}}
+    local runningFrames=0
+    for _=1,100 do
+        if not paused then runningFrames=runningFrames+1;if runningFrames==3 then health=49 end end
+        tick();if data.response then break end
+    end
+    assert(data.response and not data.response.error)
+    assert(data.response.result.reason=='player_hurt' and data.response.result.elapsed<2 and paused,
+        'damage inside a long act must pause immediately, not at the next sequence boundary')
+    assert(object.controls.movement==0 and object.controls.sideMovement==0)
+    print('Actual motor: sequence damage guard interrupts long act and clears input')
+    return
+end
 if blockedShot then
     data.request={session='adapter',id=1,op='strike',args={ref='visible_enemy'}}
     for _=1,100 do tick();if data.response then break end end

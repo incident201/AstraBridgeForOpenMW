@@ -276,3 +276,15 @@ replace('components/sdlutil/sdlgraphicswindow.cpp', '#include "sdlgraphicswindow
         '#include "sdlgraphicswindow.hpp"\n#include "astraframe.hpp"')
 replace('components/sdlutil/sdlgraphicswindow.cpp', '        SDL_GL_SwapWindow(mWindow);',
         '        AstraFrame::capture(mWindow);\n        SDL_GL_SwapWindow(mWindow);')
+
+replace('apps/openmw/mwlua/uibindings.cpp',
+    'api["_astraUiSnapshot"] = [context, windowManager](sol::this_state state) {',
+    'api["_astraUiSnapshot"] = [context, windowManager](sol::this_state state, const std::string& epoch) {\n            AstraUI::beginEpoch(epoch);')
+replace('apps/openmw/mwlua/uibindings.cpp','        api["_astraDoorDescription"]',
+'''        api["_astraOwnedItemInfo"] = [context](sol::this_state state, const LObject& object, const std::string& epoch) {
+            if (context.mType != Context::Local || !context.mLuaManager->isSynchronizedUpdateRunning())
+                throw std::runtime_error("Astra inventory requires player onFrame");
+            AstraUI::beginEpoch(epoch);
+            return AstraUI::ownedItemInfo(state,object);
+        };
+        api["_astraDoorDescription"]''')

@@ -33,7 +33,7 @@ local function saves()
         for slot, info in pairs(slots) do
             refSerial = refSerial + 1
             local ref = 'save_' .. (session or 'boot'):sub(1,8) .. '_' .. refSerial
-            refs[ref] = {dir=dir, slot=slot}
+            refs[ref] = {dir=dir, slot=slot, description=info.description}
             list[#list+1] = {ref=ref, description=info.description,
                 checkpoint_key=checkpointKey(dir,slot),
                 time_played_seconds=info.timePlayed,
@@ -58,8 +58,10 @@ local function dispatch(cmd)
             reply(cmd, nil, 'save_unavailable'); return
         end
         assert(type(cmd.args.description) == 'string' and #cmd.args.description <= 160)
-        -- Omitting slotName creates a new save; never overwrites an existing one.
-        menu.saveGame(cmd.args.description)
+        local target=cmd.args._replace_ref and refs[cmd.args._replace_ref]
+        if cmd.args._replace_ref and (not target or target.dir~=menu.getCurrentSaveDir() or target.description~=cmd.args.description
+            or not target.description:match('^Astra auto %x+ %d+$')) then reply(cmd,nil,'stale_save_ref');return end
+        menu.saveGame(cmd.args.description,target and target.slot or nil)
         reply(cmd, {saves=saves()})
     elseif cmd.op == 'new_game' or cmd.op == 'load' then
         local target

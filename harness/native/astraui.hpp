@@ -37,16 +37,33 @@
 #include <algorithm>
 #include <functional>
 #include <sstream>
+#include <map>
+#include <components/esm3/loadrepa.hpp>
+#include "astracombat.hpp"
+#include "../mwmechanics/magiceffects.hpp"
 
 namespace MWLua::AstraUI
 {
+    inline std::map<MWWorld::Ptr, std::uint64_t> itemInstances;
+    inline std::uint64_t itemSerial = 0;
+    inline std::string itemEpoch;
+    inline void beginEpoch(const std::string& epoch)
+    {
+        if (epoch!=itemEpoch) { itemInstances.clear(); itemEpoch=epoch; }
+    }
+    inline std::string itemIdentity(const MWWorld::Ptr& ptr)
+    {
+        auto [it, inserted]=itemInstances.try_emplace(ptr,0);
+        if (inserted) it->second=++itemSerial;
+        return std::to_string(it->second);
+    }
     struct Entry
     {
         std::string text, role;
         MyGUI::IntRect rect;
         bool enabled = false;
         std::function<void()> action;
-        std::string panel, description, unavailableReason;
+        std::string panel, description, unavailableReason, instance;
         int count = 0;
         int conditionCurrent = -1, conditionMax = -1;
         bool equipped = false, pendingTrade = false;
@@ -114,8 +131,7 @@ namespace MWLua::AstraUI
     inline void visit(MyGUI::Widget* w, MyGUI::IntRect clip, MyGUI::Widget* modalRoot,
         MWBase::WindowManager* wm, Snapshot& out, int depth=0)
     {
-        if (!w || depth>30 || !w->getInheritedVisible() || w->getAlpha()<=0
-            || (out.entries.size()>1500 && !inDialogue(w,wm))) return;
+        if (!w || depth>30 || !w->getInheritedVisible() || w->getAlpha()<=0) return;
         const std::string document(w->getUserString("AstraDocumentBody"));
         if (!document.empty())
         {
@@ -134,7 +150,7 @@ namespace MWLua::AstraUI
         if (empty(clip)) return;
         const bool enabled=w->getInheritedEnabled() && (!out.modal || root(w)==modalRoot)
             && w->getUserString("AstraUnavailableReason").empty();
-        if (auto* list=w->castType<Gui::MWList>(false); list && inDialogue(w,wm))
+        if (auto* list=w->castType<Gui::MWList>(false))
         {
             // The current dialogue's already populated sidebar, including services.
             // No dialogue database or response lookup: scrolling is presentation only.
@@ -147,7 +163,7 @@ namespace MWLua::AstraUI
                 const auto rect=intersection(clip,item->getAbsoluteRect());
                 Entry e{plain(item->getCaption()),"button",rect,
                     enabled && item->getInheritedEnabled(),[item]{item->eventMouseButtonClick(item);}};
-                e.panel="dialogue_topics";
+                e.panel=inDialogue(w,wm)?"dialogue_topics":"list";
                 e.screenVisible=!empty(rect);
                 out.entries.push_back(std::move(e));
             }
@@ -177,21 +193,19 @@ namespace MWLua::AstraUI
         }
         if (auto* list=w->castType<MyGUI::ListBox>(false))
         {
-            // Read only rows currently rendered in the scrollable UI, never
-            // attached record IDs or offscreen list entries.
-            for (std::size_t i=0;i<list->getItemCount() && out.entries.size()<1500;++i)
+            // All rows populated in this OPEN list. Scrolling changes only presentation.
+            for (std::size_t i=0;i<list->getItemCount();++i)
             {
-                if (!list->isItemVisibleAt(i)) continue;
-                auto* item=list->getWidgetByIndex(i);
-                if (!item || !item->getInheritedVisible()) continue;
-                auto rect=intersection(clip,item->getAbsoluteRect());
-                if (empty(rect)) continue;
+                MyGUI::IntRect rect{};
+                if (list->isItemVisibleAt(i))
+                    if (auto* item=list->getWidgetByIndex(i)) rect=intersection(clip,item->getAbsoluteRect());
                 Entry e{plain(list->getItemNameAt(i)),"list_item",rect,enabled,[list,i] {
                     list->setIndexSelected(i);
                     list->eventListChangePosition(list,i);
                     list->eventListMouseItemActivate(list,i);
                 }};
                 e.selected=list->getIndexSelected()==i;
+                e.screenVisible=!empty(rect);
                 out.entries.push_back(std::move(e));
             }
             return;
@@ -210,6 +224,7 @@ namespace MWLua::AstraUI
                     enabled && icon->getInheritedEnabled(),[icon]{icon->eventMouseButtonClick(icon);}};
                 e.panel=wm->containsMode(MWGui::GM_Repair)?"repair":"recharge";
                 e.count=ptr->getCellRef().getCount();
+                e.instance=itemIdentity(*ptr);
                 const auto player=MWBase::Environment::get().getWorld()->getPlayerPtr();
                 e.equipped=player.getClass().getInventoryStore(player).isEquipped(*ptr);
                 e.description=plain(MyGUI::LanguageManager::getInstance().replaceTags(cls.getToolTipInfo(*ptr,e.count).text));
@@ -234,10 +249,39 @@ namespace MWLua::AstraUI
                 area.panel=panel;
                 out.entries.push_back(std::move(area));
             }
-            // MyGUI skin children are absent from Widget::getEnumerator().
-            auto* scroll=view->astraScrollView();
-            if (scroll) for (std::size_t i=0;i<scroll->getChildCount();++i)
-                visit(scroll->getChildAt(i),intersection(clip,scroll->getAbsoluteRect()),modalRoot,wm,out,depth+1);
+            // The model belongs to this currently opened and filtered item view.
+            // Its normal event delegate performs the same trade/use action as a click.
+            auto* model=view->getModel();
+            if (model) for (std::size_t i=0;i<model->getItemCount();++i)
+            {
+                const auto item=model->getItem(static_cast<MWGui::ItemModel::ModelIndex>(i));
+                if (item.mBase.isEmpty()) continue;
+                const auto& cls=item.mBase.getClass();
+                Entry e{std::string(cls.getName(item.mBase)),"item",{},enabled,[view,i]{
+                    view->eventItemClicked(static_cast<MWGui::ItemModel::ModelIndex>(i));
+                }};
+                e.panel=panel;e.count=static_cast<int>(item.mCount);
+                e.instance=itemIdentity(item.mBase);
+                e.equipped=item.mType==MWGui::ItemStack::Type_Equipped;
+                e.pendingTrade=item.mType==MWGui::ItemStack::Type_Barter;
+                e.description=plain(MyGUI::LanguageManager::getInstance().replaceTags(cls.getToolTipInfo(item.mBase,e.count).text));
+                if (cls.hasItemHealth(item.mBase))
+                { e.conditionCurrent=cls.getItemHealth(item.mBase);e.conditionMax=cls.getItemMaxHealth(item.mBase); }
+                e.screenVisible=false;
+                auto* scroll=view->astraScrollView();
+                if (scroll && scroll->getChildCount())
+                {
+                    auto* area=scroll->getChildAt(0);
+                    for (std::size_t j=0;j<area->getChildCount();++j)
+                    {
+                        auto* icon=area->getChildAt(j);
+                        auto* data=icon->getUserData<std::pair<MWGui::ItemModel::ModelIndex,MWGui::ItemModel*>>(false);
+                        if (data && data->second==model && data->first==static_cast<MWGui::ItemModel::ModelIndex>(i))
+                        { e.rect=intersection(clip,icon->getAbsoluteRect());e.screenVisible=!empty(e.rect);break; }
+                    }
+                }
+                out.entries.push_back(std::move(e));
+            }
             return;
         }
         if (w->isType<MWGui::ItemWidget>() && w->getUserString("ToolTipType")=="ItemModelIndex")
@@ -455,7 +499,7 @@ namespace MWLua::AstraUI
         feed(out.documentRef);
         for (const auto& e:out.entries)
         {
-            feed(e.role); feed(e.text);
+            feed(e.role); feed(e.text); feed(e.instance);
             feed(std::to_string(e.rect.left)+","+std::to_string(e.rect.top)+","+std::to_string(e.rect.right)+","+std::to_string(e.rect.bottom));
             feed(e.enabled?"on":"off");
             feed(e.screenVisible?"visible":"offscreen");
@@ -503,6 +547,7 @@ namespace MWLua::AstraUI
             if (e.role=="item" || e.role=="item_slot")
             {
                 row["count"]=e.count;row["description"]=e.description;
+                if (!e.instance.empty()) row["instance"]=e.instance;
                 row["equipped"]=e.equipped;row["pending_trade"]=e.pendingTrade;
                 if (e.conditionCurrent>=0)
                 { row["condition_current"]=e.conditionCurrent; row["condition_max"]=e.conditionMax; }
@@ -545,6 +590,60 @@ namespace MWLua::AstraUI
         result["sneaking"]=mechanics->isSneaking(player);
         result["submerged"]=world->isSubmerged(player);
         return result;
+    }
+    inline sol::table ownedItemInfo(sol::this_state state, const LObject& object)
+    {
+        sol::table out(sol::state_view(state),sol::create);
+        const auto ptr=object.ptr();
+        const auto player=MWBase::Environment::get().getWorld()->getPlayerPtr();
+        auto& inventory=player.getClass().getInventoryStore(player);
+        bool owned=false;
+        for (auto it=inventory.begin();it!=inventory.end();++it) if (*it==ptr) { owned=true;break; }
+        if (!owned) return out;
+        const auto& cls=ptr.getClass();
+        out["instance"]=itemIdentity(ptr);
+        const auto tooltip=cls.getToolTipInfo(ptr,ptr.getCellRef().getCount());
+        out["description"]=plain(MyGUI::LanguageManager::getInstance().replaceTags(tooltip.text));
+        auto effects=tooltip.effects;
+        if (cls.hasItemHealth(ptr))
+        { out["condition_current"]=cls.getItemHealth(ptr);out["condition_max"]=cls.getItemMaxHealth(ptr); }
+        if (ptr.getType()==ESM::Repair::sRecordId || ptr.getType()==ESM::Lockpick::sRecordId || ptr.getType()==ESM::Probe::sRecordId)
+            out["uses_remaining"]=cls.getItemHealth(ptr);
+        const auto enchantment=cls.getEnchantment(ptr);
+        if (!enchantment.empty())
+        {
+            const auto* record=MWBase::Environment::get().getESMStore()->get<ESM::Enchantment>().find(enchantment);
+            effects=MWGui::Widgets::MWEffectList::effectListFromESM(&record->mEffects);
+            const float capacity=MWMechanics::getEnchantmentCharge(*record);
+            const float charge=ptr.getCellRef().getEnchantmentCharge();
+            if (record->mData.mType==ESM::Enchantment::WhenUsed || record->mData.mType==ESM::Enchantment::WhenStrikes)
+            { out["charge_current"]=charge<0?capacity:charge;out["charge_max"]=capacity; }
+        }
+        if (!effects.empty())
+        {
+            sol::table list(sol::state_view(state),sol::create);
+            const auto& store=*MWBase::Environment::get().getESMStore();
+            int index=0;
+            for (const auto& effect:effects)
+            {
+                sol::table row(sol::state_view(state),sol::create);
+                if (!effect.mKnown || effect.mEffectID.empty()) row["name"]="?";
+                else
+                {
+                    row["name"]=MWMechanics::getMagicEffectString(*store.get<ESM::MagicEffect>().find(effect.mEffectID),
+                        store.get<ESM::Attribute>().search(effect.mAttribute),store.get<ESM::Skill>().search(effect.mSkill));
+                    if (!tooltip.isIngredient)
+                    {
+                        if (effect.mMagnMin>=0) row["magnitude_min"]=effect.mMagnMin;
+                        if (effect.mMagnMax>=0) row["magnitude_max"]=effect.mMagnMax;
+                        if (effect.mDuration>=0) row["duration"]=effect.mDuration;
+                    }
+                }
+                list[++index]=row;
+            }
+            out["effects"]=list;
+        }
+        return out;
     }
     inline std::string doorDescription(const LObject& object)
     {

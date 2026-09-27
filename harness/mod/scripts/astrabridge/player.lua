@@ -26,6 +26,8 @@ local bus = storage.playerSection('AstraBridge')
 local A, Player = types.Actor, types.Player
 local Terrain=A.getPathfindingAgentBounds and require('scripts.astrabridge.terrain')
 local refs, serial, epoch = {}, 0, 0
+local ownedRefs={}
+local Guards=require('scripts.astrabridge.guards')
 local requestKey, pending, active
 local pauseSerial, pauseAck, settle = 0, -1, 0
 local ready = false
@@ -69,11 +71,14 @@ local function plain(text) return (text:gsub('@(.-)#','%1')) end
 local function namespace()return (bus:get('session') or 'test'):sub(1,8)..'_'..epoch end
 local function uiState()
     if not ui._astraUiSnapshot then return {supported=false,elements=P.array()} end
-    local result=ui._astraUiSnapshot();result.supported=true
+    local result=ui._astraUiSnapshot(namespace());result.supported=true
     result.blocked=result.revision=='non_gameplay_ui'
     result.revision=namespace()..'_'..result.revision
     if result.document then result.document.ref='document_'..namespace()..'_'..result.document.ref:sub(10) end
-    for _,e in ipairs(result.elements) do e.ref='ui_'..namespace()..'_'..e.ref:sub(4) end
+    for _,e in ipairs(result.elements) do
+        e.ref='ui_'..namespace()..'_'..e.ref:sub(4)
+        if e.instance then e.instance='instance_'..namespace()..'_'..e.instance end
+    end
     local notices={sMagicSkillFail='spell_failed',sLockSuccess='lock_opened',sLockFail='lock_failed',
         sLockImpossible='lock_impossible',sTrapSuccess='trap_disarmed',sTrapFail='trap_failed'}
     if I.UI.getMode()=='Alchemy' then
@@ -112,12 +117,18 @@ local function uiState()
     return result
 end
 local function ref(value, kind)
+    if kind=='item' and ownedRefs[value.id] and refs[ownedRefs[value.id]] then return ownedRefs[value.id] end
     serial = serial + 1
     local id = kind .. '_' .. namespace() .. '_' .. serial
     refs[id] = {value=value, kind=kind}
+    if kind=='item' then ownedRefs[value.id]=id end
     return id
 end
-local function invalidate() refs = {} end
+local function invalidate()
+    local kept={}
+    for id,r in pairs(refs) do if r.kind=='item' and r.value:isValid() then kept[id]=r end end
+    refs=kept
+end
 local function stats(detailed)
     local out = {}
     if not windowAllowed('Stats') then return out end
@@ -256,6 +267,15 @@ local function observation(args)
         epoch=epoch, frame=lastFrame, stats=stats(), available=P.array(), text_source='screenshot',
         orientation=Scene.orientation(),location=Space.label(self.cell,core.regions and core.regions.records),ui=uiState(),target_lock=lockState(),messages=uiMessages}
     if out.ui.supported then out.text_source='native_ui' end
+    out.simulation_seconds=core.getSimulationTime()
+    if windowAllowed('Inventory') then
+        out._inventory_counts={}
+        for _,obj in ipairs(A.inventory(self):getAll()) do
+            local name=obj.type.record(obj).name
+            out._inventory_counts[name]=(out._inventory_counts[name] or 0)+obj.count
+        end
+    end
+    if windowAllowed('Magic') then out.journal_count=#Player.journal(self).journalTextEntries end
     out.body=bodyState()
     out.trajectory=Trajectory.report(args and args._trail_after,args and args._trail_segment)
     out._atlas_frame=Trajectory.frame()
@@ -306,6 +326,12 @@ local function inspect(args)
             local rec = obj.type.record(obj)
             items[#items+1] = {ref=ref(obj, 'item'), name=rec.name,
                 count=obj.count, equipped=A.hasEquipped(self, obj)}
+            local row=items[#items]
+            for _,kind in ipairs({'Weapon','Armor','Clothing','Book','Potion','Ingredient','Apparatus','Repair','Lockpick','Probe','Light','Miscellaneous'}) do
+                if types[kind] and types[kind].objectIsInstance(obj) then row.kind=kind:lower();break end
+            end
+            if ui._astraOwnedItemInfo then for k,v in pairs(ui._astraOwnedItemInfo(obj,namespace())) do row[k]=v end end
+            if row.instance then row.instance='instance_'..namespace()..'_'..row.instance end
         end
         return {items=items, carried_weight=round(A.getEncumbrance(self)), capacity=round(A.getCapacity(self))}
     elseif args.view == 'spells' then
@@ -644,6 +670,8 @@ end
 
 local function dispatch(cmd)
     local op, args = cmd.op, cmd.args
+    local guardReason=Guards.check(args._guard,core.getSimulationTime(),A.stats and A.stats.dynamic and A.stats.dynamic.health(self))
+    if guardReason then pause(cmd,{paused=true,reason=guardReason,elapsed=0});return end
     if (op=='chain' or op=='strike' or op=='cast') and not windowAllowed('Stats') then
         -- Combat result resource deltas are not available before the tutorial
         -- grants the stat interface. Timed waiting remains possible with act.
@@ -682,6 +710,9 @@ local function dispatch(cmd)
         if I.UI.getMode() then pause(cmd,nil,'ui_open');return end
         if not Terrain then pause(cmd,nil,'action_unavailable');return end
         pause(cmd,{ref=Terrain.mark(args._atlas_offset,args._atlas_route)})
+    elseif op=='pick' then
+        if I.UI.getMode() then pause(cmd,nil,'ui_open');return end
+        pause(cmd,Scene.pick(args.x,args.y,args.radius or 0))
     elseif op=='ground' then
         if I.UI.getMode() then pause(cmd,nil,'ui_open');return end
         pause(cmd,{ground_targets=Scene.groundTargets()})
@@ -1061,6 +1092,17 @@ local function stopMovement()
     self.controls.movement=0;self.controls.sideMovement=0
 end
 
+local function adjustViewpoint(p)
+    if not p.interact or p.cmd.args.adjust_viewpoint==false or not Terrain or not A.isOnGround(self) then return false end
+    p.viewpointAttempts=(p.viewpointAttempts or 0)+1
+    if p.viewpointAttempts>2 then return false end
+    local side=p.viewpointAttempts==1 and -math.pi/2 or math.pi/2
+    local probe=Terrain.probe(camera.getYaw()+side,.4)
+    if probe.obstacle or probe.distance<24 or math.abs(probe.vertical)>15 or not Terrain.walkLine(self.position,probe.point) then return false end
+    p.viewpointGoal=probe.point;p.viewpointStart=p.elapsed
+    stopMovement();return true
+end
+
 local function driveEvasion(p,g,dt)
     if not p.evade then stopMovement();return end
     local delta=self.position-p.evadePosition
@@ -1370,6 +1412,11 @@ local function onFrame(dt)
                 if p.navigator then progress.navigation=require('scripts.astrabridge.navigation').report(p.navigator) end
                 P.emit({version=1,session=bus:get('session'),event='progress',result=progress})
             end
+            local guardReason=Guards.check(p.cmd.args._guard,core.getSimulationTime(),A.stats and A.stats.dynamic and A.stats.dynamic.health(self))
+            if guardReason then
+                if p.combat then finishCombat(p,guardReason) else pause(p.cmd,{paused=true,reason=guardReason,elapsed=p.elapsed}) end
+                return
+            end
             local damage=0
             if p.lastHealth then
                 local health=ownHealth();damage=p.lastHealth-health;p.lastHealth=health
@@ -1397,6 +1444,18 @@ local function onFrame(dt)
                 if p.pausedFrames >= 3 then pause(p.cmd,{paused=true,elapsed=p.elapsed,reason='game_paused'}) end
             elseif not core.isWorldPaused() then
                 p.pausedFrames = 0
+                if p.viewpointGoal then
+                    local d=p.viewpointGoal-self.position
+                    p.elapsed=p.elapsed+dt
+                    if d:length()<4 then p.viewpointGoal=nil;stopMovement();return end
+                    if p.elapsed-p.viewpointStart>1.5 or p.elapsed>=p.seconds or Terrain.contact(self.position,p.viewpointGoal) then
+                        pause(p.cmd,{paused=true,reason='viewpoint_blocked'});return
+                    end
+                    local y=camera.getYaw();local scale=math.min(1,d:length()/35)
+                    active.move=scale*(d.x*math.sin(y)+d.y*math.cos(y))/math.max(1,d:length())
+                    active.strafe=scale*(d.x*math.cos(y)-d.y*math.sin(y))/math.max(1,d:length())
+                    return
+                end
                 local lockGoal
                 if targetLock and targetLock.status~='down' then
                     lockGoal=lockedTarget()
@@ -1461,12 +1520,10 @@ local function onFrame(dt)
                             *require('scripts.astrabridge.navigation').clearance(p.navigator,waypoint) or 0
                         if active.move==0 then stopMovement() end
                         p.elapsed=p.elapsed+dt
-                        if (self.position-p.progressPosition):length()>3 or math.abs(Scene.angle(yaw-camera.getYaw()))>=math.rad(turnTolerance) then
-                            p.progressPosition=self.position;p.progressTime=p.elapsed
-                        end
-                        if p.elapsed-p.progressTime>1.1 then
-                            if require('scripts.astrabridge.navigation').recover(p.navigator,yaw) then p.progressTime=p.elapsed;p.progressPosition=self.position
-                            else pause(p.cmd,{paused=true,reason='blocked'});return end
+                        local stall=N.stalled(p.navigator,p.elapsed)
+                        if stall then
+                            if N.recover(p.navigator,yaw) then require('scripts.astrabridge.progress').recover(p.navigator,p.elapsed)
+                            else pause(p.cmd,{paused=true,reason=p.navigator.failureReason or 'blocked'});return end
                         end
                         if p.elapsed>=(p.maxSeconds or 8) then pause(p.cmd,{paused=true,reason='step_limit'});return end
                         return
@@ -1500,6 +1557,7 @@ local function onFrame(dt)
                             else pause(p.cmd,{paused=true,reason='within_reach'});return end
                         end
                         if p.kind=='focus' and math.abs(pitch)>math.rad(80) then
+                            if adjustViewpoint(p) then return end
                             pause(p.cmd,{paused=true,reason='viewpoint_adjustment_needed'});return
                         end
                         if p.navigator then
@@ -1535,10 +1593,17 @@ local function onFrame(dt)
                         active.attack=p.attack and (Scene.combatAligned and Scene.combatAligned(aimTarget) or aimed)
                         if p.elapsed>=p.seconds then finishStep(p,{paused=true,reason='tracked',elapsed=p.elapsed});return end
                     end
+                    if p.kind=='focus' and not aimed and p.elapsed>1 and math.abs(ye)<math.rad(1) and math.abs(pe)<math.rad(1) then
+                        if adjustViewpoint(p) then return end
+                        pause(p.cmd,{paused=true,reason='target_obstructed'});return
+                    end
                     if p.kind=='focus' and aimed and not (p.waitReady and Scene.lootReady(aimTarget)==false) then
                         if p.interact then
                             if not Scene.reach(aimTarget) then pause(p.cmd,{paused=true,reason='out_of_reach'});return end
-                            if not Scene.crosshair(aimTarget) then pause(p.cmd,{paused=true,reason='target_not_aimed'});return end
+                            if not Scene.crosshair(aimTarget) then
+                                if adjustViewpoint(p) then return end
+                                pause(p.cmd,{paused=true,reason='target_not_aimed'});return
+                            end
                             if not ui._astraActivate then pause(p.cmd,nil,'native_ui_unavailable');return end
                             p.expected={cell=Space.key(self.cell)}
                             if types.Item and types.Item.objectIsInstance(aimTarget.obj) then
@@ -1560,12 +1625,16 @@ local function onFrame(dt)
                     end
                     if active.move==0 and active.strafe==0 then stopMovement() end
                     p.elapsed=p.elapsed+dt
-                    if (self.position-p.progressPosition):length()>3 or (math.abs(ye)>math.rad(20) and p.kind~='move_local') then
-                        p.progressPosition=self.position;p.progressTime=p.elapsed
-                    end
-                    if p.kind~='focus' and p.kind~='track' and p.elapsed-p.progressTime>1.1 then
-                        if p.navigator and require('scripts.astrabridge.navigation').recover(p.navigator,yaw) then p.progressTime=p.elapsed;p.progressPosition=self.position
-                        else pause(p.cmd,{paused=true,reason='blocked'});return end
+                    if p.kind~='focus' and p.kind~='track' then
+                        local N=require('scripts.astrabridge.navigation')
+                        local stall
+                        if p.navigator then stall=N.stalled(p.navigator,p.elapsed)
+                        elseif p.destination then stall=require('scripts.astrabridge.progress').update(p,p.elapsed,
+                            (p.destination-self.position):length(),self.position.x,self.position.y,self.position.z) end
+                        if stall then
+                            if p.navigator and N.recover(p.navigator,yaw) then require('scripts.astrabridge.progress').recover(p.navigator,p.elapsed)
+                            else pause(p.cmd,{paused=true,reason=stall});return end
+                        end
                     end
                     if p.kind~='track' and p.elapsed>p.seconds then pause(p.cmd,{paused=true,reason='step_limit'});return end
                     return
@@ -1657,6 +1726,7 @@ local function reset()
     bus:set('request',nil)
     bus:set('response',nil)
     ready, requestKey,targetLock = false, nil,nil
+    refs={};ownedRefs={}
     routes={}
     walkingRoute=nil
     pausedSneak=false

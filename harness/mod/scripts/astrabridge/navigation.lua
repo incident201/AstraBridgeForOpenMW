@@ -302,7 +302,8 @@ end
 function M.report(n)
     local out={status=n.status,replans=n.replans,recovery_count=n.recoveryCount or 0,blocked_by=n.blockedBy,
         source=n.recorded and 'recorded_trail' or n.localPath and 'local_collision' or 'navmesh',reason=n.failureReason or n.fallbackReason,
-        standing_point=n.standingPoint or false}
+        standing_point=n.standingPoint or false,waypoint=n.index,waypoints=n.path and #n.path,
+        stalled_seconds=n.stalledSeconds and math.floor(n.stalledSeconds*10)/10}
     if n.goal then
         out.goal_distance_m=math.floor(horizontal(n.goal-self.position)/70*100+.5)/100
         out.goal_height_change_m=math.floor((n.goal.z-self.position.z)/70*100+.5)/100
@@ -315,6 +316,17 @@ function M.report(n)
         out.remaining_m=math.floor(length/70*100+.5)/100
     end
     return out
+end
+function M.stalled(n,elapsed)
+    if not n.path then return nil end
+    local length=0;local previous=self.position
+    for i=n.index,#n.path do length=length+(n.path[i]-previous):length();previous=n.path[i] end
+    -- A new native plan has a different length. Keep the bounded recovery count.
+    if n.progressPath~=n.path then n.progress=nil;n.progressPath=n.path end
+    local reason=require('scripts.astrabridge.progress').update(n,elapsed,length,self.position.x,self.position.y,self.position.z)
+    if reason then n.failureReason=reason
+    elseif (n.stalledSeconds or 0)<.1 then n.failureReason=nil end
+    return reason
 end
 -- Lua input reaches physics on a later frame. Slow down before short segments,
 -- especially on the low-FPS software renderer, instead of overshooting and turning back.

@@ -102,6 +102,7 @@ LEAF_KEYS = {
     "view_mode",
     "screen_visible",
     "title", "characters", "offset", "next_offset", "eof", "scope", "phase", "standing_point",
+    "simulation_seconds", "journal_count", "instance", "waypoint", "waypoints", "progress_m", "stalled_seconds",
 }
 DICT_KEYS = {"stats", "attributes", "health", "magicka", "fatigue", "observation", "orientation", "scene", "ui", "motion", "movement", "target_lock", "body", "navigation", "combat", "weapon_info", "castable", "resources", "changes", "terrain", "trajectory"}
 LIST_KEYS = {"items", "spells", "entries", "saves", "available", "objects", "actions", "skills", "topics", "elements", "messages", "effects", "steps", "rays", "passages", "samples", "ground_targets"}
@@ -186,7 +187,8 @@ def validate(op: str, args: dict) -> None:
         "read": {"ref", "offset", "limit"}, "resetNPC": {"reason"},
         "act": {"seconds", "move", "strafe", "yaw", "pitch", "attack", "run", "sneak", "trigger", "target"},
         "look":{"heading_deg","pitch_deg"},
-        "ui":set(),"map":set(),"choose":{"ref"},"focus":{"ref","wait_ready"},"approach":{"ref","reach","run","under_fire","seconds"},"interact":{"ref","approach","run","seconds","under_fire"},
+        "ui":set(),"map":set(),"choose":{"ref"},"focus":{"ref","wait_ready"},"approach":{"ref","reach","run","under_fire","seconds"},"interact":{"ref","approach","run","seconds","under_fire","adjust_viewpoint"},
+        "pick":{"x","y","radius","observation"},
         "walk":{"x","y","ref","observation","run","under_fire","seconds"},
         "survey":set(),"ground":set(),"mark":set(),"go":{"ref","run","seconds","under_fire"},
         "evade":{"direction","ref","meters","seconds","run","actions"},
@@ -201,9 +203,14 @@ def validate(op: str, args: dict) -> None:
     }
     if op not in fields or args.keys() - fields[op]:
         raise BridgeError("invalid_arguments")
+    if op=='pick':
+        for key in ('x','y'):number(args.get(key),0,16383)
+        number(args.get('radius',0),0,160)
+        if type(args.get('observation')) is not int:raise BridgeError('invalid_arguments')
     if op in {'approach','interact','move_local','walk','wait_until'}:
         if 'seconds' in args:number(args['seconds'],.02,math.inf)
     if op=='interact' and 'approach' in args and type(args['approach']) is not bool:raise BridgeError('invalid_arguments')
+    if op=='interact' and 'adjust_viewpoint' in args and type(args['adjust_viewpoint']) is not bool:raise BridgeError('invalid_arguments')
     if op=='wait_until':
         if args.get('condition') not in {'fatigue','animation','passage','ui'}:raise BridgeError('invalid_arguments')
         number(args.get('percent',100),0,100)

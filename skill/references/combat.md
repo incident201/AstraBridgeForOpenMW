@@ -13,7 +13,7 @@ All commands below are prefixed with `./astra`. References come from actual obse
 | `trigger ToggleSpell` | Enter/leave spell stance. Controlled `cast` normally handles preparation itself. |
 | `inspect combat` | Read selected attack/cast details: reach, condition, ammunition, cost, availability, charge and effects. |
 
-Selection/use invalidates ephemeral item/spell handles. The selection itself persists, so `select-spell SPELL_REF` followed by `cast` is valid. Do not retain an old item ref across unrelated actions; reacquire it from inventory. `status --player` is safe for a quick read without invalidating handles.
+Item refs remain valid across ordinary actions while the same instance stays owned. Spell refs can expire after queries/actions; the selection itself persists, so `select-spell SPELL_REF` followed by `cast` is valid. Refresh an item after removal/merging or load/restart. `status --player` is safe for a quick read without invalidating handles.
 
 ## Target lock and one use
 

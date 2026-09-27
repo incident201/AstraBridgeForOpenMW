@@ -53,12 +53,14 @@ def test_screenshot_cache_preserves_explicit_notes_and_unrelated_files(tmp_path)
     assert len(list(tmp_path.glob('*-atlas.svg')))==8
 
 
-def test_compact_ui_preserves_all_dialogue_and_available_topics():
+def test_compact_ui_bounds_preview_and_preserves_explicit_access_to_full_text():
     text='Полный ответ. '*2000
     obs={'observation':1,'ui_mode':'Dialogue','ui':{'dialogue':{'text':text,'topics':[{'text':'Тема'}]},
           'elements':[{'role':'button','text':'Тема','ref':'ui_1','screen_visible':False,'enabled':True}]}}
     result=compact(obs)
-    assert result['ui']['dialogue']['text']==text
+    assert result['ui']['dialogue']['text']==text[:1600]
+    assert result['ui']['text_has_more'] and result['ui']['text_characters']==len(text)
+    assert present_response(obs,full=True)['ui']['dialogue']['text']==text
     assert result['ui']['elements'][0]['ref']=='ui_1'
 
 

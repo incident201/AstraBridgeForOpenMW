@@ -111,13 +111,20 @@ namespace MWLua
         MWBase::WindowManager* windowManager = MWBase::Environment::get().getWindowManager();
 
         sol::table api(lua, sol::create);
-        api["_astraUiSnapshot"] = [context, windowManager](sol::this_state state) {
+        api["_astraUiSnapshot"] = [context, windowManager](sol::this_state state, const std::string& epoch) {
+            AstraUI::beginEpoch(epoch);
             if (!context.mLuaManager->isSynchronizedUpdateRunning()) throw std::runtime_error("Astra UI requires onFrame");
             return AstraUI::observe(state, windowManager);
         };
         api["_astraUiChoose"] = [context, windowManager](const std::string& ref) {
             if (!context.mLuaManager->isSynchronizedUpdateRunning()) throw std::runtime_error("Astra UI requires onFrame");
             return AstraUI::choose(windowManager, ref);
+        };
+        api["_astraOwnedItemInfo"] = [context](sol::this_state state, const LObject& object, const std::string& epoch) {
+            if (context.mType != Context::Local || !context.mLuaManager->isSynchronizedUpdateRunning())
+                throw std::runtime_error("Astra inventory requires player onFrame");
+            AstraUI::beginEpoch(epoch);
+            return AstraUI::ownedItemInfo(state,object);
         };
         api["_astraDoorDescription"] = [context](const LObject& object) {
             if (context.mType != Context::Local || !context.mLuaManager->isSynchronizedUpdateRunning())

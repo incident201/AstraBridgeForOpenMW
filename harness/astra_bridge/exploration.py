@@ -35,6 +35,7 @@ class ExplorationAtlas(AtlasRoutes):
             CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS checkpoints (key TEXT PRIMARY KEY, payload TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS transitions (key TEXT PRIMARY KEY, profile TEXT NOT NULL, payload TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS route_outcomes (id INTEGER PRIMARY KEY, profile TEXT NOT NULL, payload TEXT NOT NULL);
         """)
         self.data = {'segments': [json.loads(row[0]) for row in self.db.execute('SELECT payload FROM graphs')], 'markers': []}
         self.profile = self._meta('profile') or uuid.uuid4().hex

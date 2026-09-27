@@ -13,9 +13,10 @@ local hasAnimation,animation=pcall(require,'openmw.animation')
 local M = {unitsPerMeter=70}
 local handles, ids, seen, preferred, serial, epoch = {}, {}, {}, {}, 0, 0
 local groundTargets,groundSerial={},0
+local preferredPoints={}
 local function round(x) return math.floor(x*100+.5)/100 end
 function M.angle(x) return (x+math.pi)%(2*math.pi)-math.pi end
-function M.reset(e) handles,ids,seen,preferred,serial,epoch={},{},{},{},0,e;groundTargets={};groundSerial=0 end
+function M.reset(e) handles,ids,seen,preferred,serial,epoch={},{},{},{},0,e;groundTargets={};groundSerial=0;preferredPoints={} end
 function M.orientation()
     local s=ui.screenSize()
     local vf=camera.getFieldOfView()
@@ -65,6 +66,17 @@ local offsets={{0,0,0},{0,0,.65},{0,0,-.5},{.6,0,0},{-.6,0,0},{0,.6,0},{0,-.6,0}
 local function visible(g,budget,offscreen)
     if not g then return nil end
     local size=ui.screenSize()
+    local picked=preferredPoints[g.obj.id]
+    if picked then
+        local screen=camera.worldToViewportVector(picked)
+        if offscreen or screen.x>=0 and screen.y>=0 and screen.x<size.x and screen.y<size.y then
+            local ray=nearby.castRenderingRay(g.origin,picked+(picked-g.origin):normalize()*4,{ignore=self.object})
+            if ray.hitObject==g.obj then
+                g.point=ray.hitPos;g.screen={round(screen.x),round(screen.y)};g.distance=(ray.hitPos-g.origin):length()
+                return g
+            end
+        end
+    end
     local order={}
     local key=g.obj.id
     if preferred[key] then order[#order+1]=preferred[key] end
@@ -159,24 +171,7 @@ function M.aimedAt(g)
     local ray=nearby.castRenderingRay(from,from+dir*(g.distance+g.half:length()*2+8),{ignore=self.object})
     return ray.hitObject and ray.hitObject==g.obj
 end
-function M.observe()
-    local candidates={}
-    for _,group in ipairs({{nearby.actors,'actor'},{nearby.doors,'door'},{nearby.containers,'container'},
-        {nearby.items,'item'},{nearby.activators,'activator'}}) do
-        for _,obj in ipairs(group[1]) do
-            if obj~=self.object then
-                local ok,g=pcall(geometry,obj)
-                if ok and g then g.kind=group[2];candidates[#candidates+1]=g end
-            end
-        end
-    end
-    require('scripts.astrabridge.sampling').order(candidates)
-    local budget={left=180}
-    local result=P.array()
-    for _,g in ipairs(candidates) do
-        if #result>=28 or budget.left<=0 then break end
-        local ok,v=pcall(visible,g,budget)
-        if ok and v then
+local function publicObject(g,v)
             local rec=g.obj.type.record(g.obj)
             if rec and rec.name and rec.name~='' then
                 local key=g.obj.id -- private lookup; never serialize or hash this into a public ref
@@ -198,11 +193,61 @@ function M.observe()
                     row.description=ui._astraDoorDescription(g.obj)
                 end
                 for _,n in ipairs(g.rect) do row.rect[#row.rect+1]=round(n) end
-                result[#result+1]=row
+                return row
+            end
+end
+function M.pick(x,y,radius)
+    local size=ui.screenSize()
+    if x<0 or y<0 or x>=size.x or y>=size.y then return {reason='invalid_arguments'} end
+    local origin=camera.getPosition();local rows=P.array();local found={}
+    local offsets=radius>0 and {-1,-.75,-.5,-.25,0,.25,.5,.75,1} or {0}
+    for _,dx in ipairs(offsets) do for _,dy in ipairs(offsets) do
+        local sx,sy=x+dx*radius,y+dy*radius
+        if sx>=0 and sy>=0 and sx<size.x and sy<size.y then
+            local direction=camera.viewportToWorldVector(util.vector2(sx/size.x,sy/size.y)):normalize()
+            local ray=nearby.castRenderingRay(origin,origin+direction*2800,{ignore=self.object})
+            local obj=ray.hitObject
+            if obj and not found[obj.id] then
+                local g=geometry(obj)
+                if g then
+                    for _,kind in ipairs({'Actor','Door','Container','Item','Activator'}) do
+                        if types[kind] and types[kind].objectIsInstance(obj) then g.kind=kind:lower();break end
+                    end
+                    if g.kind then
+                        g.point=ray.hitPos;g.screen={round(sx),round(sy)};g.distance=(g.point-origin):length()
+                        preferredPoints[obj.id]=g.point
+                        local row=publicObject(g,g)
+                        if row then rows[#rows+1]=row;found[obj.id]=true end
+                    end
+                end
+            end
+        end
+    end end
+    return {objects=rows,reason=#rows>0 and 'visible_object_found' or 'no_interactable_object_at_pixels',scope='visible_pixels'}
+end
+function M.observe()
+    local candidates={}
+    for _,group in ipairs({{nearby.actors,'actor'},{nearby.doors,'door'},{nearby.containers,'container'},
+        {nearby.items,'item'},{nearby.activators,'activator'}}) do
+        for _,obj in ipairs(group[1]) do
+            if obj~=self.object then
+                local ok,g=pcall(geometry,obj)
+                if ok and g then g.kind=group[2];candidates[#candidates+1]=g end
             end
         end
     end
-    return {objects=result,sampling_limited=budget.left<=0,orientation=M.orientation()}
+    require('scripts.astrabridge.sampling').order(candidates)
+    local budget={left=180}
+    local result=P.array()
+    for _,g in ipairs(candidates) do
+        if #result>=28 or budget.left<=0 then break end
+        local ok,v=pcall(visible,g,budget)
+        if ok and v then
+            local row=publicObject(g,v)
+            if row then result[#result+1]=row end
+        end
+    end
+    return {objects=result,sampling_limited=budget.left<=0 or #result>=28,orientation=M.orientation()}
 end
 function M.pose() return {position=self.position,yaw=camera.getYaw(),pitch=camera.getPitch(),cell=Space.key(self.cell)} end
 function M.groundPoint(x,y)

@@ -22,6 +22,9 @@ from .exploration import ExplorationAtlas
 from .control import Control
 from .observations import prune_screenshots, present_response
 from . import workflows
+from . import information
+from .knowledge import Knowledge
+from .autosave import Autosave
 
 
 def observation_changes(before,after):
@@ -72,6 +75,9 @@ class Session:
         self.recorder = None
         self.last_recording = None
         self.save_refs = {}
+        self.knowledge=Knowledge(self.runtime/'agent-memory.sqlite3')
+        self.autosave=Autosave(self.runtime/'autosave.json')
+        self.sequence_guard=None
         self.control = Control(self)
 
     def prepare(self):
@@ -203,12 +209,17 @@ class Session:
         with self.condition:
             self.condition.notify_all()
 
-    def command(self, op, args=None, *, timeout=25, _atlas_offset=None, _atlas_route=None):
+    def command(self, op, args=None, *, timeout=25, _atlas_offset=None, _atlas_route=None, _save_ref=None):
         args = args or {}
         validate(op, args)
         if getattr(self, 'control', None) and self.control.cancelled.is_set() and op not in {'stop','observe','ping','quit','inspect','ui'}:
             raise BridgeError('cancelled')
         timeout = action_timeout(op, args, max(timeout, 70))
+        if getattr(self,'sequence_guard',None) and op not in {'observe','inspect','ui','mark','stop'}:
+            args={**args,'_guard':self.sequence_guard}
+        if _save_ref is not None:
+            assert op=='save'
+            args={**args,'_replace_ref':_save_ref}
         if _atlas_offset is not None:
             assert op == 'mark'
             args = {**args, '_atlas_offset': _atlas_offset}
@@ -247,12 +258,18 @@ class Session:
         if op == "stop":
             self.uncertain = False
         raw = response.get("result", {})
+        inventory=raw.pop('_inventory_counts',None)
+        if inventory is not None and (not isinstance(inventory,dict) or any(not isinstance(k,str) or type(v) is not int or v<0 for k,v in inventory.items())):raise BridgeError('invalid_bridge_response')
         for travel in raw.pop('_atlas_travel',[]):self._ingest_travel(travel)
         # This metadata never crosses the public projection boundary.
         frame = raw.pop('_atlas_frame', None) if op == 'observe' else None
         if frame is not None:
             self._validate_frame(frame)
         result = check_result(raw)
+        if inventory is not None:result['inventory_summary']=inventory
+        if op in {'load','new_game'}:
+            self.autosave.clock=None
+        self.knowledge.ingest(op,result)
         if 'saves' in result: self.save_refs = {s['ref']: s for s in result['saves']}
         if op == 'load': self.atlas.restore(self.save_refs.get(args.get('ref')))
         if op == 'new_game': self.atlas.new_game()
@@ -311,6 +328,22 @@ class Session:
             result['exploration'] = self.atlas.present(path.with_name(path.stem+'-atlas.svg') if maps else None) if maps or getattr(self,'full_observations',False) else self.atlas.summary()
         else:result['exploration']={'supported':False,'reason':'no_player'}
         result.pop('trajectory', None)  # transport samples stay in the controller; give the agent the map and named nodes
+        self.autosave.observe(result)
+        previous=self.latest_observation
+        if previous and previous.get('state')=='running' and result.get('state')=='running':
+            events=[]
+            old_effects={e.get('name'):e for e in previous.get('effects',[])}
+            new_effects={e.get('name'):e for e in result.get('effects',[])}
+            for name in old_effects.keys()-new_effects.keys():events.append({'kind':'effect_ended','name':name})
+            for name in new_effects.keys()-old_effects.keys():events.append({'kind':'effect_started','name':name})
+            old_count=previous.get('journal_count');new_count=result.get('journal_count')
+            if old_count is not None and new_count is not None and old_count!=new_count:events.append({'kind':'journal_changed','added':new_count-old_count,'details':'inspect journal'})
+            old_items=previous.get('inventory_summary');new_items=result.get('inventory_summary')
+            if old_items is not None and new_items is not None:
+                for name in old_items.keys()|new_items.keys():
+                    delta=new_items.get(name,0)-old_items.get(name,0)
+                    if delta:events.append({'kind':'inventory_changed','name':name,'count_change':delta})
+            if events:result['events']=[self.knowledge.event(e) for e in events]
         self.latest_observation = result
         if capture:
             prune_screenshots(self.runtime/'screenshots',self.memory,getattr(self,'screenshot_keep',128))
@@ -376,6 +409,18 @@ class Session:
             raise BridgeError("invalid_arguments")
         with self.lock:
             started = time.monotonic()
+            if op=='details':return information.details(self,args)
+            if op=='knowledge':return self.knowledge.call(args)
+            if op=='autosave':return self.autosave.configure(args)
+            if op=='ui':return information.query_ui(self,args)
+            if op=='inspect' and args.get('view') in {'journal','conversations'} and ('query' in args or 'limit' in args):return information.inspect_text(self,args)
+            if op=='inspect' and args.get('view') in {'inventory','spells'}:
+                if args.keys()-{'view','query','page','limit','topic'}:raise BridgeError('invalid_arguments')
+                value=self.command('inspect',{'view':args['view']})
+                key='items' if args['view']=='inventory' else 'spells'
+                if getattr(self,'full_observations',False) and not any(k in args for k in ('query','limit')) and not args.get('page'):return value
+                value[key],meta=information.page_rows(value.get(key,[]),args)
+                return {**value,**meta}
             before=self.latest_observation
             portal=None
             if op=='interact' or op=='act' and args.get('trigger')=='Activate':
@@ -386,7 +431,8 @@ class Session:
                     if node:portal=(node['ref'],{**door,'heading_deg':before.get('orientation',{}).get('heading_deg')})
             if op=='sequence':return workflows.sequence(self,args)
             if op=='repair':return workflows.repair(self,args)
-            if op=='read' and (args.get('all') or args.get('search')):return workflows.read_document(self,args)
+            if op=='read' and (args.get('all') or args.get('search')):
+                result=workflows.read_document(self,args);self.knowledge.ingest('read',result);return result
             if op=='atlas':return workflows.atlas_query(self,args)
             if op=='revisit':return workflows.navigate(self,args)
             if op in {'remember','recall','connect','route'}:
@@ -454,7 +500,9 @@ class Session:
                 existing = {self.atlas.save_key(s) for s in self.command('saves')['saves']}
                 result = self.command('save', args)
                 created = [s for s in result['saves'] if s['description'] == args['description'] and self.atlas.save_key(s) not in existing]
-                if len(created) == 1: self.atlas.checkpoint(created[0])
+                if len(created)!=1:raise BridgeError('save_confirmation_missing')
+                self.atlas.checkpoint(created[0])
+                result={'saved':created[0],'total_saves':len(result['saves'])}
             elif op == "restart":
                 if args.keys() - {"load_latest"} or ("load_latest" in args and type(args["load_latest"]) is not bool):
                     raise BridgeError("invalid_arguments")
@@ -506,7 +554,7 @@ class Session:
                 if args.keys()-{'no_screenshot','map'}:raise BridgeError('invalid_arguments')
                 result = self.observe(capture=not args.get('no_screenshot',False),maps=args.get('map',False))
             else:
-                if op=='walk' and 'ref' not in args:
+                if op=='pick' or op=='walk' and 'ref' not in args:
                     validate(op,args)
                     self._check_ui(args)
                     if self.latest_observation['ui_mode']!='Gameplay':raise BridgeError('ui_open')
@@ -549,7 +597,7 @@ class Session:
                 if op in {"act", "look", "trigger", "use_item", "select_spell", "select_enchanted", "load", "new_game", "stop",
                           "focus","approach","interact","wait_until","move_local","walk","go","fly","evade","survey","fov","choose","edit","adjust","map","track","lock","unlock","strike","cast","chain","resetNPC"}:
                     if op in {'load','new_game'}:self.memory.branch(op)
-                    self.latest_observation = None
+                    if op in {'load','new_game'}:self.latest_observation = None
                     # Return one canonical observation instead of embedded stale data.
                     result.pop("observation", None)
                     result = {"action": result, "observation": self.observe()}

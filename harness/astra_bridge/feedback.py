@@ -11,9 +11,10 @@ def feedback(op, action, before, after, inputs=None):
         state='rejected'
     elif why in {'player_down','action_not_started'}:
         state='failed'
-    elif why in {'blocked','no_path','path_end_out_of_reach','endpoint_mismatch','height_mismatch','navigation_unavailable','cannot_act','maneuver_blocked','ground_required','shot_path_blocked'}:
+    elif why in {'blocked','no_path','path_end_out_of_reach','endpoint_mismatch','height_mismatch','navigation_unavailable','cannot_act','maneuver_blocked','ground_required','shot_path_blocked',
+                 'no_route_progress','repeated_positions','repeated_obstruction','target_obstructed','viewpoint_blocked','viewpoint_adjustment_needed','target_not_aimed'}:
         state='blocked'
-    elif why in {'target_lost','ui_open','game_paused','cancelled','location_changed','player_hurt','swimming_requires_manual_control','cast_not_confirmed','shot_not_confirmed','weapon_changed','health_low','levitation_ended','water_walking_ended'}:
+    elif why in {'target_lost','ui_open','game_paused','cancelled','location_changed','player_hurt','swimming_requires_manual_control','cast_not_confirmed','shot_not_confirmed','weapon_changed','health_low','levitation_ended','water_walking_ended','sequence_time_limit'}:
         state='interrupted'
     else:state='submitted' if action.get('submitted') else 'observed'
     if why=='path_end_out_of_reach' and action.get('motion',{}).get('moved_m',0)>.2:state='partial'

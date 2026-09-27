@@ -3,9 +3,50 @@ import heapq
 import json
 import math
 import uuid
+import time
 
 
 class AtlasRoutes:
+    def route_outcomes(self, active=False):
+        rows=[json.loads(r[0]) for r in self.db.execute('SELECT payload FROM route_outcomes WHERE profile=? ORDER BY id DESC',(self.profile,))]
+        if not active:return rows
+        recent=[];succeeded=[]
+        for row in rows:
+            if row['success']:succeeded.append(row)
+            elif row.get('retry_after',0)>time.time() and not any(s['kind']==row['kind'] and s['space']==row['space'] and s['destination']==row['destination'] and math.dist(s['origin'],row['origin'])<2 for s in succeeded):recent.append(row)
+        return recent
+
+    def outcome_history(self,args):
+        from .information import page_rows
+        rows=[]
+        for row in self.route_outcomes():
+            public={k:v for k,v in row.items() if k not in {'origin','position','retry_after'}}
+            public['retry_in_seconds']=max(0,round(row.get('retry_after',0)-time.time(),1))
+            space,node=self.find_node(row['destination'])
+            if node:public['names']=node.get('names',[])
+            rows.append(public)
+        rows,meta=page_rows(rows,args)
+        return {'attempts':rows,**meta,'source':'observed_route_outcomes'}
+
+    def record_outcome(self, step, origin, action):
+        reason=action.get('reason','unknown');success=reason=='arrived' or action.get('outcome')=='location_changed'
+        current=self.current()
+        row={'kind':step['kind'],'destination':step.get('ref',step.get('to')),'from':step.get('from'),
+             'space':origin['space'],'origin':origin['pose'],'position':list(current['pose']) if current else None,
+             'reason':reason,'success':success,'time':time.time(),'navigation':action.get('navigation',{}),
+             'elapsed':action.get('elapsed',0),'turned_deg':action.get('motion',{}).get('turned_deg',0)}
+        if not success and reason in {'blocked','no_progress','no_route_progress','repeated_positions','repeated_obstruction','no_path','endpoint_mismatch','height_mismatch','known_door_not_visible','activation_unconfirmed','out_of_reach','target_not_aimed'}:
+            # Temporary actors must not permanently poison a learned route.
+            row['retry_after']=row['time']+(8 if row['navigation'].get('blocked_by')=='actor' else 90)
+        if success and step['kind']=='door':row['approach']=step.get('door',{})
+        with self.db:self.db.execute('INSERT INTO route_outcomes(profile,payload) VALUES (?,?)',(self.profile,json.dumps(row,ensure_ascii=False)))
+        self._route_cache=None
+        return row
+
+    def blocked_leg(self, failures, kind, destination, space, origin):
+        return any(r['kind']==kind and r['destination']==destination and r['space']==space
+                   and (math.dist(r['origin'],origin)<2 or r.get('position') and math.dist(r['position'],origin)<2) for r in failures)
+
     def graph_for(self, ref):
         return next((s for s in self.data['segments'] if s['ref']==ref and s.get('profile',self.profile)==self.profile),None)
 
@@ -105,10 +146,17 @@ class AtlasRoutes:
         target_space,target=self.find_node(ref)
         if not target or not self.current():return None
         links=self.transitions();nodes={target['ref']:(target_space,target)}
+        failures=self.route_outcomes(active=True)
         for link in links:
             for key in ('from','to'):
                 s,n=self.find_node(link[key])
                 if n:nodes[n['ref']]=(s,n)
+        if failures:
+            # Alternative waypoints are exclusively previously occupied nodes.
+            for s in self.data['segments']:
+                if s.get('profile',self.profile)==self.profile:
+                    for n in s['nodes']:
+                        if n.get('names') or n.get('visits',0)>1:nodes[n['ref']]=(s,n)
         costs={'@player':0};parents={};queue=[(0,'@player')]
         while queue:
             cost,key=heapq.heappop(queue)
@@ -120,6 +168,7 @@ class AtlasRoutes:
             edges=[]
             for dest,(ds,dn) in nodes.items():
                 if ds['ref']!=s['ref'] or dest==key:continue
+                if self.blocked_leg(failures,'walk',dest,s['ref'],start if start is not None else s['pose']):continue
                 if dest in routes:edges.append((dest,routes[dest][1],{'kind':'walk','ref':dest,'source':'recorded_trail'}))
                 elif math.dist(dn['p'],start if start is not None else s['pose'])<80:
                     # Door arrival markers rarely coincide with the point from
@@ -127,7 +176,8 @@ class AtlasRoutes:
                     # ask the engine to bridge this gap when executing the leg.
                     edges.append((dest,math.dist(dn['p'],start if start is not None else s['pose']),
                                   {'kind':'walk','ref':dest,'source':'native_path_required'}))
-            edges += [(l['to'],1,{'kind':'door',**l}) for l in links if l['from']==key and l['to'] in nodes]
+            edges += [(l['to'],1,{'kind':'door',**l}) for l in links if l['from']==key and l['to'] in nodes
+                      and not self.blocked_leg(failures,'door',l['to'],s['ref'],start if start is not None else s['pose'])]
             for dest,length,step in edges:
                 candidate=cost+max(.01,length)
                 if candidate<costs.get(dest,math.inf):
