@@ -91,6 +91,11 @@ namespace MWGui
         if (book.isEmpty() || (book.getType() != ESM::REC_BOOK && book.getType() != ESM::REC_BOOK4))
             throw std::runtime_error("Invalid argument in BookWindow::setPtr");
         mBook = book;
+        static unsigned long long astraDocumentInstance = 0;
+        mLeftPage->setUserString("AstraDocumentBody", "book");
+        mLeftPage->setUserString("AstraDocumentTitle", std::string(book.getClass().getName(book)));
+        mLeftPage->setUserString("AstraDocumentInstance", std::to_string(++astraDocumentInstance));
+        mRightPage->setUserString("AstraDocumentBody", "duplicate");
 
         MWWorld::Ptr player = MWMechanics::getPlayer();
         bool showTakeButton = book.getContainerStore() != &player.getClass().getContainerStore(player);

@@ -1,0 +1,2 @@
+v1.1:
+- Renamed files in the OpenMW version to ensure they load before other animations

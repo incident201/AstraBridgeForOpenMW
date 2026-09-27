@@ -43,6 +43,12 @@ namespace MWGui
 
         void setDisplayMode(DisplayMode type);
 
+        std::vector<ItemWidget*> astraItemWidgets() const
+        {
+            std::vector<ItemWidget*> result;
+            for (const auto& line : mLines) result.push_back(line.mIcon);
+            return result;
+        }
         void update();
         void layoutWidgets();
         void resetScrollbars();

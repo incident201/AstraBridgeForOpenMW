@@ -20,6 +20,7 @@
 #include "../mwgui/bookpage.hpp"
 #include "../mwgui/itemwidget.hpp"
 #include "../mwgui/itemview.hpp"
+#include "../mwgui/itemchargeview.hpp"
 #include "../mwgui/itemmodel.hpp"
 #include "../mwgui/inventorywindow.hpp"
 #include "../mwgui/tradewindow.hpp"
@@ -29,6 +30,7 @@
 #include "../mwbase/inputmanager.hpp"
 #include "../mwworld/class.hpp"
 #include "../mwworld/cellref.hpp"
+#include "../mwworld/inventorystore.hpp"
 #include "../mwbase/world.hpp"
 #include "../mwbase/mechanicsmanager.hpp"
 #include "object.hpp"
@@ -46,6 +48,7 @@ namespace MWLua::AstraUI
         std::function<void()> action;
         std::string panel, description, unavailableReason;
         int count = 0;
+        int conditionCurrent = -1, conditionMax = -1;
         bool equipped = false, pendingTrade = false;
         bool selected = false;
         bool screenVisible = true;
@@ -62,6 +65,7 @@ namespace MWLua::AstraUI
         std::string revision;
         std::string dialogueText;
         bool dialogue = false;
+        std::string documentText, documentTitle, documentKind, documentRef;
     };
     inline MyGUI::IntRect intersection(MyGUI::IntRect a, MyGUI::IntRect b)
     {
@@ -77,6 +81,29 @@ namespace MWLua::AstraUI
     {
         return MyGUI::TextIterator::getOnlyText(text).asUTF8();
     }
+    inline std::string fingerprint(const std::string& text)
+    {
+        std::uint64_t hash=1469598103934665603ull;
+        for (unsigned char c:text) { hash^=c; hash*=1099511628211ull; }
+        std::ostringstream value; value<<std::hex<<hash; return value.str();
+    }
+    inline void documentText(MyGUI::Widget* w, std::string& text)
+    {
+        // Formatter-created captions of the OPEN document, in layout order.
+        // Clipping/pagination does not change their content. Never read book records.
+        if (auto* box=w->castType<MyGUI::TextBox>(false))
+        {
+            auto caption=plain(box->getCaption());
+            if (!caption.empty())
+            {
+                if (!text.empty() && text.back()!='\n' && caption.front()!='\n') text+='\n';
+                text+=caption;
+            }
+            return;
+        }
+        auto children=w->getEnumerator();
+        while (children.next()) documentText(children.current(),text);
+    }
     inline bool inDialogue(MyGUI::Widget* w, MWBase::WindowManager* wm)
     {
         if (!wm->containsMode(MWGui::GM_Dialogue)) return false;
@@ -89,6 +116,20 @@ namespace MWLua::AstraUI
     {
         if (!w || depth>30 || !w->getInheritedVisible() || w->getAlpha()<=0
             || (out.entries.size()>1500 && !inDialogue(w,wm))) return;
+        const std::string document(w->getUserString("AstraDocumentBody"));
+        if (!document.empty())
+        {
+            // The right page contains a second copy of the same formatted book.
+            if (document!="duplicate")
+            {
+                out.documentKind=document;
+                out.documentTitle=w->getUserString("AstraDocumentTitle");
+                documentText(w,out.documentText);
+                out.documentRef="document_"+fingerprint(document+"\n"+out.documentTitle+"\n"
+                    +std::string(w->getUserString("AstraDocumentInstance"))+"\n"+out.documentText);
+            }
+            return; // Full text is delivered only by bounded read(), never duplicated in observations.
+        }
         clip=intersection(clip,w->getAbsoluteRect());
         if (empty(clip)) return;
         const bool enabled=w->getInheritedEnabled() && (!out.modal || root(w)==modalRoot)
@@ -151,6 +192,30 @@ namespace MWLua::AstraUI
                     list->eventListMouseItemActivate(list,i);
                 }};
                 e.selected=list->getIndexSelected()==i;
+                out.entries.push_back(std::move(e));
+            }
+            return;
+        }
+        if (auto* view=w->castType<MWGui::ItemChargeView>(false))
+        {
+            // These rows live in MyGUI skin children. Use the current UI rows,
+            // including scrolled-out ones, and their normal click delegates.
+            for (auto* icon:view->astraItemWidgets())
+            {
+                auto* ptr=icon->getUserData<MWWorld::Ptr>(false);
+                if (!ptr || ptr->isEmpty()) continue;
+                const auto& cls=ptr->getClass();
+                auto rect=intersection(clip,icon->getAbsoluteRect());
+                Entry e{std::string(cls.getName(*ptr)),"item",rect,
+                    enabled && icon->getInheritedEnabled(),[icon]{icon->eventMouseButtonClick(icon);}};
+                e.panel=wm->containsMode(MWGui::GM_Repair)?"repair":"recharge";
+                e.count=ptr->getCellRef().getCount();
+                const auto player=MWBase::Environment::get().getWorld()->getPlayerPtr();
+                e.equipped=player.getClass().getInventoryStore(player).isEquipped(*ptr);
+                e.description=plain(MyGUI::LanguageManager::getInstance().replaceTags(cls.getToolTipInfo(*ptr,e.count).text));
+                if (cls.hasItemHealth(*ptr))
+                { e.conditionCurrent=cls.getItemHealth(*ptr); e.conditionMax=cls.getItemMaxHealth(*ptr); }
+                e.screenVisible=!empty(rect);
                 out.entries.push_back(std::move(e));
             }
             return;
@@ -223,6 +288,8 @@ namespace MWLua::AstraUI
                 if (name.ends_with("SoulBox")) label="soul gem";
                 panel="enchanting";
             }
+            else if (wm->containsMode(MWGui::GM_Repair) && name.ends_with("ToolIcon"))
+            { label="repair tool"; panel="repair"; }
             if (!label.empty())
             {
                 auto* data=w->getUserData<MWWorld::Ptr>(false);
@@ -350,6 +417,8 @@ namespace MWLua::AstraUI
             const auto& n=w->getName();
             if (n.find("TakeButton")!=std::string::npos) label=wm->getGameSettingString("sTake","Take");
             else if (n.find("CloseButton")!=std::string::npos) label=wm->getGameSettingString("sClose","Close");
+            else if (n.ends_with("NextPageBTN")) label="Next page";
+            else if (n.ends_with("PrevPageBTN")) label="Previous page";
             if (!label.empty()) out.entries.push_back({label,"button",clip,enabled,[w]{w->eventMouseButtonClick(w);}});
         }
         auto children=w->getEnumerator();
@@ -383,6 +452,7 @@ namespace MWLua::AstraUI
         auto feed=[&](const std::string& s){for (unsigned char c:s){hash^=c;hash*=1099511628211ull;}};
         feed(out.modal?"modal":"normal");
         feed(out.dialogueText);
+        feed(out.documentRef);
         for (const auto& e:out.entries)
         {
             feed(e.role); feed(e.text);
@@ -392,6 +462,7 @@ namespace MWLua::AstraUI
             if (e.role=="list_item") feed(e.selected?"selected":"unselected");
             feed(e.unavailableReason);
             feed(e.panel);feed(e.description);feed(std::to_string(e.count));
+            feed(std::to_string(e.conditionCurrent)+"/"+std::to_string(e.conditionMax));
             if (e.role=="slider") feed(std::to_string(e.sliderPosition)+"/"+std::to_string(e.sliderMax));
             feed(e.equipped?"equipped":"unequipped");feed(e.pendingTrade?"pending":"normal");
         }
@@ -404,6 +475,14 @@ namespace MWLua::AstraUI
         Snapshot snap=snapshot(wm);
         sol::table result(lua,sol::create),entries(lua,sol::create);
         result["revision"]=snap.revision;result["modal"]=snap.modal;
+        if (!snap.documentRef.empty())
+        {
+            sol::table document(lua,sol::create);
+            document["ref"]=snap.documentRef; document["title"]=snap.documentTitle;
+            document["kind"]=snap.documentKind;
+            document["characters"]=MyGUI::UString(snap.documentText).size();
+            result["document"]=document;
+        }
         if (snap.dialogue)
         {
             sol::table dialogue(lua,sol::create);
@@ -425,6 +504,8 @@ namespace MWLua::AstraUI
             {
                 row["count"]=e.count;row["description"]=e.description;
                 row["equipped"]=e.equipped;row["pending_trade"]=e.pendingTrade;
+                if (e.conditionCurrent>=0)
+                { row["condition_current"]=e.conditionCurrent; row["condition_max"]=e.conditionMax; }
             }
             row["ref"]="ui_"+snap.revision+"_"+std::to_string(i);
             rect[1]=e.rect.left;rect[2]=e.rect.top;rect[3]=e.rect.right-e.rect.left;rect[4]=e.rect.bottom-e.rect.top;
@@ -432,6 +513,24 @@ namespace MWLua::AstraUI
             entries[i+1]=row;
         }
         result["elements"]=entries;
+        return result;
+    }
+    inline sol::table read(sol::this_state state, MWBase::WindowManager* wm,
+        const std::string& ref, int offset, int limit)
+    {
+        sol::state_view lua(state);
+        sol::table result(lua,sol::create);
+        const auto snap=snapshot(wm);
+        if (snap.documentRef.empty()) { result["reason"]="document_not_open"; return result; }
+        if (!ref.empty() && ref!=snap.documentRef) { result["reason"]="stale_document_ref"; return result; }
+        const MyGUI::UString text(snap.documentText);
+        if (offset<0 || static_cast<std::size_t>(offset)>text.size() || limit<1 || limit>8000)
+        { result["reason"]="invalid_arguments"; return result; }
+        const auto next=std::min(text.size(),static_cast<std::size_t>(offset)+limit);
+        result["ref"]=snap.documentRef; result["title"]=snap.documentTitle; result["kind"]=snap.documentKind;
+        result["text"]=text.substr(offset,next-offset).asUTF8();
+        result["offset"]=offset; result["next_offset"]=next; result["characters"]=text.size();
+        result["eof"]=next==text.size();
         return result;
     }
     inline sol::table playerState(sol::this_state state)

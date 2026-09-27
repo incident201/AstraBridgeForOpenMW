@@ -173,6 +173,19 @@ namespace MWLua
             if (context.mType != Context::Local || !context.mLuaManager->isSynchronizedUpdateRunning()) return false;
             return AstraUI::scroll(windowManager, steps);
         };
+        api["_astraReadDocument"] = [context, windowManager](sol::this_state state,
+            const std::string& ref, int offset, int limit) {
+            if (context.mType != Context::Local || !context.mLuaManager->isSynchronizedUpdateRunning())
+                throw std::runtime_error("Astra document reading requires player onFrame");
+            return AstraUI::read(state, windowManager, ref, offset, limit);
+        };
+        api["_astraResetNPC"] = [context, windowManager]() {
+            if (context.mType != Context::Local || !context.mLuaManager->isSynchronizedUpdateRunning()
+                || windowManager->isGuiMode()) return false;
+            // Exact engine implementation of RA/ResetActors, no console or eval.
+            MWBase::Environment::get().getWorld()->resetActors();
+            return true;
+        };
         api["_astraUiEdit"] = [context, windowManager](const std::string& ref, const std::string& value) {
             if (!context.mLuaManager->isSynchronizedUpdateRunning()) throw std::runtime_error("Astra UI requires onFrame");
             return AstraUI::edit(windowManager, ref, value);

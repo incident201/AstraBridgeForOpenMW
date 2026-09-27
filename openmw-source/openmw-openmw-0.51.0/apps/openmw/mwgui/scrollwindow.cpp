@@ -51,6 +51,10 @@ namespace MWGui
         if (scroll.isEmpty() || (scroll.getType() != ESM::REC_BOOK && scroll.getType() != ESM::REC_BOOK4))
             throw std::runtime_error("Invalid argument in ScrollWindow::setPtr");
         mScroll = scroll;
+        static unsigned long long astraDocumentInstance = 0;
+        mTextView->setUserString("AstraDocumentBody", "scroll");
+        mTextView->setUserString("AstraDocumentTitle", std::string(scroll.getClass().getName(scroll)));
+        mTextView->setUserString("AstraDocumentInstance", std::to_string(++astraDocumentInstance));
 
         MWWorld::Ptr player = MWMechanics::getPlayer();
         bool showTakeButton = scroll.getContainerStore() != &player.getClass().getContainerStore(player);

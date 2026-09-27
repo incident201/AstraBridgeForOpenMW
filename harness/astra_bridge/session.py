@@ -82,9 +82,19 @@ class Session:
         settings_path = self.profile / 'settings.cfg'
         profile_settings = configparser.ConfigParser(interpolation=None, strict=False)
         profile_settings.read(settings_path)
+        settings_changed = False
         if profile_settings.get('Physics', 'async num threads', fallback=None) != '0':
             if not profile_settings.has_section('Physics'): profile_settings.add_section('Physics')
             profile_settings.set('Physics', 'async num threads', '0')
+            settings_changed = True
+        # Bundled YAIAF uses OpenMW's per-animation sources, without an ESP or
+        # replacement base skeleton. Apply to existing isolated profiles as well.
+        if (self.root / 'mod/Animations/xbase_anim/_xYAIAF.kf').is_file():
+            if profile_settings.get('Game', 'use additional anim sources', fallback=None) != 'true':
+                if not profile_settings.has_section('Game'): profile_settings.add_section('Game')
+                profile_settings.set('Game', 'use additional anim sources', 'true')
+                settings_changed = True
+        if settings_changed:
             with settings_path.open('w') as output: profile_settings.write(output)
         for path in ("userdata", "cache", "screenshots", "local-data"):
             (self.runtime / path).mkdir(exist_ok=True)
@@ -521,7 +531,7 @@ class Session:
                     timeout=100 if op in {"load", "new_game"} else 70 if op=='fly' else 60 if op in {'act','look','focus','approach','move_local','walk','go','evade','track','lock','strike','cast','chain'} else 25
                     result = self.command(op, args, timeout=timeout)
                 if op in {"act", "look", "trigger", "use_item", "select_spell", "select_enchanted", "load", "new_game", "stop",
-                          "focus","approach","move_local","walk","go","fly","evade","survey","fov","choose","edit","adjust","map","track","lock","unlock","strike","cast","chain"}:
+                          "focus","approach","move_local","walk","go","fly","evade","survey","fov","choose","edit","adjust","map","track","lock","unlock","strike","cast","chain","resetNPC"}:
                     if op in {'load','new_game'}:self.memory.branch(op)
                     self.latest_observation = None
                     # Return one canonical observation instead of embedded stale data.

@@ -101,11 +101,13 @@ LEAF_KEYS = {
     "cast_outcome",
     "view_mode",
     "screen_visible",
+    "title", "characters", "offset", "next_offset", "eof", "scope",
 }
 DICT_KEYS = {"stats", "attributes", "health", "magicka", "fatigue", "observation", "orientation", "scene", "ui", "motion", "movement", "target_lock", "body", "navigation", "combat", "weapon_info", "castable", "resources", "changes", "terrain", "trajectory"}
 LIST_KEYS = {"items", "spells", "entries", "saves", "available", "objects", "actions", "skills", "topics", "elements", "messages", "effects", "steps", "rays", "passages", "samples", "ground_targets"}
 LIST_KEYS.add('attribute_details')
 DICT_KEYS.add('dialogue')
+DICT_KEYS.add('document')
 ERRORS = {"save_unavailable", "stale_save_ref", "operation_failed", "invalid_arguments", "no_player",
           "game_operation_timeout", "cancelled", "view_unavailable", "unknown_view",
           "ui_open", "use_act", "stale_ref", "action_unavailable", "unknown_operation",
@@ -120,6 +122,7 @@ ERRORS.add('ui_control_disabled')
 ERRORS.update({'ui_element_offscreen', 'ui_scroll_unavailable'})
 ERRORS.add('movement_conflicts_with_target')
 ERRORS.update({'levitation_required','flight_requires_fly'})
+ERRORS.update({'document_not_open', 'stale_document_ref'})
 
 
 def check_result(value, depth=0):
@@ -166,6 +169,7 @@ def validate(op: str, args: dict) -> None:
         "quit": set(), "save": {"description"}, "load": {"ref"},
         "inspect": {"view", "page", "topic"}, "use_item": {"ref"}, "select_spell": {"ref"}, "select_enchanted":{"ref"},
         "trigger": {"name"},
+        "read": {"ref", "offset", "limit"}, "resetNPC": {"reason"},
         "act": {"seconds", "move", "strafe", "yaw", "pitch", "attack", "run", "sneak", "trigger", "target"},
         "look":{"heading_deg","pitch_deg"},
         "ui":set(),"map":set(),"choose":{"ref"},"focus":{"ref","wait_ready"},"approach":{"ref","reach","run","under_fire"},
@@ -281,6 +285,17 @@ def validate(op: str, args: dict) -> None:
             if step['op']=='wait':number(step.get('seconds',.5),.02,3)
             for key in ('spell','item'):
                 if key in step and (not isinstance(step[key],str) or not 1<=len(step[key])<=200):raise BridgeError('invalid_arguments')
+    if op == 'read':
+        for key, default, low, high in (('offset', 0, 0, 100000000), ('limit', 4000, 1, 8000)):
+            value = args.get(key, default)
+            if type(value) is not int or not low <= value <= high:
+                raise BridgeError('invalid_arguments')
+        if 'ref' in args and (not isinstance(args['ref'], str) or not args['ref'].startswith('document_') or len(args['ref']) > 100):
+            raise BridgeError('invalid_arguments')
+    if op == 'resetNPC':
+        reason = args.get('reason')
+        if not isinstance(reason, str) or not reason.strip() or len(reason) > 300 or '\x00' in reason:
+            raise BridgeError('invalid_arguments')
     if op == "save":
         if not isinstance(args.get("description"), str) or not 1 <= len(args["description"].encode()) <= 160:
             raise BridgeError("invalid_arguments")

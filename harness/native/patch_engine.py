@@ -89,6 +89,40 @@ replace('apps/openmw/mwlua/uibindings.cpp','        api["_astraPlayerState"]',
         };
         api["_astraPlayerState"]''')
 copy_header('astraui.hpp')
+replace('apps/openmw/mwgui/itemchargeview.hpp','        void update();',
+'''        std::vector<ItemWidget*> astraItemWidgets() const
+        {
+            std::vector<ItemWidget*> result;
+            for (const auto& line : mLines) result.push_back(line.mIcon);
+            return result;
+        }
+        void update();''')
+for file, variable, body, kind in (
+    ('bookwindow.cpp', 'book', 'mLeftPage', 'book'),
+    ('scrollwindow.cpp', 'scroll', 'mTextView', 'scroll'),
+):
+    anchor=f'        m{variable.capitalize()} = {variable};'
+    extra='\n        mRightPage->setUserString("AstraDocumentBody", "duplicate");' if kind=='book' else ''
+    replace('apps/openmw/mwgui/'+file, anchor, anchor+f'''
+        static unsigned long long astraDocumentInstance = 0;
+        {body}->setUserString("AstraDocumentBody", "{kind}");
+        {body}->setUserString("AstraDocumentTitle", std::string({variable}.getClass().getName({variable})));
+        {body}->setUserString("AstraDocumentInstance", std::to_string(++astraDocumentInstance));'''+extra)
+replace('apps/openmw/mwlua/uibindings.cpp','        api["_astraUiEdit"]',
+'''        api["_astraReadDocument"] = [context, windowManager](sol::this_state state,
+            const std::string& ref, int offset, int limit) {
+            if (context.mType != Context::Local || !context.mLuaManager->isSynchronizedUpdateRunning())
+                throw std::runtime_error("Astra document reading requires player onFrame");
+            return AstraUI::read(state, windowManager, ref, offset, limit);
+        };
+        api["_astraResetNPC"] = [context, windowManager]() {
+            if (context.mType != Context::Local || !context.mLuaManager->isSynchronizedUpdateRunning()
+                || windowManager->isGuiMode()) return false;
+            // Exact engine implementation of RA/ResetActors, no console or eval.
+            MWBase::Environment::get().getWorld()->resetActors();
+            return true;
+        };
+        api["_astraUiEdit"]''')
 replace('apps/openmw/mwlua/uibindings.cpp','        api["_astraUiSnapshot"]',
 '''        api["_astraDoorDescription"] = [context](const LObject& object) {
             if (context.mType != Context::Local || !context.mLuaManager->isSynchronizedUpdateRunning())

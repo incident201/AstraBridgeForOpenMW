@@ -67,6 +67,7 @@ In a real observation, use:
 | `item_…` | `inspect inventory` → `items[].ref` | `use-item`, `select-enchanted` | Inventory/spell queries share an ephemeral handle table. Either query replaces that table; many actions invalidate it too. Obtain the needed ref immediately before use. |
 | `spell_…` | `inspect spells` → `spells[].ref` | `select-spell` | Same rule as items. Selection remains after its handle expires. |
 | `ui_…` | `ui` → `elements[].ref`, or observation's `ui.elements` | `choose`, `edit`, `adjust`, `hover` | Bound to the current UI revision. Refresh after a UI change. |
+| `document_…` | `ui.document.ref` or `read` | `read --ref` | Valid only for that opened book/scroll instance. Refresh after reopening or loading. |
 | `passage_…` | `observe` → `terrain.passages[].ref` | `go` | Short-lived local sample; refresh after moving. |
 | `ground_…` | `ground` → `ground_targets[].ref` | `go`, `walk --ref` | Short-lived visible-point sample; use promptly without moving first. |
 | `node_…` | `atlas` / observation → `exploration.nodes[].ref` | `revisit` | Persistent recorded node in this playthrough and space. Check `can_revisit` and `revisit_source`. |
@@ -92,6 +93,7 @@ Do not pass an NPC ref to `go`, a map label such as `A4` to `revisit`, or an inv
 | `inspect conversations` | Topics already known by the character. |
 | `inspect conversations --topic "EXACT_TOPIC" --page N` | Recorded dialogue for that known topic; not an interaction with an NPC. |
 | `ui` | Current structured UI, including visible item tooltips. |
+| `read [--ref DOCUMENT_REF] [--offset N] [--limit N]` | Text of the currently open book/scroll. Default 4000 characters, maximum 8000 per reply; no page turning or scrolling required. |
 
 Character summary includes identity, sign, level, health/magicka/fatigue, eight attributes, skills and progress, weight/capacity, gold, bounty, reputation, equipment/magic and active effects. Effects provide name/source, description, `harmful`, strength where applicable, affected attribute/skill, total/remaining duration or `permanent`. `from_equipment` marks an effect tied to equipped gear.
 
@@ -124,6 +126,12 @@ UI roles: `button`, `link`, `list_item`, `input`, `slider`, `item`, `item_slot`,
 **Trading/containers:** inspect `panel` to distinguish `inventory`, `merchant`, and `container`. Choosing an item may open a quantity dialog or begin a drag. Resolve the actual dialog, then choose the destination `drop_target` if a drag is active. `pending_trade` means a proposal; use the merchant's real confirmation button and verify ownership/gold afterward. Closed-container contents are not exposed.
 
 **Spellmaking, enchanting, alchemy, training, rest, level-up and character creation:** there are no separate high-level service commands. Use these same UI operations and the controls actually displayed. For example, rest opens via `trigger Rest`; then inspect its slider/buttons instead of assuming keyboard shortcuts or a particular caption.
+
+### Books, scrolls and manual repair
+
+Open an owned book with `use-item`, or a book in the world with `interact`. `ui.document` reports its title, kind, ref and total character count. Call `read`; continue with `read --ref DOCUMENT_REF --offset NEXT_OFFSET` until `eof:true`. Offsets count Unicode characters, not UTF-8 bytes. The text covers the whole opened document; observations carry metadata only, so long books do not overflow replies. The ref also works after turning pages. Closing/reopening the book invalidates it. `document_not_open` means no book/scroll is open; `stale_document_ref` requires a new query. Images remain available in the screenshot.
+
+Use an owned repair hammer to open Repair. `ui.elements` includes the actual repairable rows as `role:item`, `panel:repair`, with `condition_current`, `condition_max` and the normal tooltip. Rows outside the viewport can be chosen semantically. Choosing one performs **one normal repair attempt**, consuming tool use and applying the game's skill/RNG rules. Refresh the UI after every attempt; failure is possible, and fully repaired items disappear. The `repair tool: …` slot shows the selected hammer and opens the game's tool selector when chosen.
 
 ## Saves and process lifecycle
 
@@ -163,5 +171,11 @@ The timeline includes active gameplay and UI work, excludes thinking pauses, and
 | `spell_failed`, unavailable magic/ammunition | Read messages, effects and own resources; change the gameplay decision. |
 | `levitation_ended`, `water_walking_ended` | Effect-dependent route stopped. Inspect support/height/water state before continuing. |
 | Controller timeout/disconnection/uncertain state | Do not automatically replay a mutation. Query status/observe after reconnecting, stop if needed, then decide whether restart/load is necessary. |
+
+### Emergency actor placement recovery
+
+`resetNPC --reason "Observed actor-placement malfunction"` runs the engine's RA/ResetActors operation. It is a last resort for a confirmed or strongly evidenced malfunction, such as a previously observed stationary travel NPC drifting off its platform. First inspect the location and existing travel memory, then save to a separate slot. Close menus before calling it. It is never automatic and must not be used to bypass enemies, quests, ordinary NPC obstruction or a failed path.
+
+Despite its name, the engine operation affects eligible **NPCs and creatures in all active cells**, returning them to their original positions/orientations; actors moved in from another cell and actors without a content-file origin are excluded by the engine. It does not resurrect actors or reset player stats. The reason is logged. Transient actor/item/UI/navigation handles are invalidated; the learned atlas remains. Observe again and verify that the intended NPC and interaction are restored before saving the recovered state. YAIAF prevents idle-animation drift going forward; it does not repair positions already stored in an old save.
 
 If the public interface cannot perform an essential operation, report the command, response and current observation to the user/developer. Gameplay permission does not authorize modifying the interface.

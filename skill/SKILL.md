@@ -1,6 +1,6 @@
 ---
 name: openmw-play
-description: "Play Morrowind through an already configured AstraBridge/OpenMW installation: observe the game, navigate, interact with menus and characters, fight, and maintain playthrough memory. Use for gameplay, not harness or engine development."
+description: "Play Morrowind through a configured AstraBridge/OpenMW installation: navigate, talk, fight, read opened books and scrolls, repair equipment, and maintain travel memory and recordings. Includes emergency recovery of displaced NPCs. Use for gameplay, not harness or engine development."
 ---
 
 # Play OpenMW through AstraBridge
@@ -17,6 +17,7 @@ cd "$ASTRA_HOME"
 ## Mandatory gameplay boundaries
 
 - **No game console, cheats, debug Lua, arbitrary evaluation, save editing, or direct mutation of game parameters.** Permission previously given for development tests does not authorize cheats during a playthrough.
+- The sole position-recovery exception is `resetNPC --reason "..."`, equivalent to the engine's RA/ResetActors. Use only as a last resort for an observed actor-placement malfunction, after saving; see [recovery](references/commands.md#recovery). Never use it for ordinary navigation, combat or quest shortcuts.
 - **Do not modify the harness, Lua mod, engine, protocol, safety/access checks, or game files without a separate explicit development request from the user.** Do not bypass the public interface using raw input tools, the internal transport, private APIs, or developer helpers. Report missing capabilities; use the existing stop/load/restart operations for ordinary recovery.
 - **Do not search the web for walkthroughs, guides, wikis, quest solutions, maps, loot locations, or enemy statistics.** Do not obtain that information from ESM/ESP/BSA files, engine source, developer reports, raw saves, or other playthroughs. The `openmw-source/` tree is for authorized development, not gameplay research.
 - Base decisions on current in-game observations, dialogue, the journal, the game's map, memory from this playthrough, and common sense. Do not use remembered spoilers or optimal routes from model training. If the character has not learned something, treat it as unknown.
@@ -40,6 +41,8 @@ cd "$ASTRA_HOME"
 | Walk to a point visible on screen | `ground`, then `go` with a returned ground ref |
 | Approach/talk to a visible NPC, open a door, pick up an item | `interact REF --approach` |
 | Select a menu response or item | `ui`, then `choose` using its ref or exact caption |
+| Read an open book or scroll | `read`, then continue with its document ref and `next_offset` until `eof` |
+| Repair gear with a hammer | `use-item` the hammer, then `choose` a current `panel:repair` item |
 | Attack a moving target repeatedly | `chain` with the actor ref and `pursue:true` |
 | Retreat or strafe while keeping a target in view | `retreat` or `evade` |
 | Fly while a levitation effect is active | `fly` with relative distances |

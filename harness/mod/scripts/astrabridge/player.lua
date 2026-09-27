@@ -72,6 +72,7 @@ local function uiState()
     local result=ui._astraUiSnapshot();result.supported=true
     result.blocked=result.revision=='non_gameplay_ui'
     result.revision=namespace()..'_'..result.revision
+    if result.document then result.document.ref='document_'..namespace()..'_'..result.document.ref:sub(10) end
     for _,e in ipairs(result.elements) do e.ref='ui_'..namespace()..'_'..e.ref:sub(4) end
     local notices={sMagicSkillFail='spell_failed',sLockSuccess='lock_opened',sLockFail='lock_failed',
         sLockImpossible='lock_impossible',sTrapSuccess='trap_disarmed',sTrapFail='trap_failed'}
@@ -650,6 +651,28 @@ local function dispatch(cmd)
     if op == 'observe' or op == 'inspect' or op == 'stop' then
         if op=='stop' then pausedSneak=false end
         pause(cmd, {paused=true})
+    elseif op=='read' then
+        if not ui._astraReadDocument then pause(cmd,nil,'native_ui_unavailable');return end
+        local ref=args.ref or ''
+        local prefix='document_'..namespace()..'_'
+        if ref~='' then
+            if ref:sub(1,#prefix)~=prefix then pause(cmd,nil,'stale_document_ref');return end
+            ref='document_'..ref:sub(#prefix+1)
+        end
+        local result=ui._astraReadDocument(ref,args.offset or 0,args.limit or 4000)
+        if result.reason then pause(cmd,nil,result.reason);return end
+        result.ref=prefix..result.ref:sub(10)
+        pause(cmd,result)
+    elseif op=='resetNPC' then
+        if I.UI.getMode() then pause(cmd,nil,'ui_open');return end
+        if not ui._astraResetNPC or types.Actor.isDead(self) then pause(cmd,nil,'action_unavailable');return end
+        if not ui._astraResetNPC() then pause(cmd,nil,'action_unavailable');return end
+        -- Actor positions changed. Invalidate handles/local plans, preserve travelled atlas.
+        epoch=epoch+1;bus:set('epoch',epoch)
+        Scene.reset(namespace())
+        if Terrain then Terrain.reset(namespace()) end
+        routes={};walkingRoute=nil;targetLock=nil;invalidate()
+        pause(cmd,{submitted=true,reason='actors_reset',description=args.reason,scope='actors_in_active_cells'})
     elseif op=='survey' then
         if I.UI.getMode() then pause(cmd,nil,'ui_open');return end
         if Terrain then Terrain.invalidate() end
