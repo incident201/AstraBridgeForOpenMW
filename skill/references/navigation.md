@@ -111,6 +111,8 @@ Swimming uses normal movement plus view pitch, for example looking upward then a
 
 Atlas is stored transactionally in `runtime/exploration-memory.sqlite3`; graphs, points and nodes have no retention-count limit. Private transforms align only the player's observed trajectory. The interface never exposes world coordinates or unseen geometry.
 
+Access learned travel memory through `atlas`, `recall`, `revisit` and `return-to`. `runtime/userdata/navmesh.db` belongs to OpenMW's internal pathfinding cache. Direct agent access to that file or its copies/exports is forbidden during gameplay under the [mandatory gameplay boundaries](../SKILL.md#mandatory-gameplay-boundaries), including troubleshooting failed movement. Report a missing public capability instead of inspecting the cache. The engine's normal use of this cache through public navigation commands remains allowed.
+
 ```sh
 ./astra atlas --list
 ./astra atlas --space SPACE_REF --radius-m 80
