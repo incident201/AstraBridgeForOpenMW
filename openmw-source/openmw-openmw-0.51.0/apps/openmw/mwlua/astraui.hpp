@@ -38,18 +38,39 @@
 #include <functional>
 #include <sstream>
 #include <map>
+#include <set>
 #include <components/esm3/loadrepa.hpp>
 #include "astracombat.hpp"
 #include "../mwmechanics/magiceffects.hpp"
 
 namespace MWLua::AstraUI
 {
+    // Widget lifetime, rather than screen coordinates or a transient tooltip,
+    // identifies an action. The value is private and never a gameplay ref.
+    inline std::uint64_t widgetSerial = 0;
+    inline MyGUI::Widget* visitingWidget = nullptr;
+    inline std::string widgetIdentity(MyGUI::Widget* widget)
+    {
+        if (!widget) return {};
+        if (widget->getUserString("AstraWidgetIdentity").empty())
+            widget->setUserString("AstraWidgetIdentity", std::to_string(++widgetSerial));
+        return std::string(widget->getUserString("AstraWidgetIdentity"));
+    }
+    struct VisitScope
+    {
+        MyGUI::Widget* previous;
+        VisitScope(MyGUI::Widget* widget) : previous(visitingWidget) { visitingWidget=widget; }
+        ~VisitScope() { visitingWidget=previous; }
+    };
+    inline std::string controlSignature;
+    inline std::uint64_t controlGeneration = 0;
+    inline void invalidateControls() { controlSignature.clear(); ++controlGeneration; }
     inline std::map<MWWorld::Ptr, std::uint64_t> itemInstances;
     inline std::uint64_t itemSerial = 0;
     inline std::string itemEpoch;
     inline void beginEpoch(const std::string& epoch)
     {
-        if (epoch!=itemEpoch) { itemInstances.clear(); itemEpoch=epoch; }
+        if (epoch!=itemEpoch) { itemInstances.clear(); itemEpoch=epoch; invalidateControls(); }
     }
     inline std::string itemIdentity(const MWWorld::Ptr& ptr)
     {
@@ -65,6 +86,7 @@ namespace MWLua::AstraUI
         std::function<void()> action;
         std::string panel, description, unavailableReason, instance;
         std::string control, value, destination, notice;
+        std::string ref, widget, window;
         int count = 0;
         int conditionCurrent = -1, conditionMax = -1;
         bool equipped = false, pendingTrade = false;
@@ -74,7 +96,13 @@ namespace MWLua::AstraUI
         std::function<void(std::size_t)> adjust;
         std::size_t sliderPosition = 0, sliderMax = 0;
         Entry(std::string label,std::string type,MyGUI::IntRect bounds,bool available,std::function<void()> callback)
-            : text(std::move(label)),role(std::move(type)),rect(bounds),enabled(available),action(std::move(callback)) {}
+            : text(std::move(label)),role(std::move(type)),rect(bounds),enabled(available),action(std::move(callback))
+        {
+            widget=widgetIdentity(visitingWidget);
+            auto* parent=visitingWidget;
+            while (parent && parent->getParent()) parent=parent->getParent();
+            window=widgetIdentity(parent);
+        }
     };
     inline void semanticControl(Entry& entry, MyGUI::Widget* widget)
     {
@@ -144,6 +172,7 @@ namespace MWLua::AstraUI
         MWBase::WindowManager* wm, Snapshot& out, int depth=0)
     {
         if (!w || depth>30 || !w->getInheritedVisible() || w->getAlpha()<=0) return;
+        VisitScope visitScope(w);
         const std::string document(w->getUserString("AstraDocumentBody"));
         if (!document.empty())
         {
@@ -487,7 +516,7 @@ namespace MWLua::AstraUI
     {
         Snapshot out;
         if (wm->isConsoleMode() || wm->isPostProcessorHudVisible())
-        {out.revision="non_gameplay_ui";return out;}
+        {out.revision="non_gameplay_ui";invalidateControls();return out;}
         out.modal=MyGUI::InputManager::getInstance().isModalAny();
         auto* modalRoot=root(MyGUI::InputManager::getInstance().getKeyFocusWidget());
         if (out.modal)
@@ -527,6 +556,36 @@ namespace MWLua::AstraUI
             feed(e.equipped?"equipped":"unequipped");feed(e.pendingTrade?"pending":"normal");
         }
         std::ostringstream value;value<<std::hex<<hash;out.revision=value.str();
+        // Keep observation revision comprehensive, but action refs depend only
+        // on the active menus and their meaning. A tooltip/notification has a
+        // different window and must not invalidate an unchanged menu button.
+        std::set<std::string> actionWindows;
+        for (const auto& e:out.entries)
+            if (e.action || e.edit || e.adjust) actionWindows.insert(e.window);
+        std::string signature;
+        auto add=[&](const std::string& s) { signature+=std::to_string(s.size())+":"+s; };
+        add(out.modal?"modal":"normal");add(out.dialogueText);add(out.documentRef);
+        for (const auto& e:out.entries)
+        {
+            if (!actionWindows.contains(e.window)) continue;
+            // Retain modal question text and prices, not rendered geometry.
+            add(e.window);add(e.widget);add(e.role);add(e.text);add(e.instance);
+            add(e.enabled?"enabled":"disabled");add(e.panel);add(e.description);
+            add(e.unavailableReason);add(e.control);add(e.value);add(e.destination);
+            add(std::to_string(e.count));add(std::to_string(e.conditionCurrent));
+            add(std::to_string(e.conditionMax));add(e.selected?"selected":"normal");
+            add(e.equipped?"equipped":"normal");add(e.pendingTrade?"pending":"normal");
+            if (e.adjust) {add(std::to_string(e.sliderPosition));add(std::to_string(e.sliderMax));}
+        }
+        if (signature!=controlSignature) {controlSignature=std::move(signature);++controlGeneration;}
+        std::size_t actionIndex=0;
+        for (std::size_t i=0;i<out.entries.size();++i)
+        {
+            auto& e=out.entries[i];
+            e.ref=(e.action || e.edit || e.adjust)
+                ? "ui_action_"+std::to_string(controlGeneration)+"_"+std::to_string(actionIndex++)
+                : "ui_text_"+out.revision+"_"+std::to_string(i);
+        }
         return out;
     }
     inline sol::table observe(sol::this_state state,MWBase::WindowManager* wm)
@@ -572,7 +631,7 @@ namespace MWLua::AstraUI
                 if (e.conditionCurrent>=0)
                 { row["condition_current"]=e.conditionCurrent; row["condition_max"]=e.conditionMax; }
             }
-            row["ref"]="ui_"+snap.revision+"_"+std::to_string(i);
+            row["ref"]=e.ref;
             rect[1]=e.rect.left;rect[2]=e.rect.top;rect[3]=e.rect.right-e.rect.left;rect[4]=e.rect.bottom-e.rect.top;
             if (e.screenVisible) row["rect"]=rect;
             entries[i+1]=row;
@@ -678,8 +737,8 @@ namespace MWLua::AstraUI
         for (std::size_t i=0;i<snap.entries.size();++i)
         {
             auto& e=snap.entries[i];
-            if (ref=="ui_"+snap.revision+"_"+std::to_string(i) && e.enabled && e.action)
-            {e.action();return true;}
+            if (ref==e.ref && e.enabled && e.action)
+            {invalidateControls();e.action();return true;}
         }
         return false;
     }
@@ -690,7 +749,7 @@ namespace MWLua::AstraUI
         for (std::size_t i=0;i<snap.entries.size();++i)
         {
             const auto& e=snap.entries[i];
-            if (ref!="ui_"+snap.revision+"_"+std::to_string(i) || !e.screenVisible) continue;
+            if (ref!=e.ref || !e.screenVisible) continue;
             MWBase::Environment::get().getInputManager()->injectUiMouseMove(
                 (e.rect.left+e.rect.right)/2,(e.rect.top+e.rect.bottom)/2);
             wm->setCursorActive(true);
@@ -719,8 +778,8 @@ namespace MWLua::AstraUI
         for (std::size_t i=0;i<snap.entries.size();++i)
         {
             auto& e=snap.entries[i];
-            if (ref=="ui_"+snap.revision+"_"+std::to_string(i) && e.enabled && e.edit)
-            {e.edit(value);return true;}
+            if (ref==e.ref && e.enabled && e.edit)
+            {invalidateControls();e.edit(value);return true;}
         }
         return false;
     }
@@ -730,8 +789,8 @@ namespace MWLua::AstraUI
         for (std::size_t i=0;i<snap.entries.size();++i)
         {
             auto& e=snap.entries[i];
-            if (ref=="ui_"+snap.revision+"_"+std::to_string(i) && e.enabled && e.adjust && position<=e.sliderMax)
-            {e.adjust(position);return true;}
+            if (ref==e.ref && e.enabled && e.adjust && position<=e.sliderMax)
+            {invalidateControls();e.adjust(position);return true;}
         }
         return false;
     }

@@ -2,6 +2,8 @@
 
 Use current screenshots plus structured navigation data. The maps below are partial assistance, not a complete layout of the level. For handle types and result interpretation, see [commands.md](commands.md).
 
+For places already visited, start with `atlas --query "NAME"` / `revisit`, or `recall` / `return-to`; see [travel memory](#travel-memory-json-nodes-plus-optional-diagram). A failed local route is not evidence that the remembered place was forgotten.
+
 ## Coordinate conventions
 
 - Distances are metres; durations are simulation seconds.
@@ -34,6 +36,10 @@ Use current screenshots plus structured navigation data. The maps below are part
 `walk` also accepts `--under-fire`. This flag disables the early damage stop for the movement commands that support it; it does not confer protection. Ordinary navigation can stop on damage, a changed location/UI, obstruction, lost target, time limit or partial path. Check the returned reason and actual distance, not just `ok:true`.
 
 Path-following `go`/`walk` looks along its movement. A live combat lock controls the camera: `unlock` before independent turns/scans/path navigation. Combat pursuit/retreat intentionally keeps the actor in view; see [combat.md](combat.md).
+
+An object may be above the standing surface, such as a hatch. Approach checks reach from the final eye position. Short missing navmesh connections may use `source: local_collision` after checking floor support and body clearance. A useful partial path can stop short and reports actual progress; it does not certify arrival. NPCs may move or disable player controls through a tutorial script. `player_controls_disabled` means wait or handle the current UI, rather than retrying movement against the restriction.
+
+`scan` starts with a new observation. Each returned view includes its zero-based `view`, actual `heading_deg` and screenshot. Do not infer a view's angle from a previous observation or filename sequence. The final view is the current camera direction. Inspect omitted objects from one stored view with `action-result REQUEST_ID --view N --section scene`.
 
 ### Direct `act` fields
 
@@ -87,7 +93,7 @@ For a visibly reachable point not described well by a passage:
 
 `arrived` uses a tolerance reported by navigation. `partial`, `path_end_out_of_reach`, `blocked`, or `height_mismatch` do not mean the destination was reached. A bridge, stair or landing can be visible but not connected by the current navmesh. Choose another visible waypoint or a short direct action supported by the screenshot; do not force a hidden route.
 
-`endpoint_mismatch` means the native path ended on a different height from the requested destination; the motor does not walk that misleading partial route. A short route may instead use physically sampled floor support (`navigation.source: local_collision`). Native navigation remains the default (`navmesh`). All movement uses normal collision and controls.
+`endpoint_mismatch` means the native path ended on a different height without a validated standing point or useful approach segment. An object approach may follow a useful native prefix, then replan; it reports partial progress if the destination remains unreachable. A short route may instead use physically sampled floor support (`navigation.source: local_collision`). Native navigation remains the default (`navmesh`). All movement uses normal collision and controls.
 
 ## Flight and water
 

@@ -9,6 +9,7 @@ from .protocol import BridgeError, atomic_json, validate
 from .observations import present_response
 from .receipts import Receipts
 from .autosave import finish_session
+from .information import receipt_details
 
 
 class Control:
@@ -53,8 +54,8 @@ class Control:
         request_id=args.pop('request_id',None)
         if type(full) is not bool: raise BridgeError('invalid_arguments')
         if op=='action_result':
-            if args.keys()-{'ref'}:raise BridgeError('invalid_arguments')
             receipt=self.receipts.get(args.get('ref'))
+            if args.keys()-{'ref'}:return receipt_details(receipt,args)
             if 'response' in receipt:receipt['response']=present_response(receipt['response'],full)
             return receipt
         if op == 'status' and not args.get('player'):
@@ -106,9 +107,35 @@ class Control:
                 self.receipts.finish(request_id,result)
             except Exception as exc:
                 unknown=s.uncertain or str(exc) in {'game_exited','result_unknown_stop_or_restart'} or not isinstance(exc,BridgeError)
-                self.receipts.finish(request_id,{'error':str(exc) if isinstance(exc,BridgeError) else 'controller_operation_failed'},'unknown' if unknown else 'rejected')
+                if isinstance(exc,BridgeError):
+                    exc.details['request_id']=request_id
+                    if not unknown and str(exc) in {'ui_open','stale_ui_ref','action_unavailable'}:
+                        observation=s.latest_observation or {}
+                        if hasattr(s,'observe'):
+                            try:observation=s.observe(capture=False)
+                            except BridgeError:pass
+                        exc.details['ui_mode']=observation.get('ui_mode')
+                        exc.details['body']={k:v for k,v in observation.get('body',{}).items() if k in
+                                             {'can_move','dead','controls_enabled','looking_enabled','jumping_enabled','animation_busy','recovering'}}
+                        body=observation.get('body',{})
+                        exc.details['next_command']='status --player'
+                        if str(exc)=='action_unavailable':
+                            if body.get('controls_enabled') is False:
+                                exc.details.update(reason='player_controls_disabled',next_command='wait-until controls --seconds 10')
+                            elif body.get('looking_enabled') is False and (op in {'look','focus','interact','approach','track'} or args.get('yaw') or args.get('pitch')):
+                                exc.details.update(reason='player_looking_disabled',next_command='wait-until controls --control looking --seconds 10')
+                            elif body.get('jumping_enabled') is False and args.get('trigger')=='Jump':
+                                exc.details.update(reason='player_jumping_disabled',next_command='wait-until controls --control jumping --seconds 10')
+                            elif body.get('animation_busy') or body.get('recovering'):
+                                exc.details['next_command']='wait-until animation --seconds 10'
+                        if str(exc) in {'ui_open','stale_ui_ref'} or observation.get('ui_mode')!='Gameplay' or observation.get('ui',{}).get('modal'):
+                            exc.details['next_command']='ui'
+                failure=exc.response() if isinstance(exc,BridgeError) else {'error':'controller_operation_failed'}
+                self.receipts.finish(request_id,failure,'unknown' if unknown else 'rejected')
                 raise
-            return {**present_response(result, full, before),'request_id':request_id}
+            presented=present_response(result, full, before, args.get('ref'))
+            if 'details' in presented:presented['details']=presented['details'].replace('REQUEST_ID',request_id)
+            return {**presented,'request_id':request_id}
         finally:
             self.active = None
             s.full_observations=False

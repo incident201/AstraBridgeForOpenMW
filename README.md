@@ -15,7 +15,7 @@ The build archive contains the engine, resources, shared libraries, license noti
 
 ## Install the Linux build
 
-The binary targets a current CachyOS/Arch-like Linux x86_64 system with glibc 2.44 or newer, an X11/XWayland graphical session, and a working graphics driver. The runtime uses Python 3.11 or newer. The two Python wheels needed for offline bootstrap and a local `xdotool` are bundled in `harness/`.
+The binary targets a current CachyOS/Arch-like Linux x86_64 system with glibc 2.44 or newer, an X11/XWayland graphical session, and a working graphics driver. The runtime uses Python 3.11 or newer. Runtime wheels for standard CPython 3.11–3.14 on Linux x86_64, including Pillow, and a local `xdotool` are bundled in `harness/`. For other Python ABIs, omit `--offline` to install compatible dependencies online.
 
 From this repository, choose a separate installation directory:
 

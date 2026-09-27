@@ -6,6 +6,7 @@ function V.__sub(a,b)return V.new(a.x-b.x,a.y-b.y,a.z-b.z)end
 function V.__add(a,b)return V.new(a.x+b.x,a.y+b.y,a.z+b.z)end
 function V.__mul(a,b)return V.new(a.x*b,a.y*b,a.z*b)end
 function V:length()return math.sqrt(self.x^2+self.y^2+self.z^2)end
+function V:normalize()return self*(1/self:length())end
 local self={position=V.new(0,0,0)}
 local calls=0
 local waterWalking=false
@@ -167,7 +168,9 @@ assert(not N.recover(crowded,0),'dynamic recovery remains bounded')
 self.position=V.new(0,0,0)
 require('openmw.types').Actor.objectIsInstance=function()return false end
 require('openmw.core').getGMST=function()return 140 end
-local door={};local goal={obj=door,center=V.new(0,350,70),half=V.new(20,20,70)}
+local door={};local goal={obj=door,center=V.new(0,350,70),half=V.new(20,20,70),point=V.new(0,350,70)}
+package.preload['openmw.camera']=function()return {getPosition=function()return self.position+V.new(0,0,90)end}end
+nearby.castRenderingRay=function()return {hit=true,hitObject=door}end
 nearby.castRay=function()return {hit=true,hitObject=door}end
 nearby.findPath=function(_,dest)
     if dest.x==0 and dest.y==350 then return 99,{} end
@@ -178,6 +181,30 @@ assert(plan.standingPoint and plan.status=='planned' and plan.goal.y==350,
     'a door inside a wall needs a reachable activation standing point')
 nearby.castRay=function()return {hit=true,hitObject={}}end
 assert(not N.new(goal).standingPoint,'a standing point behind intervening geometry cannot activate the door')
+
+-- A hatch above the stairs is reachable from the eye at the native endpoint.
+local hatch={obj=door,center=V.new(0,350,230),point=V.new(0,350,225),half=V.new(20,20,5)}
+nearby.findPath=function()return 1,{self.position,V.new(0,310,70)}end
+nearby.castRay=function()return {hit=true,hitObject=door}end
+local hatchPlan=N.new(hatch)
+assert(hatchPlan.standingPoint and not hatchPlan.endpointMismatch,'feet below a hatch are valid when eye-to-surface activation is clear and in range')
+nearby.castRenderingRay=function()return {hit=true,hitObject={}}end
+assert(not N.new(hatch).standingPoint,'a floor occluding the hatch cannot be an activation standing point')
+nearby.castRenderingRay=function()return {hit=true,hitObject=door}end
+hatch.point=V.new(0,350,600)
+assert(not N.new(hatch).standingPoint,'a visible target above activation range is not reachable')
+
+-- A short seam before a visible actor uses physical floor, without crossing bodies.
+require('openmw.types').Actor.objectIsInstance=function()return true end
+local guard={position=V.new(0,350,0)}
+local actorGoal={obj=guard,point=V.new(0,350,90)}
+nearby.castRenderingRay=function()return {hit=true,hitObject=guard}end
+nearby.findPath=function()return 1,{self.position,V.new(0,20,100)}end
+terrain.walkLine=function(from,to)return {from,to}end
+local joined=N.new(actorGoal)
+assert(joined.localPath and joined.standingPoint and not joined.endpointMismatch)
+terrain.walkLine=function()return nil end
+assert(not N.new(actorGoal).localPath,'a blocked corridor must not become a connector')
 
 -- A coarse native endpoint must not strand the actor just short of its known point.
 self.position=V.new(0,0,0)

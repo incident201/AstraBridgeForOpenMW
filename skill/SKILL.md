@@ -1,6 +1,6 @@
 ---
 name: openmw-play
-description: "Play Morrowind through a configured AstraBridge/OpenMW installation: navigate, talk, fight, read opened books and scrolls, repair equipment, and maintain persistent named travel memory and recordings. Supports fresh selectors and postconditions, language-independent service controls, rest/buy/travel helpers, air/water navigation, targeted information queries, persistent task/evidence memory, recoverable command results, autosaves and emergency recovery of displaced NPCs. Use for gameplay, not harness or engine development."
+description: "Play Morrowind through a configured AstraBridge/OpenMW installation: navigate, interact, fight, read documents, repair gear and record play. Use its public CLI for compact observations, targeted full information, control availability, stable menu actions, persistent travel/task memory, recoverable results and saves. Includes language-independent service controls and emergency recovery of displaced NPCs. Use for gameplay, not harness or engine development."
 ---
 
 # Play OpenMW through AstraBridge
@@ -13,6 +13,8 @@ cd "$ASTRA_HOME"
 ```
 
 `ASTRA_HOME` is a directory hint for the agent; it does not configure the CLI. If setup is incomplete, refer the user to the repository's English `README.md`. Do not turn a gameplay request into installation or development work.
+
+Explicitly requested installation or development is a separate task. During gameplay, private source files, internal logs and test fixtures are not alternate channels for observing game state. These rules govern agent behavior; the harness validates its public commands and is not a filesystem sandbox for unrestricted shell tools.
 
 ## Mandatory gameplay boundaries
 
@@ -71,13 +73,15 @@ These references describe the public interface; no source-code inspection is nee
 
 The harness pauses the world after each action completes or is interrupted. Reasoning time does not consume effect duration or let enemies move. Turning, waiting, and moving within an action do consume simulation time. Choose `act.seconds` for the intended duration; there is no three-second cap or periodic pause within an action. A `chain` has no mandatory thinking pause between its steps.
 
-This also pauses NPC animation and time-dependent game scripts. During the opening ship scene, movement can return `action_unavailable` while the game has disabled controls and waits for the guard to arrive. Do not infer a broken script from a still image or an unchanged scene between commands. Advance the scene with `act '{"seconds":10}'` (repeat if needed), then inspect the new observation, NPC positions, messages, and `feedback`. If an action ends with `game_paused`, inspect the current UI and handle the game's tutorial prompt before continuing.
+This also pauses NPC animation and time-dependent game scripts. During the opening ship scene, movement can return `action_unavailable` while the game has disabled controls and waits for the guard to arrive. `body.controls_enabled` reports this restriction; `can_move` alone describes physical mobility. Use `wait-until controls --seconds 30`, then inspect its result. A tutorial modal can interrupt the wait even when `ui_mode` is `Gameplay`: run `ui`, choose its current button, and resume. `act '{"seconds":10}'` also advances an idle scene. A still image between commands does not indicate a broken script.
 
 During a long action, `status` returns live progress and `stop` interrupts independently of that action. Use `finish-session --description "..."` when the user requests saving, stopping recording and closing together; it keeps the game open if saving fails. Use `stop` alone when they only want to pause. Never wait out a long action after the user asks to stop.
 
 Normal observations include a screenshot of at most 1280×720 and compact structured information. Pixel coordinates in commands and returned rectangles refer to that screenshot; game rendering and video recording default to 1920×1080. Essential equipment, effect durations and important changes stay in the compact response. Use `details SECTION` to expand the current observation without taking another screenshot, search/page large UI or inventory lists, and use `--full` when the complete response is useful; `atlas --map` or `observe --map` explicitly requests map images. The cache keeps the latest 128 ordinary screenshots by default; explicit `remember` note images are protected. The atlas retains learned paths in SQLite independently of cached screenshots.
 
 After an action, check `feedback`, `action.reason`, observed movement, messages, and the new observation. Submission, a finished animation, or mana spent does not by itself confirm the intended outcome. Inspect the result before sending the next dependent action.
+
+Quick recovery: `stale_ui_ref` → query `ui` and select the current control; `activation_sent` → check the resulting menu/messages and `target-info` before retrying; blocked movement → inspect the screenshot, movement distance and navigation reason, then choose a reachable observed point. `scan` labels each view with its actual heading and index; use those labels rather than inferring angles from screenshot numbers. Retrieve one earlier view with `action-result REQUEST_ID --view N --section scene` without moving the camera.
 
 On `blocked`, `target_lost`, a changed UI, or an expired effect, reassess rather than blindly repeat. After a connection failure, recover the receipt with `action-result REQUEST_ID` (or the latest receipt if no ID is known). Supply `--request-id ID` before an action whose outcome must survive a disconnect. Reusing that ID retrieves its receipt and never repeats the mutation. An unknown receipt is not proof of failure. Do not repair a gameplay failure by changing code or using the console.
 

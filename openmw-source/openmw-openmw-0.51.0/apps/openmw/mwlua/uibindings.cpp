@@ -208,9 +208,17 @@ namespace MWLua
             MWBase::Environment::get().getInputManager()->executeAction(MWInput::A_Rest);
             return windowManager->containsMode(MWGui::GM_Rest);
         };
-        api["_astraActivate"] = [context, windowManager]() {
+        api["_astraIsActivationTarget"] = [context, windowManager](const LObject& expected) {
             if (context.mType != Context::Local || !context.mLuaManager->isSynchronizedUpdateRunning()
                 || windowManager->isGuiMode()) return false;
+            return MWBase::Environment::get().getWorld()->getFocusObject() == expected.ptr();
+        };
+        api["_astraActivate"] = [context, windowManager](sol::optional<LObject> expected) {
+            if (context.mType != Context::Local || !context.mLuaManager->isSynchronizedUpdateRunning()
+                || windowManager->isGuiMode()) return false;
+            // Check the exact ray used by ordinary Activate, after the camera
+            // has reached a rendered frame. Never substitute a nearby object.
+            if (expected && MWBase::Environment::get().getWorld()->getFocusObject() != expected->ptr()) return false;
             MWBase::Environment::get().getInputManager()->executeAction(MWInput::A_Activate);
             return true;
         };

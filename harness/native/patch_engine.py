@@ -95,6 +95,27 @@ replace('apps/openmw/mwlua/uibindings.cpp','        api["_setHudVisibility"]',
             return true;
         };
         api["_setHudVisibility"]''')
+replace('apps/openmw/mwlua/uibindings.cpp',
+'''        api["_astraActivate"] = [context, windowManager]() {
+            if (context.mType != Context::Local || !context.mLuaManager->isSynchronizedUpdateRunning()
+                || windowManager->isGuiMode()) return false;
+            MWBase::Environment::get().getInputManager()->executeAction(MWInput::A_Activate);
+            return true;
+        };''',
+'''        api["_astraIsActivationTarget"] = [context, windowManager](const LObject& expected) {
+            if (context.mType != Context::Local || !context.mLuaManager->isSynchronizedUpdateRunning()
+                || windowManager->isGuiMode()) return false;
+            return MWBase::Environment::get().getWorld()->getFocusObject() == expected.ptr();
+        };
+        api["_astraActivate"] = [context, windowManager](sol::optional<LObject> expected) {
+            if (context.mType != Context::Local || !context.mLuaManager->isSynchronizedUpdateRunning()
+                || windowManager->isGuiMode()) return false;
+            // Check the exact ray used by ordinary Activate, after the camera
+            // has reached a rendered frame. Never substitute a nearby object.
+            if (expected && MWBase::Environment::get().getWorld()->getFocusObject() != expected->ptr()) return false;
+            MWBase::Environment::get().getInputManager()->executeAction(MWInput::A_Activate);
+            return true;
+        };''')
 if 'struct AstraRun' not in (root/'apps/openmw/mwgui/bookpage.hpp').read_text():
     replace('apps/openmw/mwgui/bookpage.hpp','        virtual void setFocusItem(BookTypesetter::Style* itemStyle) = 0;',
 '''        virtual void setFocusItem(BookTypesetter::Style* itemStyle) = 0;

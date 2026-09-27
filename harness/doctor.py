@@ -1,14 +1,21 @@
 #!/usr/bin/env python3
 """Read-only preflight for an extracted AstraBridge installation."""
 import ctypes,importlib.util,json,os,platform,shutil,subprocess,sys
+import importlib.metadata
 from pathlib import Path
 from astra_bridge.diagnostics import inspect_auto_fixes
+from astra_bridge.dependencies import offline_runtime
 root=Path(__file__).resolve().parent;errors=[];checks={}
 checks['python']=platform.python_version()
+checks['offline_runtime']=offline_runtime(root)
 if sys.version_info<(3,11):errors.append('Python >= 3.11 required')
 for name in ('mss','imageio_ffmpeg','PIL'):
  checks[name]=importlib.util.find_spec(name) is not None
- if not checks[name]:errors.append(f'Missing {name}; run bootstrap.py --offline')
+ if not checks[name]:errors.append(f'Missing {name}; run bootstrap.py'+(' --offline' if checks['offline_runtime']['available'] else ' (online; no compatible offline wheel)'))
+checks['runtime_versions']={}
+for name in ('mss','imageio-ffmpeg','Pillow'):
+ try:checks['runtime_versions'][name]=importlib.metadata.version(name)
+ except importlib.metadata.PackageNotFoundError:checks['runtime_versions'][name]=None
 for name in ('libxcb.so.1','libxcb-composite.so.0','libX11.so.6'):
  try:ctypes.CDLL(name);checks[name]=True
  except OSError:checks[name]=False;errors.append(f'Missing system library {name}')

@@ -9,6 +9,17 @@ local Mobility=require('scripts.astrabridge.mobility')
 local M={}
 local function mode()return Mobility.mode and Mobility.mode() or 'walk' end
 local function horizontal(v)return math.sqrt(v.x*v.x+v.y*v.y)end
+local function activationStandingPoint(point,g)
+    if not g or not g.obj or not g.point then return false end
+    local camera=require('openmw.camera')
+    local eyeHeight=camera.getPosition().z-self.position.z
+    local origin=point+util.vector3(0,0,eyeHeight)
+    local delta=g.point-origin
+    local reach=require('openmw.core').getGMST('iMaxActivateDist')*.8
+    if delta:length()>reach or delta:length()<1 then return false end
+    local hit=nearby.castRenderingRay(origin,g.point+delta:normalize()*4,{ignore=self.object})
+    return hit.hitObject==g.obj
+end
 local function destination(g)
     if g.groundPoint then return g.freeDestination and g.groundPoint or Mobility.surface(g.groundPoint) end
     if mode()=='air' or mode()=='swim' then
@@ -46,7 +57,7 @@ local function plan(n,g)
         includeFlags=Mobility.flags(flags)+flags.UsePathgrid,
         destinationTolerance=n.tolerance,
     })
-    n.path=nil;n.index=1;n.localPath=nil;n.endpointMismatch=nil
+    n.path=nil;n.index=1;n.localPath=nil;n.endpointMismatch=nil;n.partialApproach=nil;n.standingPoint=nil
     if not ok then n.status='unavailable';useRecorded(n,'navigation_unavailable');return end
     if (status==nearby.FIND_PATH_STATUS.Success or status==nearby.FIND_PATH_STATUS.PartialPath) and #path>0 then
         local surfacePath={}
@@ -59,6 +70,12 @@ local function plan(n,g)
         n.endpointMismatch=math.abs(path[#path].z-n.goal.z)>70
     else n.status='no_path' end
     n.pathStatus=n.status
+    -- Object origins are not standing destinations. In particular a hatch
+    -- can be reached from the stairs below it. Validate reach from the eye at
+    -- the actual route endpoint before rejecting its different floor height.
+    if n.path and g and not n.movingTarget and activationStandingPoint(n.path[#n.path],g) then
+        n.endpointMismatch=nil;n.status='planned';n.pathStatus='planned';n.standingPoint=true
+    end
     -- A visible door/container can have its origin inside a wall. Search for
     -- a reachable standing point around it, using normal pathfinding and a
     -- physical ray towards the observed object. Never move through the object.
@@ -74,7 +91,7 @@ local function plan(n,g)
                 agentBounds=types.Actor.getPathfindingAgentBounds(self),includeFlags=Mobility.flags(flags)+flags.UsePathgrid,destinationTolerance=16})
             if worked and status==nearby.FIND_PATH_STATUS.Success and #route>0 then
                 local last=Mobility.surface(route[#route])
-                if math.abs(last.z-n.goal.z)<50 and (last-n.goal):length()<radius+30 then
+                if activationStandingPoint(last,g) then
                     local origin=last+util.vector3(0,0,90)
                     local hit=nearby.castRay(origin,g.center,{ignore=self.object})
                     if not hit.hit or hit.hitObject==g.obj then
@@ -99,6 +116,32 @@ local function plan(n,g)
         local direct=terrain.walkLine and terrain.walkLine(self.position,n.goal)
         if direct then
             n.path=direct;n.index=1;n.endpointMismatch=nil;n.status='local';n.pathStatus='local';n.localPath=true
+        end
+    end
+    if g and g.obj and g.point and (not n.path or n.status=='partial' or n.endpointMismatch) then
+        -- Join a short missing navmesh seam only over checked floor support.
+        -- Stop before the target's body instead of walking into the actor.
+        local terrain=require('scripts.astrabridge.terrain')
+        local radius=require('openmw.core').getGMST('iMaxActivateDist')*.65
+        local yaw=math.atan2(self.position.x-n.goal.x,self.position.y-n.goal.y)
+        for _,degrees in ipairs({0,30,-30,60,-60}) do
+            local a=yaw+math.rad(degrees)
+            local candidate=n.goal+util.vector3(math.sin(a)*radius,math.cos(a)*radius,0)
+            if activationStandingPoint(candidate,g) then
+                local direct=terrain.walkLine and terrain.walkLine(self.position,candidate)
+                if direct then
+                    n.path=direct;n.index=1;n.endpointMismatch=nil;n.status='local';n.pathStatus='local'
+                    n.localPath=true;n.standingPoint=true;break
+                end
+            end
+        end
+        -- A useful native prefix can reach the near side of the seam. Do not
+        -- reject all progress just because its endpoint is below the target.
+        if n.path and (n.status=='partial' or n.endpointMismatch) then
+            local last=n.path[#n.path]
+            if horizontal(last-self.position)>70 and (last-n.goal):length()+70<(self.position-n.goal):length() then
+                n.endpointMismatch=nil;n.partialApproach=true;n.status='partial';n.pathStatus='partial'
+            end
         end
     end
 end
@@ -181,6 +224,10 @@ function M.step(n,g,dt)
         if reached then n.index=n.index+1 else break end
     end
     if n.index>#n.path then
+        if n.partialApproach and g then
+            n.partialApproach=nil;plan(n,g)
+            return M.step(n,nil,0)
+        end
         if n.volume and not M.reached(n) then
             plan(n,g);return n.path and n.path[1]
         end

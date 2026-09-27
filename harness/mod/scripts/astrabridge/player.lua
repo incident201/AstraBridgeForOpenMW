@@ -165,6 +165,9 @@ local function bodyState()
     body.on_ground=A.isOnGround(self)
     body.swimming=A.isSwimming(self)
     body.can_move=A.canMove(self)
+    body.controls_enabled=controlsAllowed()
+    body.looking_enabled=Player.getControlSwitch(self,Player.CONTROL_SWITCH.Looking)
+    body.jumping_enabled=Player.getControlSwitch(self,Player.CONTROL_SWITCH.Jumping)
     body.dead=A.isDead(self)
     for k,v in pairs(Mobility.state()) do body[k]=v end
     if hasAnimation and animation.getActiveGroup then
@@ -629,9 +632,20 @@ local function finish()
         if p.expected.item and A.inventory(self):countOf(p.expected.item)>p.expected.count then result.outcome='taken'
         elseif I.UI.getMode()==I.UI.MODE.Dialogue then result.outcome='dialogue_opened'
         elseif I.UI.getMode()==I.UI.MODE.Container then result.outcome='container_opened'
+        elseif I.UI.getMode()==I.UI.MODE.Book or I.UI.getMode()==I.UI.MODE.Scroll then result.outcome='document_opened'
         elseif Space.key(self.cell)~=p.expected.cell then
             result.outcome='location_changed'
             if result.motion then result.motion.location_changed=true end
+        elseif p.expected.door and p.expected.door:isValid() and Scene.resolve(p.expected.ref,true) then
+            local door=p.expected.door
+            local state=types.Door.getDoorState(door)
+            if state~=p.expected.doorState then
+                result.outcome=state==types.Door.STATE.Opening and 'door_opening'
+                    or state==types.Door.STATE.Closing and 'door_closing'
+                    or types.Door.isOpen(door) and 'door_opened' or 'door_closed'
+            elseif types.Door.isOpen(door)~=p.expected.doorOpen then
+                result.outcome=types.Door.isOpen(door) and 'door_opened' or 'door_closed'
+            end
         end
     end
     if not err and p.cmd.op == 'observe' then result = observation(p.cmd.args) end
@@ -1354,6 +1368,11 @@ local function conditionMet(c)
     elseif c.condition=='animation' then
         local b=bodyState();return not b.animation_busy and not b.recovering
     elseif c.condition=='ui' then return (I.UI.getMode() or 'Gameplay')==c.ui_mode
+    elseif c.condition=='controls' then
+        local control=c.control or 'controls'
+        if control=='looking' then return Player.getControlSwitch(self,Player.CONTROL_SWITCH.Looking) end
+        if control=='jumping' then return controlsAllowed() and Player.getControlSwitch(self,Player.CONTROL_SWITCH.Jumping) end
+        return controlsAllowed()
     elseif c.condition=='passage' and Terrain then
         local p=Terrain.probe(camera.getYaw()+math.rad(c.bearing_deg or 0),c.meters or 1)
         return not p.obstacle and p.distance>=((c.meters or 1)*Scene.unitsPerMeter-4)
@@ -1443,6 +1462,9 @@ local function onFrame(dt)
             elseif p.combat then combatFrame(p,dt)
             elseif I.UI.getMode() then pause(p.cmd,{paused=true,elapsed=p.elapsed,reason='ui_open'})
             elseif damage>.01 then pause(p.cmd,{paused=true,reason=A.isDead(self) and 'player_down' or 'player_hurt',damage_taken=math.floor(damage*100+.5)/100})
+            elseif not controlsAllowed() and (p.kind=='approach' or p.kind=='move_local' or p.kind=='walk' or p.kind=='evade'
+                or active and ((active.move or 0)~=0 or (active.strafe or 0)~=0)) then
+                pause(p.cmd,{paused=true,reason='player_controls_disabled'})
             elseif p.navigator and p.navigator.waterWalking and not Mobility.has('WaterWalking') then pause(p.cmd,{paused=true,reason='water_walking_ended'})
             elseif p.navigator and p.navigator.mode=='air' and not Mobility.has('Levitate') and not A.isOnGround(self) and not A.isSwimming(self) then pause(p.cmd,{paused=true,reason='levitation_ended'})
             elseif core.getRealTime() > p.deadline then pause(p.cmd,{paused=true,elapsed=p.elapsed,reason='wall_time_limit'})
@@ -1572,12 +1594,20 @@ local function onFrame(dt)
                     local aimed
                     if aimTarget then aimed=Scene.aimedAt(aimTarget)
                     else aimed=math.abs(ye)<math.rad(.5) and math.abs(pe)<math.rad(.5) end
+                    if p.kind=='focus' then
+                        -- Rendering rays and the engine's activation camera
+                        -- settle on different update stages. Finish the turn,
+                        -- then allow two frames before checking the native ray.
+                        aimed=aimed and math.abs(ye)<math.rad(.5) and math.abs(pe)<math.rad(.5)
+                        p.aimFrames=aimed and (p.aimFrames or 0)+1 or 0
+                        aimed=aimed and p.aimFrames>=2
+                    end
                     active.move,active.strafe=0,0
                     if p.kind=='track' then
                         active.attack=p.attack and (Scene.combatAligned and Scene.combatAligned(aimTarget) or aimed)
                         if p.elapsed>=p.seconds then finishStep(p,{paused=true,reason='tracked',elapsed=p.elapsed});return end
                     end
-                    if p.kind=='focus' and not aimed and p.elapsed>1 and math.abs(ye)<math.rad(1) and math.abs(pe)<math.rad(1) then
+                    if p.kind=='focus' and not aimed and (p.aimFrames or 0)==0 and p.elapsed>1 and math.abs(ye)<math.rad(1) and math.abs(pe)<math.rad(1) then
                         if adjustViewpoint(p) then return end
                         pause(p.cmd,{paused=true,reason='target_obstructed'});return
                     end
@@ -1589,12 +1619,18 @@ local function onFrame(dt)
                                 pause(p.cmd,{paused=true,reason='target_not_aimed'});return
                             end
                             if not ui._astraActivate then pause(p.cmd,nil,'native_ui_unavailable');return end
-                            p.expected={cell=Space.key(self.cell)}
+                            p.expected={cell=Space.key(self.cell),ref=p.target}
                             if types.Item and types.Item.objectIsInstance(aimTarget.obj) then
                                 p.expected.item=aimTarget.obj.recordId;p.expected.count=A.inventory(self):countOf(p.expected.item)
                             end
+                            if types.Door and types.Door.objectIsInstance(aimTarget.obj) then
+                                p.expected.door=aimTarget.obj;p.expected.doorState=types.Door.getDoorState(aimTarget.obj)
+                                p.expected.doorOpen=types.Door.isOpen(aimTarget.obj)
+                            end
                             stopMovement()
-                            if not ui._astraActivate() then pause(p.cmd,nil,'action_unavailable');return end
+                            if not ui._astraActivate(aimTarget.obj) then
+                                p.expected=nil;pause(p.cmd,{paused=true,reason='target_not_aimed'});return
+                            end
                             p.interactionSubmitted=p.elapsed;return
                         end
                         pause(p.cmd,{paused=true,reason='focused'});return

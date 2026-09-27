@@ -8,6 +8,8 @@
 - `inspect inventory --query "TEXT"` searches owned items. Entries include type, condition, charges/uses when applicable, normal tooltip information and opaque item/instance handles. `inspect spells --query "TEXT"`, `inspect journal --query "TEXT"` and `inspect conversations --query "TEXT"` work similarly.
 - `read --search "TEXT"` searches the currently opened document. Use `read --offset N --limit L` for consecutive portions or `read --all` for a necessary full reading.
 - `--full` requests the complete response. Prefer a section or search when a full response would repeat unrelated material.
+- `scan` returns a short per-view list with heading, observation number, screenshot and landmarks, plus one final observation. `action-result REQUEST_ID --view N --section scene --query "TEXT"` retrieves a stored view; `--section ui` or `messages` retrieves its other public data. Views are zero-based. These are historical observations; their handles are not guaranteed usable in the current scene. Querying a receipt neither moves the camera nor advances the game.
+- JSON uses compact formatting by default; `--pretty` adds indentation without changing content.
 
 Pages are zero-based, normally 20 rows, with `total` and `has_more`; `--limit` supports 1–1000. Compact dialogue previews are at most 1600 characters and report `text_has_more`; `details ui` returns the complete current text. This response-size choice does not limit the underlying menu to its viewport. `ui --full` returns the whole current UI. A shortened action history reports `steps_total`; its receipt with `--full` retains every step.
 
@@ -43,5 +45,7 @@ Choose an ID before submitting an important mutation:
 ```
 
 Every ordinary command also returns an automatically generated `request_id`. `status.active_action` reports it while the command runs; `action-result` without a ref returns the most recent receipt. Result queries work while another action is active.
+
+Use `action-result REQUEST_ID --section action` or `--section feedback` to read only that part. `--page` and `--limit` page action steps and observation lists; `--query` filters observation rows. The full receipt remains available with `--full`.
 
 Receipts live in `runtime/action-results.sqlite3`. Status is `submitted`, `completed`, `rejected`, or `unknown`. A controller restart converts unfinished receipts to `unknown`. Reusing the same ID and arguments returns the saved receipt under `response` and **never executes the action again**; using it with different arguments is rejected. `completed` means the command returned, not necessarily that the gameplay objective succeeded: check its action/feedback. `unknown` means the mutation might have happened. Observe/stop/recover before deciding on a fresh action; do not retry consumables on assumption.

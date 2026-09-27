@@ -160,6 +160,7 @@ function M.reach(g,margin)
     return g.distance<=core.getGMST('iMaxActivateDist')*(margin or .94)
 end
 function M.crosshair(g)
+    if ui._astraIsActivationTarget then return ui._astraIsActivationTarget(g.obj) end
     local from=camera.getPosition()
     local dir=camera.viewportToWorldVector(util.vector2(.5,.5)):normalize()
     local ray=nearby.castRenderingRay(from,from+dir*(core.getGMST('iMaxActivateDist')+10),{ignore=self.object})

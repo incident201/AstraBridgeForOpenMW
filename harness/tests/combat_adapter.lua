@@ -295,3 +295,44 @@ data.response=nil;data.request={session='adapter',id=25,op='trigger',args={name=
 for _=1,20 do tick();if data.response then break end end
 assert(opened==1 and data.response.result.reason=='ui_opened')
 print('Interrupting long motor action, conditional waits and native Rest passed')
+
+-- Tutorial scripts can revoke controls during a command; this is not a stuck route.
+local playerType=require('openmw.types').Player
+playerType.getControlSwitch=function()return true end
+data.response=nil;data.request={session='adapter',id=26,op='act',args={move=1,seconds=15}}
+for _=1,8 do tick()end
+playerType.getControlSwitch=function()return false end
+for _=1,20 do tick();if data.response then break end end
+assert(data.response.result.reason=='player_controls_disabled' and paused)
+data.response=nil;data.request={session='adapter',id=27,op='wait_until',args={condition='controls',seconds=10}}
+for _=1,8 do tick()end
+assert(not data.response,'disabled controls must not satisfy the wait')
+playerType.getControlSwitch=function()return true end
+for _=1,20 do tick();if data.response then break end end
+assert(data.response.result.reason=='condition_met' and paused)
+
+-- The pause handshake replaces the pending motor; preserve the interacted
+-- door's handle so its visible state change can still confirm the outcome.
+data.response=nil;data.request={session='adapter',id=28,op='unlock',args={}}
+for _=1,20 do tick();if data.response then break end end
+local scene=require('scripts.astrabridge.scene')
+local types=require('openmw.types')
+local doorState,activations=0,0
+local door={isValid=function()return true end}
+local goal={obj=door,center=V.new(0,100,0),point=V.new(0,100,0)}
+types.Door={STATE={Opening=1,Closing=2},objectIsInstance=function(o)return o==door end,
+    getDoorState=function()return doorState end,isOpen=function()return false end}
+scene.resolve=function(ref)if ref=='visible_door' then return goal end end
+scene.reach=function()return true end
+scene.aimedAt=function()return true end
+scene.crosshair=function()return true end
+for _,name in ipairs({'Dialogue','Container','Book','Scroll'}) do require('openmw.interfaces').UI.MODE[name]=name end
+ui._astraActivate=function(expected)
+    assert(expected==door,'targeted activation must carry the expected object')
+    activations=activations+1;doorState=1;return true
+end
+data.response=nil;data.request={session='adapter',id=29,op='interact',args={ref='visible_door'}}
+for _=1,40 do tick();if data.response then break end end
+assert(data.response and not data.response.error)
+assert(data.response.result.outcome=='door_opening' and activations==1 and paused,
+    'a visible door change must survive pausing, without repeating activation')

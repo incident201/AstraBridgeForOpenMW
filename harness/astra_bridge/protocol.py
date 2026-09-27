@@ -8,7 +8,12 @@ from pathlib import Path
 
 
 class BridgeError(Exception):
-    pass
+    def __init__(self, code, **details):
+        super().__init__(code)
+        self.details = details
+
+    def response(self):
+        return {'error': str(self), **self.details}
 
 
 class LogDecoder:
@@ -113,6 +118,7 @@ LEAF_KEYS.add('aimed')
 LEAF_KEYS.update({'control','destination'})
 LEAF_KEYS.add('game_time_seconds')
 LEAF_KEYS.update({'movement_mode','center_bearing_deg'})
+LEAF_KEYS.update({'controls_enabled','looking_enabled','jumping_enabled'})
 DICT_KEYS.add('dialogue')
 DICT_KEYS.add('document')
 ERRORS = {"save_unavailable", "stale_save_ref", "operation_failed", "invalid_arguments", "no_player",
@@ -203,7 +209,7 @@ def validate(op: str, args: dict) -> None:
         "evade":{"direction","ref","meters","seconds","run","actions"},
         "edit":{"ref","text"},"adjust":{"ref","position"},
         "ui_hover":{"ref"},"ui_scroll":{"steps"},
-        "move_local":{"forward_m","sideways_m","under_fire","run","seconds"},"wait_until":{"condition","percent","ui_mode","seconds","bearing_deg","meters"},"fov":{"degrees"},
+        "move_local":{"forward_m","sideways_m","under_fire","run","seconds"},"wait_until":{"condition","percent","ui_mode","seconds","bearing_deg","meters","control"},"fov":{"degrees"},
         "fly":{"ref","forward_m","sideways_m","vertical_m","seconds","under_fire"},
         "swim":{"ref","forward_m","sideways_m","vertical_m","seconds","under_fire"},
         "track":{"ref","seconds","attack"},
@@ -222,7 +228,9 @@ def validate(op: str, args: dict) -> None:
     if op=='interact' and 'approach' in args and type(args['approach']) is not bool:raise BridgeError('invalid_arguments')
     if op=='interact' and 'adjust_viewpoint' in args and type(args['adjust_viewpoint']) is not bool:raise BridgeError('invalid_arguments')
     if op=='wait_until':
-        if args.get('condition') not in {'fatigue','animation','passage','ui'}:raise BridgeError('invalid_arguments')
+        if args.get('condition') not in {'fatigue','animation','passage','ui','controls'}:raise BridgeError('invalid_arguments')
+        if args.get('control','controls') not in {'controls','looking','jumping'}:raise BridgeError('invalid_arguments')
+        if 'control' in args and args.get('condition')!='controls':raise BridgeError('invalid_arguments')
         number(args.get('percent',100),0,100)
         number(args.get('bearing_deg',0),-180,180)
         number(args.get('meters',1),.1,6)

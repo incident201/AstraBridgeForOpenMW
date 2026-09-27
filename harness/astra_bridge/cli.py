@@ -14,14 +14,25 @@ from concurrent.futures import ThreadPoolExecutor
 
 from .protocol import BridgeError, action_timeout
 from .session import Session
+from .information import SECTIONS
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNTIME = ROOT / "runtime"
 SOCKET = RUNTIME / "bridge.sock"
+PRETTY = False
+
+
+class Parser(argparse.ArgumentParser):
+    def error(self, message):
+        # argparse otherwise repeats every top-level command in both usage
+        # and its error, burying the one useful diagnostic.
+        if 'invalid choice:' in message:
+            message=message.split(' (choose from',1)[0]
+        self.exit(2, f'{self.prog}: {message}. Use {self.prog} --help.\n')
 
 
 def emit(value):
-    print(json.dumps(value, ensure_ascii=False, indent=2))
+    print(json.dumps(value, ensure_ascii=False, indent=2 if PRETTY else None))
 
 
 def request(op, args=None, timeout=130):
@@ -78,7 +89,7 @@ def serve(options):
                     if message.get('op')=='finish_session' and result.get('closed'):stopping.set()
                 response = {"ok": True, "result": result}
             except BridgeError as exc:
-                response = {"ok": False, "error": str(exc)}
+                response = {"ok": False, **exc.response()}
             except Exception:
                 import traceback
                 traceback.print_exc()  # private controller log, never the gameplay response
@@ -103,7 +114,8 @@ def serve(options):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="OpenMW player-visible harness")
+    global PRETTY
+    parser = Parser(description="OpenMW player-visible harness")
     commands = parser.add_subparsers(dest="command", required=True)
     for name in ("start", "serve"):
         p = commands.add_parser(name)
@@ -121,9 +133,12 @@ def main():
         if name=='ui':
             p.add_argument('--query');p.add_argument('--page',type=int,default=0);p.add_argument('--limit',type=int,default=20)
             p.add_argument('--panel');p.add_argument('--role');p.add_argument('--control')
-    p=commands.add_parser('details');p.add_argument('section');p.add_argument('--observation',type=int)
+    p=commands.add_parser('details',description='Page the latest public observation. For inventory, journal or spells use inspect.');p.add_argument('section',help='One of: '+', '.join(SECTIONS));p.add_argument('--observation',type=int)
     p.add_argument('--query');p.add_argument('--page',type=int,default=0);p.add_argument('--limit',type=int,default=20)
     p=commands.add_parser('action-result');p.add_argument('ref',nargs='?')
+    p.add_argument('--view',type=int,help='Zero-based scan view; does not move the camera')
+    p.add_argument('--section',choices=[*SECTIONS,'action','feedback'])
+    p.add_argument('--query');p.add_argument('--page',type=int);p.add_argument('--limit',type=int)
     p=commands.add_parser('autosave');p.add_argument('--enabled',action=argparse.BooleanOptionalAction,default=None)
     p.add_argument('--interval',type=float);p.add_argument('--slots',type=int)
     p=commands.add_parser('finish-session');p.add_argument('--description',default='Astra session end')
@@ -146,7 +161,8 @@ def main():
     p=commands.add_parser('buy');p.add_argument('name');p.add_argument('--quantity',type=int,default=1)
     p.add_argument('--max-total',type=int,required=True);p.add_argument('--instance');p.add_argument('--seconds',type=float,default=30)
     p=commands.add_parser('travel');p.add_argument('destination');p.add_argument('--max-cost',type=int);p.add_argument('--seconds',type=float,default=30)
-    p=commands.add_parser('wait-until');p.add_argument('condition',choices=['fatigue','animation','passage','ui'])
+    p=commands.add_parser('wait-until');p.add_argument('condition',choices=['fatigue','animation','passage','ui','controls'])
+    p.add_argument('--control',choices=['controls','looking','jumping'],help='For condition controls (default: controls)')
     p.add_argument('--percent',type=float,default=100);p.add_argument('--ui-mode');p.add_argument('--seconds',type=float,default=30)
     p.add_argument('--bearing-deg',type=float,default=0);p.add_argument('--meters',type=float,default=1)
     p = commands.add_parser('atlas'); p.add_argument('--radius-m',type=float,default=35)
@@ -209,7 +225,9 @@ def main():
         if name not in {'start','serve'}:
             command_parser.add_argument('--full',action='store_true',default=argparse.SUPPRESS)
             command_parser.add_argument('--request-id',default=argparse.SUPPRESS)
+            command_parser.add_argument('--pretty',action='store_true',default=argparse.SUPPRESS)
     options = parser.parse_args()
+    PRETTY=vars(options).pop('pretty',False)
     try:
         if options.command == "serve":
             serve(options)
@@ -262,7 +280,7 @@ def main():
         if not response["ok"]:
             sys.exit(1)
     except (BridgeError, OSError, ValueError) as exc:
-        emit({"ok": False, "error": str(exc) if isinstance(exc, BridgeError) else "invalid_request_or_connection"})
+        emit({"ok": False, **(exc.response() if isinstance(exc,BridgeError) else {'error':'invalid_request_or_connection'})})
         sys.exit(1)
 
 

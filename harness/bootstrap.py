@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import urllib.request
+from astra_bridge.dependencies import offline_runtime
 
 root = Path(__file__).resolve().parent
 parser = argparse.ArgumentParser()
@@ -17,9 +18,23 @@ parser.add_argument('--tests', action='store_true')
 parser.add_argument('--offline', action='store_true',help='Install from the packaged wheelhouse without a network connection')
 options = parser.parse_args()
 python = root / '.venv/bin/python'
+if options.offline:
+    target = {}
+    if python.exists():
+        target = json.loads(subprocess.check_output([str(python), '-c',
+            'import json,sys,platform,sysconfig; print(json.dumps(dict(version=list(sys.version_info[:2]), '
+            'implementation=sys.implementation.name, architecture=platform.machine(), '
+            'threaded=bool(sysconfig.get_config_var("Py_GIL_DISABLED")))))'], text=True))
+    bundle = offline_runtime(root, **target)
+    if not bundle['available']:
+        parser.error('Offline runtime wheels unavailable for '+bundle['implementation']+' '+bundle['python']
+                     +' '+bundle['abi']+' '+bundle['architecture']+': '+', '.join(bundle['missing'])
+                     +'. Use a supported CPython 3.11–3.14 Linux x86_64 interpreter, or run bootstrap.py without --offline.')
+    if options.tests:
+        parser.error('The bundled wheels cover runtime dependencies; install test dependencies with bootstrap.py --tests (online).')
 if not python.exists():
     if shutil.which('uv'):
-        subprocess.run(['uv', 'venv', str(root / '.venv')], check=True)
+        subprocess.run(['uv', 'venv', '--python', sys.executable, str(root / '.venv')], check=True)
     else:
         subprocess.run([sys.executable, '-m', 'venv', str(root / '.venv')], check=True)
 packages = ['-r', str(root / 'requirements.txt')]
