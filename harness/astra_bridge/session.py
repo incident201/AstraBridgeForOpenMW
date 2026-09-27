@@ -26,6 +26,7 @@ from . import workflows
 from . import information
 from .knowledge import Knowledge
 from .autosave import Autosave
+from .tribunal import prepare_tribunal_delay
 
 
 def observation_changes(before,after):
@@ -51,6 +52,7 @@ class Session:
                                    local_settings.get('recordings_dir') or self.runtime / 'recordings')
         self.engine_binary = local_settings.get('engine_binary')
         self.engine_libraries = local_settings.get('engine_libraries')
+        self.delay_tribunal = local_settings.get('delay_tribunal', True)
         self.screenshot_keep = local_settings.get('screenshot_keep',128)
         if type(self.screenshot_keep) is not int or self.screenshot_keep < 8:
             raise BridgeError('invalid_screenshot_keep')
@@ -85,6 +87,10 @@ class Session:
     def prepare(self):
         cfg = (self.installation / "config/openmw.cfg").read_text()
         cfg += f'\ndata="{self.root / "mod"}"\ndata="{self.runtime / "data"}"\ncontent=AstraBridge.omwscripts\n'
+        cfg = prepare_tribunal_delay(cfg, self.runtime / 'data',
+                                     base_dir=self.profile,
+                                     enabled=getattr(self, 'delay_tribunal', True),
+                                     local_data=self.runtime / 'local-data')
         (self.profile / "openmw.cfg").write_text(cfg)
         settings = (self.installation / "config/settings.cfg").read_text()
         border='false' if self.display.headless else 'true'
