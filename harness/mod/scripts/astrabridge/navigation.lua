@@ -43,6 +43,37 @@ local function plan(n,g)
         n.endpointMismatch=math.abs(path[#path].z-n.goal.z)>70
     else n.status='no_path' end
     n.pathStatus=n.status
+    -- A visible door/container can have its origin inside a wall. Search for
+    -- a reachable standing point around it, using normal pathfinding and a
+    -- physical ray towards the observed object. Never move through the object.
+    if g and g.obj and not n.movingTarget and (not n.path or n.status=='partial' or n.endpointMismatch) then
+        local best,score
+        local core=require('openmw.core')
+        local radius=core.getGMST('iMaxActivateDist')*.65
+        local approachYaw=math.atan2(self.position.x-n.goal.x,self.position.y-n.goal.y)
+        for _,degrees in ipairs({0,45,-45,90,-90,135,-135,180}) do
+            local yaw=approachYaw+math.rad(degrees)
+            local candidate=n.goal+util.vector3(math.sin(yaw)*radius,math.cos(yaw)*radius,0)
+            local worked,status,route=pcall(nearby.findPath,self.position,candidate,{
+                agentBounds=types.Actor.getPathfindingAgentBounds(self),includeFlags=Mobility.flags(flags)+flags.UsePathgrid,destinationTolerance=16})
+            if worked and status==nearby.FIND_PATH_STATUS.Success and #route>0 then
+                local last=Mobility.surface(route[#route])
+                if math.abs(last.z-n.goal.z)<50 and (last-n.goal):length()<radius+30 then
+                    local origin=last+util.vector3(0,0,90)
+                    local hit=nearby.castRay(origin,g.center,{ignore=self.object})
+                    if not hit.hit or hit.hitObject==g.obj then
+                        local cost=0;local previous=self.position
+                        for _,point in ipairs(route) do cost=cost+(point-previous):length();previous=point end
+                        if not score or cost<score then best=route;score=cost end
+                    end
+                end
+            end
+        end
+        if best then
+            for i,point in ipairs(best) do best[i]=Mobility.surface(point) end
+            n.path=best;n.index=1;n.status='planned';n.pathStatus='planned';n.endpointMismatch=nil;n.standingPoint=true
+        end
+    end
     if n.recordedPath and (not n.path or n.status=='partial' or n.endpointMismatch) then
         useRecorded(n,'incomplete_navmesh')
     end
@@ -130,7 +161,21 @@ function M.step(n,g,dt)
         end
         if reached then n.index=n.index+1 else break end
     end
-    if n.index>#n.path then n.status='path_end';return nil end
+    if n.index>#n.path then
+        -- Navmesh endpoints can stop a few decimetres short of a previously
+        -- occupied waypoint. Finish only over physically sampled clear floor.
+        if not n.finalApproach and n.lastGoal and n.lastGoal.groundPoint
+            and horizontal(n.goal-self.position)<=105 and math.abs(n.goal.z-self.position.z)<35 then
+            n.finalApproach=true
+            local terrain=require('scripts.astrabridge.terrain')
+            local tail=terrain.walkLine and terrain.walkLine(self.position,n.goal)
+            if tail and #tail>0 and horizontal(tail[#tail]-n.goal)<24 then
+                n.path=tail;n.index=1;n.localPath=true;n.pathStatus='local';n.status='local'
+                return M.step(n,nil,0)
+            end
+        end
+        n.status='path_end';return nil
+    end
     -- Look ahead only along a nearly straight piece of the existing route.
     -- The body-width collision test prevents cutting a doorway corner or an
     -- opened door leaf. Recorded routes retain their original floor profile.
@@ -154,7 +199,7 @@ function M.step(n,g,dt)
     end
     return n.path[n.index]
 end
-function M.begin(n)n.attempts=0;n.blockedBy=nil end
+function M.begin(n)n.attempts=0;n.blockedBy=nil;n.recoveryPositions={} end
 function M.reached(n)
     local d=n.goal-self.position
     return horizontal(d)<(n.arrivalTolerance or 25) and math.abs(d.z)<35
@@ -188,6 +233,10 @@ function M.recover(n,yaw)
     local limit=n.blockedBy=='actor' and 4 or 2
     if (n.attempts or 0)>=limit then return false end
     n.attempts=(n.attempts or 0)+1;n.recoveryCount=(n.recoveryCount or 0)+1
+    n.recoveryPositions=n.recoveryPositions or {}
+    local key=string.format('%d:%d:%d',math.floor(self.position.x/20),math.floor(self.position.y/20),math.floor(self.position.z/20))
+    n.recoveryPositions[key]=(n.recoveryPositions[key] or 0)+1
+    if n.recoveryPositions[key]>3 then n.failureReason='repeated_obstruction';return false end
     if n.blockedBy=='actor' then
         if n.attempts==1 then n.waitRemaining=.7;return true end
         -- The actor can move during our finite turn. Drop a stale sidestep and
@@ -216,8 +265,8 @@ function M.recover(n,yaw)
         end
         local forward=n.path[n.index]-self.position
         local routeYaw=math.atan2(forward.x,forward.y)
-        for _,offset in ipairs({90,-90,60,-60,120,-120}) do
-            local ok,p=pcall(terrain.probe,routeYaw+math.rad(offset),1.1)
+        for _,sample in ipairs({{90,1.1},{-90,1.1},{60,1.1},{-60,1.1},{120,1.1},{-120,1.1},{90,1.8},{-90,1.8},{135,1.8},{-135,1.8}}) do
+            local ok,p=pcall(terrain.probe,routeYaw+math.rad(sample[1]),sample[2])
             if ok and p.distance>45 and math.abs(p.vertical)<25 and not p.obstacle then
                 for _,join in ipairs(joins) do
                     local goal=join.point
@@ -252,7 +301,8 @@ function M.recover(n,yaw)
 end
 function M.report(n)
     local out={status=n.status,replans=n.replans,recovery_count=n.recoveryCount or 0,blocked_by=n.blockedBy,
-        source=n.recorded and 'recorded_trail' or n.localPath and 'local_collision' or 'navmesh',reason=n.fallbackReason}
+        source=n.recorded and 'recorded_trail' or n.localPath and 'local_collision' or 'navmesh',reason=n.failureReason or n.fallbackReason,
+        standing_point=n.standingPoint or false}
     if n.goal then
         out.goal_distance_m=math.floor(horizontal(n.goal-self.position)/70*100+.5)/100
         out.goal_height_change_m=math.floor((n.goal.z-self.position.z)/70*100+.5)/100

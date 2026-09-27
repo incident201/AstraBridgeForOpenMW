@@ -9,8 +9,10 @@ import socket
 import subprocess
 import sys
 import time
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
-from .protocol import BridgeError
+from .protocol import BridgeError, action_timeout
 from .session import Session
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,7 +26,7 @@ def emit(value):
 
 def request(op, args=None, timeout=130):
     with socket.socket(socket.AF_UNIX) as connection:
-        connection.settimeout(timeout)
+        connection.settimeout(action_timeout(op, args or {}, timeout))
         try:
             connection.connect(str(SOCKET))
         except OSError as exc:
@@ -53,43 +55,47 @@ def serve(options):
     server.bind(str(SOCKET))
     server.listen(4)
     def shutdown_signal(*_):
+        session.control.interrupt()
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, shutdown_signal)
     signal.signal(signal.SIGINT, shutdown_signal)
+    stopping = threading.Event()
+    def handle(connection):
+        with connection:
+            connection.settimeout(5)
+            try:
+                raw = connection.makefile("rb").readline(32769)
+                if len(raw) > 32768:
+                    raise BridgeError("command_too_large")
+                message = json.loads(raw)
+                if type(message) is not dict or message.keys() - {"op", "args"}:
+                    raise BridgeError("invalid_arguments")
+                if message.get("op") == "shutdown":
+                    result = session.control.execute('shutdown', message.get('args', {}))
+                    stopping.set()
+                else:
+                    result = session.control.execute(message.get("op"), message.get("args", {}))
+                response = {"ok": True, "result": result}
+            except BridgeError as exc:
+                response = {"ok": False, "error": str(exc)}
+            except Exception:
+                import traceback
+                traceback.print_exc()  # private controller log, never the gameplay response
+                response = {"ok": False, "error": "controller_operation_failed"}
+            try:
+                connection.sendall(json.dumps(response, ensure_ascii=False).encode() + b"\n")
+            except OSError:
+                pass  # disconnect does not replay or abandon an already bounded action
     try:
         session.start()
-        while True:
-            connection, _ = server.accept()
-            with connection:
-                connection.settimeout(5)
-                stopping = False
-                try:
-                    raw = connection.makefile("rb").readline(32769)
-                    if len(raw) > 32768:
-                        raise BridgeError("command_too_large")
-                    message = json.loads(raw)
-                    if type(message) is not dict or message.keys() - {"op", "args"}:
-                        raise BridgeError("invalid_arguments")
-                    if message.get("op") == "shutdown":
-                        session.close()
-                        stopping = True
-                        result = {"stopped": True}
-                    else:
-                        result = session.call(message.get("op"), message.get("args", {}))
-                    response = {"ok": True, "result": result}
-                except BridgeError as exc:
-                    response = {"ok": False, "error": str(exc)}
-                except Exception:
-                    import traceback
-                    traceback.print_exc()  # private controller log, never the gameplay response
-                    response = {"ok": False, "error": "controller_operation_failed"}
-                try:
-                    connection.sendall(json.dumps(response, ensure_ascii=False).encode() + b"\n")
-                except OSError:
-                    pass  # disconnect does not replay or abandon an already bounded action
-                if stopping:
-                    break
+        server.settimeout(.2)
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            while not stopping.is_set():
+                try: connection, _ = server.accept()
+                except socket.timeout: continue
+                pool.submit(handle, connection)
     finally:
+        session.control.interrupt()
         session.close()
         server.close()
         SOCKET.unlink(missing_ok=True)
@@ -109,17 +115,28 @@ def main():
         p=commands.add_parser(name)
         if name=='scan':p.add_argument('--pitch',dest='pitch_deg',type=float,default=0)
         if name=='status':p.add_argument('--player',action='store_true')
+        if name=='observe':
+            p.add_argument('--no-screenshot',action='store_true');p.add_argument('--map',action='store_true')
     p = commands.add_parser('read', help='Read the currently open book or scroll in bounded text chunks')
     p.add_argument('--ref'); p.add_argument('--offset', type=int, default=0); p.add_argument('--limit', type=int, default=4000)
+    reading=p.add_mutually_exclusive_group();reading.add_argument('--all',action='store_true');reading.add_argument('--search')
+    p=commands.add_parser('repair',help='Repeat normal hammer repair in the currently open repair menu')
+    p.add_argument('name');p.add_argument('--attempts',type=int,default=1);p.add_argument('--condition-pct',type=float,default=100)
     p = commands.add_parser('resetNPC', help='Emergency RA/ResetActors recovery of displaced actors in active cells')
     p.add_argument('--reason', required=True, help='Observed malfunction requiring this last-resort recovery')
     p = commands.add_parser("act"); p.add_argument("json", help='e.g. {"move":1,"seconds":0.4}')
     p = commands.add_parser('look');p.add_argument('--heading',dest='heading_deg',type=float);p.add_argument('--pitch',dest='pitch_deg',type=float)
     p = commands.add_parser("chain"); p.add_argument("json", help='{"actions":[{"op":"strike"},{"op":"strike"}],"max_seconds":12}')
+    p=commands.add_parser('sequence');p.add_argument('json')
+    p=commands.add_parser('wait-until');p.add_argument('condition',choices=['fatigue','animation','passage','ui'])
+    p.add_argument('--percent',type=float,default=100);p.add_argument('--ui-mode');p.add_argument('--seconds',type=float,default=30)
+    p.add_argument('--bearing-deg',type=float,default=0);p.add_argument('--meters',type=float,default=1)
     p = commands.add_parser('atlas'); p.add_argument('--radius-m',type=float,default=35)
     p.add_argument('--list', action='store_true'); p.add_argument('--space')
+    p.add_argument('--query');p.add_argument('--page',type=int,default=0);p.add_argument('--limit',type=int,default=20)
+    p.add_argument('--level');p.add_argument('--map',action='store_true');p.add_argument('--route')
     p = commands.add_parser('revisit'); p.add_argument('ref'); p.add_argument('--run',action='store_true')
-    p.add_argument('--seconds',type=float,default=12); p.add_argument('--under-fire',action='store_true')
+    p.add_argument('--seconds',type=float,default=60); p.add_argument('--under-fire',action='store_true')
     p = commands.add_parser("inspect"); p.add_argument("view", choices=["stats", "inventory", "spells", "journal","conversations","combat","effects","character"]); p.add_argument("--page", type=int, default=0);p.add_argument('--topic')
     for name in ('strike','cast'):
         p=commands.add_parser(name);p.add_argument('ref',nargs='?');p.add_argument('--air',action='store_true')
@@ -129,13 +146,15 @@ def main():
         if name=='approach':p.add_argument('--reach',choices=['activate','melee','touch'],default='activate')
         if name=='approach':p.add_argument('--run',action='store_true')
         if name=='approach':p.add_argument('--under-fire',action='store_true')
+        if name=='approach':p.add_argument('--seconds',type=float,default=30)
         if name=='focus':p.add_argument('--wait-ready',action='store_true')
     p=commands.add_parser('walk');p.add_argument('x',nargs='?',type=int);p.add_argument('y',nargs='?',type=int)
     p.add_argument('--observation',type=int);p.add_argument('--ref');p.add_argument('--run',action='store_true')
     p.add_argument('--under-fire',action='store_true')
+    p.add_argument('--seconds',type=float,default=8)
     p=commands.add_parser('go');p.add_argument('ref');p.add_argument('--run',action='store_true');p.add_argument('--seconds',type=float,default=12)
     p.add_argument('--under-fire',action='store_true')
-    p=commands.add_parser('return-to');p.add_argument('ref');p.add_argument('--run',action='store_true');p.add_argument('--seconds',type=float,default=12)
+    p=commands.add_parser('return-to');p.add_argument('ref');p.add_argument('--run',action='store_true');p.add_argument('--seconds',type=float,default=60)
     p.add_argument('--under-fire',action='store_true')
     for name in ('evade','retreat'):
         p=commands.add_parser(name)
@@ -148,8 +167,10 @@ def main():
     p = commands.add_parser("trigger"); p.add_argument("name")
     p = commands.add_parser("restart"); p.add_argument("--load-latest", action="store_true")
     p=commands.add_parser('interact');p.add_argument('ref');p.add_argument('--approach',action='store_true')
+    p.add_argument('--run',action='store_true');p.add_argument('--seconds',type=float,default=30);p.add_argument('--under-fire',action='store_true')
     p=commands.add_parser('move-local');p.add_argument('forward_m',type=float);p.add_argument('--sideways-m',type=float,default=0)
     p.add_argument('--under-fire',action='store_true')
+    p.add_argument('--run',action='store_true');p.add_argument('--seconds',type=float,default=30)
     p=commands.add_parser('fly');p.add_argument('--forward-m',type=float,default=0);p.add_argument('--sideways-m',type=float,default=0)
     p.add_argument('--vertical-m',type=float,default=0);p.add_argument('--seconds',type=float,default=10);p.add_argument('--under-fire',action='store_true')
     p=commands.add_parser('fov');p.add_argument('degrees',type=float)
@@ -160,6 +181,8 @@ def main():
     p = commands.add_parser("click"); p.add_argument("x", type=int); p.add_argument("y", type=int); p.add_argument("--button", type=int, default=1); p.add_argument("--observation", type=int, required=True)
     for name, field in (("key", "key"), ("text", "text"), ("scroll", "steps")):
         p = commands.add_parser(name); p.add_argument(field, type=int if name == "scroll" else str); p.add_argument("--observation", type=int, required=True)
+    for name,command_parser in commands.choices.items():
+        if name not in {'start','serve'}:command_parser.add_argument('--full',action='store_true',default=argparse.SUPPRESS)
     options = parser.parse_args()
     try:
         if options.command == "serve":
@@ -194,8 +217,11 @@ def main():
         op = options.command.replace("-", "_")
         args = vars(options).copy(); args.pop("command")
         args={k:v for k,v in args.items() if v is not None}
-        if op in {"act","chain"}:
+        if op in {"act","chain","sequence"}:
+            full=args.get('full',False)
             args = json.loads(args["json"])
+            if full:args['full']=True
+        if op=='read' and not args.get('all'):args.pop('all',None)
         response = request(op, args)
         emit(response)
         if not response["ok"]:

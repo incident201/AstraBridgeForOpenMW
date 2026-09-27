@@ -12,13 +12,16 @@ import time
 import uuid
 
 from .display import Display
-from .protocol import BridgeError, ERRORS, atomic_json, check_result, validate, number, LogDecoder
+from .protocol import BridgeError, ERRORS, atomic_json, check_result, validate, number, LogDecoder, action_timeout
 from .recording import Recorder
 from .frame_stream import FrameStream
 from .memory import SpatialMemory
 from .terrain_map import render_terrain
 from .feedback import feedback
 from .exploration import ExplorationAtlas
+from .control import Control
+from .observations import prune_screenshots, present_response
+from . import workflows
 
 
 def observation_changes(before,after):
@@ -44,6 +47,9 @@ class Session:
                                    local_settings.get('recordings_dir') or self.runtime / 'recordings')
         self.engine_binary = local_settings.get('engine_binary')
         self.engine_libraries = local_settings.get('engine_libraries')
+        self.screenshot_keep = local_settings.get('screenshot_keep',128)
+        if type(self.screenshot_keep) is not int or self.screenshot_keep < 8:
+            raise BridgeError('invalid_screenshot_keep')
         self.memory = SpatialMemory(self.runtime / 'spatial-memory.json')
         self.atlas = ExplorationAtlas(self.runtime / 'exploration-memory.json')
         self.profile = self.runtime / "profile"
@@ -55,6 +61,7 @@ class Session:
         self.process = None
         self.condition = threading.Condition()
         self.responses = {}
+        self.travel_updates = []
         self.session_id = ""
         self.command_id = 0
         self.observation_id = 0
@@ -65,6 +72,7 @@ class Session:
         self.recorder = None
         self.last_recording = None
         self.save_refs = {}
+        self.control = Control(self)
 
     def prepare(self):
         cfg = (self.installation / "config/openmw.cfg").read_text()
@@ -98,6 +106,10 @@ class Session:
             with settings_path.open('w') as output: profile_settings.write(output)
         for path in ("userdata", "cache", "screenshots", "local-data"):
             (self.runtime / path).mkdir(exist_ok=True)
+        if hasattr(self,'memory') and hasattr(self,'atlas'):
+            self.memory.attach_atlas(self.atlas)
+            prune_screenshots(self.runtime/'screenshots',self.memory,self.screenshot_keep)
+            self.atlas.import_transitions(self.runtime/'actions.jsonl')
 
     def start(self):
         self.prepare()
@@ -112,6 +124,7 @@ class Session:
         self.uncertain = False
         atomic_json(self.inbox, {"version": 1, "session": self.session_id, "id": 0, "op": "ping", "args": {}})
         atomic_json(self.inbox.with_name('input.json'), {})
+        atomic_json(self.inbox.with_name('cancel.json'), {})
         candidates = sorted(self.installation.glob("openmw-*/openmw.x86_64"))
         if not candidates:
             raise BridgeError("openmw_binary_missing")
@@ -160,6 +173,13 @@ class Session:
                     if message is None:continue
                     if message.get("session") != session_id or message.get("version") != 1:
                         continue
+                    if message.get('event') == 'progress':
+                        result=message.get('result', {})
+                        with self.condition:
+                            self.travel_updates.extend(result.pop('_atlas_travel', []))
+                            self.condition.notify_all()
+                        self.control.progress(check_result(result))
+                        continue
                     if message.get("event") in {"simulation","camera_motion"} and type(message.get("active")) is bool:
                         if self.recorder:
                             self.recorder.set_active(message['event'], message["active"])
@@ -178,7 +198,7 @@ class Session:
                     with self.condition:
                         self.responses[message["id"]] = message
                         self.condition.notify_all()
-                except (ValueError, TypeError, KeyError):
+                except (ValueError, TypeError, KeyError, BridgeError):
                     continue
         with self.condition:
             self.condition.notify_all()
@@ -186,6 +206,9 @@ class Session:
     def command(self, op, args=None, *, timeout=25, _atlas_offset=None, _atlas_route=None):
         args = args or {}
         validate(op, args)
+        if getattr(self, 'control', None) and self.control.cancelled.is_set() and op not in {'stop','observe','ping','quit','inspect','ui'}:
+            raise BridgeError('cancelled')
+        timeout = action_timeout(op, args, max(timeout, 70))
         if _atlas_offset is not None:
             assert op == 'mark'
             args = {**args, '_atlas_offset': _atlas_offset}
@@ -207,6 +230,7 @@ class Session:
         deadline = time.monotonic() + timeout
         with self.condition:
             while cmd_id not in self.responses:
+                self._drain_travel()
                 if self.process.poll() is not None:
                     raise BridgeError("game_exited")
                 remaining = deadline - time.monotonic()
@@ -216,20 +240,18 @@ class Session:
                     raise BridgeError("result_unknown_stop_or_restart")
                 self.condition.wait(min(.2, remaining))
             response = self.responses.pop(cmd_id)
+            self._drain_travel()
         if response.get("status") == "rejected":
             error = response.get("error")
             raise BridgeError(error if error in ERRORS else "operation_failed")
         if op == "stop":
             self.uncertain = False
         raw = response.get("result", {})
+        for travel in raw.pop('_atlas_travel',[]):self._ingest_travel(travel)
         # This metadata never crosses the public projection boundary.
         frame = raw.pop('_atlas_frame', None) if op == 'observe' else None
         if frame is not None:
-            if (type(frame) is not dict or set(frame) != {'space', 'origin'}
-                or not isinstance(frame['space'], str) or len(frame['space']) > 1024
-                or not isinstance(frame['origin'], list) or len(frame['origin']) != 3):
-                raise BridgeError('invalid_bridge_response')
-            for value in frame['origin']: number(value, -1e9, 1e9)
+            self._validate_frame(frame)
         result = check_result(raw)
         if 'saves' in result: self.save_refs = {s['ref']: s for s in result['saves']}
         if op == 'load': self.atlas.restore(self.save_refs.get(args.get('ref')))
@@ -238,7 +260,27 @@ class Session:
         if op == 'mark' and result.get('ref'): self.atlas.note_marker(result['ref'])
         return result
 
-    def observe(self):
+    @staticmethod
+    def _validate_frame(frame):
+        if (type(frame) is not dict or set(frame)!={'space','origin'}
+            or not isinstance(frame['space'],str) or len(frame['space'])>1024
+            or not isinstance(frame['origin'],list) or len(frame['origin'])!=3):
+            raise BridgeError('invalid_bridge_response')
+        for value in frame['origin']:number(value,-1e9,1e9)
+
+    def _ingest_travel(self,travel):
+        self._validate_frame(travel['frame'])
+        observation=check_result({'trajectory':travel['trajectory'],'location':travel['location']})
+        self.atlas.ingest(observation,travel['frame'])
+
+    def _drain_travel(self):
+        # Called by the command owner while holding condition; the reader only
+        # queues deltas, so SQLite writes never race observations/route planning.
+        for travel in getattr(self,'travel_updates',[]):self._ingest_travel(travel)
+        self.travel_updates=[]
+
+    def observe(self, *, capture=True, maps=False):
+        capture = capture and not getattr(self,'batch_depth',0)
         result = self.command("observe")
         if result.get('ui',{}).get('blocked'):raise BridgeError('non_gameplay_ui')
         # Lua confirms pause and settles UI. Native capture waits for fresh
@@ -246,11 +288,13 @@ class Session:
         time.sleep(.02)
         self.observation_id += 1
         path = self.runtime / "screenshots" / f"{self.session_id[:8]}-{self.observation_id:06}.png"
-        size = self.display.capture(path)
-        result.update({"observation": self.observation_id, "screenshot": str(path), "screen": size,
+        result['observation'] = self.observation_id
+        if capture:
+            size = self.display.capture(path)
+            result.update({"screenshot": str(path), "screen": size,
                        "capture_sync": "render_complete" if self.display.frame_stream.supported else "paused_best_effort",
                        "capture_backend":self.display.frame_stream.backend if self.display.frame_stream.supported else "xcomposite_window"})
-        if result.get('terrain',{}).get('supported'):
+        if maps and result.get('terrain',{}).get('supported'):
             map_path=path.with_suffix('.svg')
             render_terrain(result,map_path)
             result['local_map']=str(map_path)
@@ -263,9 +307,13 @@ class Session:
                 self.atlas.persist()
             except BridgeError as exc:
                 node['marker_unavailable'] = str(exc)
-        result['exploration'] = self.atlas.present(path.with_name(path.stem+'-atlas.svg')) if result.get('state')=='running' and not result.get('body',{}).get('dead') else {'supported':False,'reason':'no_player'}
+        if result.get('state')=='running' and not result.get('body',{}).get('dead'):
+            result['exploration'] = self.atlas.present(path.with_name(path.stem+'-atlas.svg') if maps else None) if maps or getattr(self,'full_observations',False) else self.atlas.summary()
+        else:result['exploration']={'supported':False,'reason':'no_player'}
         result.pop('trajectory', None)  # transport samples stay in the controller; give the agent the map and named nodes
         self.latest_observation = result
+        if capture:
+            prune_screenshots(self.runtime/'screenshots',self.memory,getattr(self,'screenshot_keep',128))
         return result
 
     def _check_ui(self, args):
@@ -329,41 +377,18 @@ class Session:
         with self.lock:
             started = time.monotonic()
             before=self.latest_observation
-            if op == 'atlas':
-                if args.keys()-{'radius_m','list','space'}: raise BridgeError('invalid_arguments')
-                if args.get('list'): return {'spaces': self.atlas.catalog()}
-                if args.get('space'):
-                    ref = args['space']
-                    if not any(s['ref'] == ref for s in self.atlas.catalog()): raise BridgeError('unknown_map_space')
-                    active = self.atlas.segment
-                    try:
-                        self.atlas.segment = ref
-                        result = self.atlas.present(self.runtime / 'screenshots' / (ref+'-archive.svg'),
-                                                    number(args.get('radius_m',35),10,80), archived=ref != active)
-                        for space in result.get('spaces', []): space['current'] = space['ref'] == active
-                        return result
-                    finally: self.atlas.segment = active
-                radius = number(args.get('radius_m', 35), 10, 80)
-                observation = self.observe()
-                if not observation.get('exploration', {}).get('supported'): return {'supported': False}
-                return self.atlas.present(Path(observation['screenshot']).with_name(Path(observation['screenshot']).stem+'-atlas.svg'), radius)
-            if op == 'revisit':
-                if args.keys()-{'ref','run','seconds','under_fire'} or not isinstance(args.get('ref'),str):
-                    raise BridgeError('invalid_arguments')
-                self.observe()  # align the saved path with the current own pose
-                node = self.atlas.resolve(args['ref'])
-                if not node: raise BridgeError('unknown_map_node')
-                route = self.atlas.travelled_route(node)
-                if route is None and not self.atlas.current().get('persistent'): raise BridgeError('recorded_route_unavailable')
-                pose = self.atlas.current()['pose']
-                offset = [round(a-b, 4) for a,b in zip(node['p'], pose)]
-                if sum(v*v for v in offset) >= 10000: raise BridgeError('recorded_route_unavailable')
-                offsets = [[round(a-b, 4) for a,b in zip(p, pose)] for p in route] if route else None
-                marker = self.command('mark', _atlas_offset=offset, _atlas_route=offsets)['ref']
-                result = self.call('go', {**args, 'ref': marker})
-                if result['action'].get('reason') == 'arrived':
-                    result['feedback']['events'].append({'kind': 'map_node_reached', 'ref': node['ref'], 'name': node['label']})
-                return result
+            portal=None
+            if op=='interact' or op=='act' and args.get('trigger')=='Activate':
+                ref=args.get('ref') if op=='interact' else args.get('target')
+                door=next((x for x in (before or {}).get('scene',{}).get('objects',[]) if x.get('ref')==ref and x.get('kind')=='door'),None)
+                if door:
+                    node=self.atlas.anchor_node()
+                    if node:portal=(node['ref'],{**door,'heading_deg':before.get('orientation',{}).get('heading_deg')})
+            if op=='sequence':return workflows.sequence(self,args)
+            if op=='repair':return workflows.repair(self,args)
+            if op=='read' and (args.get('all') or args.get('search')):return workflows.read_document(self,args)
+            if op=='atlas':return workflows.atlas_query(self,args)
+            if op=='revisit':return workflows.navigate(self,args)
             if op in {'remember','recall','connect','route'}:
                 if op=='remember':
                     if args.keys()-{'label','note','exits','confidence'}:raise BridgeError('invalid_arguments')
@@ -371,6 +396,8 @@ class Session:
                                                 args.get('confidence','observed'),self.latest_observation)
                     if self.latest_observation.get('ui_mode')=='Gameplay' and self.latest_observation.get('body',{}).get('on_ground') and not self.latest_observation.get('body',{}).get('swimming') and not self.latest_observation.get('body',{}).get('dead'):
                         place['motor_ref']=self.command('mark')['ref'];self.memory.persist()
+                        node=self.atlas.anchor_node(place['label'])
+                        if node:place['atlas_node']=node['ref'];self.memory.persist()
                     return place
                 if op=='recall':
                     if args.keys()-{'query','archived'}:raise BridgeError('invalid_arguments')
@@ -394,24 +421,12 @@ class Session:
                 return self.call('chain',chain)
             if op=='return_to':
                 if args.keys()-{'ref','run','seconds','under_fire'}:raise BridgeError('invalid_arguments')
-                place=next((p for p in self.memory.data['places'] if p['ref']==args.get('ref') and p['branch']==self.memory.data['branch']),None)
-                if not place or not place.get('motor_ref'):raise BridgeError('unknown_place')
-                result=self.call('go',{**args,'ref':place['motor_ref']})
-                if result['action'].get('reason')=='arrived':
-                    self.memory.data['anchor']={'place':place['ref'],'status':'at_recorded_waypoint','source':'motor_arrival'}
-                    self.memory.persist()
-                    result['feedback']['events'].append({'kind':'waypoint_reached','ref':place['ref'],'name':place['label']})
-                return result
-            if op=='interact':
-                if args.keys()-{'ref','approach'} or type(args.get('approach',False)) is not bool:
-                    raise BridgeError('invalid_arguments')
-                target=args.get('ref')
-                if args.get('approach'):
-                    approached=self.call('approach',{'ref':target})
-                    if approached['action'].get('reason')!='within_reach':return approached
-                focused=self.call('focus',{'ref':target,'wait_ready':True})
-                if focused['action'].get('reason')!='focused':return focused
-                return self.call('act',{'trigger':'Activate','target':target,'seconds':.2})
+                place=next((p for p in self.memory.data['places'] if p['ref']==args.get('ref')),None)
+                if not place:raise BridgeError('unknown_place')
+                if place.get('atlas_node'):
+                    return workflows.navigate(self,{**args,'ref':place['atlas_node']})
+                if place.get('branch')!=self.memory.data['branch'] or not place.get('motor_ref'):raise BridgeError('unknown_place')
+                return self.call('go',{**args,'ref':place['motor_ref']})
             if op == "status":
                 if args.keys()-{'player'} or ('player' in args and type(args['player']) is not bool):
                     raise BridgeError('invalid_arguments')
@@ -488,8 +503,8 @@ class Session:
                     time.sleep(.12)
                     result = self.observe()
             elif op == "observe":
-                validate(op, args)
-                result = self.observe()
+                if args.keys()-{'no_screenshot','map'}:raise BridgeError('invalid_arguments')
+                result = self.observe(capture=not args.get('no_screenshot',False),maps=args.get('map',False))
             else:
                 if op=='walk' and 'ref' not in args:
                     validate(op,args)
@@ -516,8 +531,9 @@ class Session:
                                 raise BridgeError('ui_open')
                             self.display.focus(self.process.pid)
                             if args['name']=='GameMenu':self.display.key('escape')
-                            else:self.display.native_rest(self.profile)
-                            result = {'paused':True,'submitted':True}
+                            else:
+                                result = self.command('trigger', {'name':'Rest'})
+                            if args['name']=='GameMenu': result = {'paused':True,'submitted':True}
                         else:
                             result = self.command(op,args)
                         time.sleep(.15)
@@ -528,10 +544,10 @@ class Session:
                         result = self.command(op, args)
                         time.sleep(.12)
                 else:
-                    timeout=100 if op in {"load", "new_game"} else 70 if op=='fly' else 60 if op in {'act','look','focus','approach','move_local','walk','go','evade','track','lock','strike','cast','chain'} else 25
+                    timeout=100 if op in {"load", "new_game"} else 70 if op=='fly' else 60 if op in {'act','look','focus','approach','move_local','walk','go','evade','track','lock','strike','cast','chain','interact','wait_until'} else 25
                     result = self.command(op, args, timeout=timeout)
                 if op in {"act", "look", "trigger", "use_item", "select_spell", "select_enchanted", "load", "new_game", "stop",
-                          "focus","approach","move_local","walk","go","fly","evade","survey","fov","choose","edit","adjust","map","track","lock","unlock","strike","cast","chain","resetNPC"}:
+                          "focus","approach","interact","wait_until","move_local","walk","go","fly","evade","survey","fov","choose","edit","adjust","map","track","lock","unlock","strike","cast","chain","resetNPC"}:
                     if op in {'load','new_game'}:self.memory.branch(op)
                     self.latest_observation = None
                     # Return one canonical observation instead of embedded stale data.
@@ -540,12 +556,22 @@ class Session:
                     if op not in {'load','new_game'}:
                         changes=observation_changes(before,result['observation'])
                         if changes:result['action']['changes']=changes
+                    if portal and result['action'].get('outcome')=='location_changed':
+                        destination=self.atlas.anchor_node()
+                        origin_space,_=self.atlas.find_node(portal[0])
+                        if destination and origin_space:
+                            active=self.atlas.segment
+                            try:
+                                self.atlas.segment=origin_space['ref']
+                                origin=self.atlas.anchor_node()
+                            finally:self.atlas.segment=active
+                            self.atlas.add_transition(origin['ref'],destination['ref'],{**portal[1],'heading_deg':origin_space['heading']})
                     result['feedback']=feedback(op,result['action'],before,result['observation'],args)
                     if result['feedback']['reason']=='player_down':
                         result['action']['reason']='player_down';result['action']['outcome']='interrupted'
                     self.memory.record_step(op,args,result['action'],result['observation'])
             with open(self.runtime / "actions.jsonl", "a") as log:
-                log.write(json.dumps({"op": op, "args": args, "result": result,
+                log.write(json.dumps({"op": op, "args": args, "result": present_response(result),
                                       "wall_seconds": round(time.monotonic()-started, 3)}, ensure_ascii=False) + "\n")
             return result
 

@@ -6,17 +6,34 @@ local Space=require('scripts.astrabridge.space')
 local P=require('scripts.astrabridge.protocol')
 local M={}
 local namespace,serial,space,origin,heading,rows,sequence='boot',0,nil,nil,0,{},0
+local completed,flushedRef,flushedSequence,location={},nil,0,''
 local function round(x)return math.floor(x*100+.5)/100 end
+local function checkpoint()
+    if not origin then return end
+    local ref='trail_'..namespace..'_'..serial
+    local after=flushedRef==ref and flushedSequence or 0
+    local samples=P.array()
+    for _,row in ipairs(rows) do if row.sequence>after then samples[#samples+1]=row end end
+    if #samples>0 then
+        completed[#completed+1]={location=location,frame={space=space,origin={origin.x/70,origin.y/70,origin.z/70}},
+            trajectory={ref=ref,sequence=sequence,start_heading_deg=round(math.deg(heading)%360),samples=samples,
+                sparse=samples[1].sequence>after+1,source='travelled_player_path'}}
+    end
+    flushedRef,flushedSequence=ref,sequence
+end
 function M.reset(value)
     namespace,serial,space,origin,rows,sequence=value,0,nil,nil,{},0
+    completed,flushedRef,flushedSequence,location={},nil,0,''
 end
 function M.sample(force)
     if not self.cell or not self.position then return end
     local key=Space.key(self.cell)
     if space~=key then
+        checkpoint()
         space,origin,heading,rows,sequence=key,self.position,camera.getYaw(),{},0
         serial=serial+1
     end
+    location=Space.label(self.cell)
     local d=self.position-origin
     local f=(d.x*math.sin(heading)+d.y*math.cos(heading))/70
     local s=(d.x*math.cos(heading)-d.y*math.sin(heading))/70
@@ -26,6 +43,7 @@ function M.sample(force)
     if last and (f-last.forward_m)^2+(s-last.sideways_m)^2+(z-last.vertical_m)^2>12^2 then
         -- Travel services/scripts can teleport inside the same exterior world.
         -- A discontinuity is a new visit, never a path through unseen territory.
+        checkpoint()
         origin,heading,rows,sequence=self.position,camera.getYaw(),{},0
         serial=serial+1;f,s,z=0,0,0;last=nil
     end
@@ -43,6 +61,12 @@ end
 function M.frame()
     if not origin then return nil end
     return {space=space,origin={origin.x/70,origin.y/70,origin.z/70}}
+end
+-- Stream during long actions and retain the last samples before a cell change.
+-- Only the controller consumes these private coordinate frames.
+function M.flush()
+    M.sample(true);checkpoint()
+    local out=completed;completed={};return out
 end
 function M.report(after,segment)
     M.sample(true)

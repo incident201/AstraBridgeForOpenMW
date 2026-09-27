@@ -195,6 +195,12 @@ namespace MWLua
                 throw std::runtime_error("Astra player state requires player onFrame");
             return AstraUI::playerState(state);
         };
+        api["_astraRest"] = [context, windowManager]() {
+            if (context.mType != Context::Local || !context.mLuaManager->isSynchronizedUpdateRunning()) return false;
+            if (windowManager->isGuiMode()) return false;
+            MWBase::Environment::get().getInputManager()->executeAction(MWInput::A_Rest);
+            return windowManager->containsMode(MWGui::GM_Rest);
+        };
         api["_astraActivate"] = [context, windowManager]() {
             if (context.mType != Context::Local || !context.mLuaManager->isSynchronizedUpdateRunning()
                 || windowManager->isGuiMode()) return false;

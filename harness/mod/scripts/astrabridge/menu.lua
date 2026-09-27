@@ -7,6 +7,7 @@ bus:setLifeTime(storage.LIFE_TIME.GameSession)
 local session, lastId, lastReply = nil, 0, nil
 local nextPoll = 0
 local pending
+local cancelToken
 local refs, refSerial = {}, 0
 local function checkpointKey(dir,slot)
     -- Opaque, stable slot identity. creationTime is sampled before writing, but
@@ -82,12 +83,17 @@ local function dispatch(cmd)
     else
         bus:set('response', nil)
         bus:set('request', cmd)
-        local motor=({act=true,look=true,focus=true,approach=true,move_local=true,walk=true,go=true,evade=true,track=true,lock=true,strike=true,cast=true,chain=true})[cmd.op]
-        pending = {cmd=cmd, deadline=core.getRealTime()+(motor and 55 or 20)}
+        local motor=({interact=true,wait_until=true,fly=true,act=true,look=true,focus=true,approach=true,move_local=true,walk=true,go=true,evade=true,track=true,lock=true,strike=true,cast=true,chain=true})[cmd.op]
+        pending = {cmd=cmd, deadline=core.getRealTime()+P.actionTimeout(cmd.op,cmd.args,motor and 55 or 20)}
     end
 end
 local function onFrame()
     local now = core.getRealTime()
+    local cancellation=P.readCancel()
+    if cancellation and cancellation.session==session and cancellation.token~=cancelToken then
+        cancelToken=cancellation.token
+        bus:set('cancel',true)
+    end
     if pending then
         if pending.lifecycle and bus:get('ready') then
             reply(pending.cmd, {state=state(), paused=true})

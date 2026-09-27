@@ -7,13 +7,13 @@ def test_evasion_controller():
     r=subprocess.run(['lua','tests/evasion.lua'],cwd=Path(__file__).resolve().parents[1],capture_output=True,text=True)
     assert r.returncode==0,r.stdout+r.stderr
 
-@pytest.mark.parametrize('args',[{'direction':'forward'},{'direction':'back','meters':100},
-    {'direction':'left','seconds':20},{'direction':'right','attack':True},{'direction':'back','run':1}])
+@pytest.mark.parametrize('args',[{'direction':'forward'},{'direction':'back','meters':float('inf')},
+    {'direction':'left','seconds':0},{'direction':'right','attack':True},{'direction':'back','run':1}])
 def test_evasion_stays_bounded(args):
     with pytest.raises(BridgeError):validate('evade',args)
 
 @pytest.mark.parametrize('movement',[{'direction':'up'},{'direction':'back','position':[0,0]},
-    {'direction':'left','meters':100},{'direction':'forward','face_target':'yes'}])
+    {'direction':'left','meters':float('inf')},{'direction':'forward','face_target':'yes'}])
 def test_parallel_movement_validation(movement):
     with pytest.raises(BridgeError):validate('chain',{'actions':[{'op':'cast'}],'movement':movement})
 
@@ -27,7 +27,7 @@ def test_chain_health_guard_is_a_bounded_percentage(value):
 
 def test_chain_wait_has_no_arbitrary_controls_or_unbounded_duration():
     validate('chain',{'actions':[{'op':'cast'},{'op':'wait','seconds':1}]})
-    for step in [{'op':'wait','seconds':4},{'op':'wait','spell':'Hidden'},{'op':'wait','attack':True}]:
+    for step in [{'op':'wait','seconds':float('inf')},{'op':'wait','spell':'Hidden'},{'op':'wait','attack':True}]:
         with pytest.raises(BridgeError):validate('chain',{'actions':[step]})
 
 def test_direct_movement_keeps_stock_cast_pulses_and_does_not_leak_between_actions():

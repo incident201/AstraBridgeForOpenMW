@@ -60,6 +60,14 @@ function M.read()
     if type(cmd.op) ~= 'string' or type(cmd.args) ~= 'table' then return nil end
     return cmd
 end
+function M.readCancel()
+    local ok,result=pcall(function()
+        local f=vfs.open('astrabridge-runtime/cancel.json')
+        local text=f:read(1024);f:close()
+        return markup.decodeYaml(text)
+    end)
+    if ok and type(result)=='table' and type(result.token)=='string' then return result end
+end
 function M.reply(cmd, result, err)
     M.emit({version=1, session=cmd.session, id=cmd.id,
         status=err and 'rejected' or 'completed', result=result, error=err})
@@ -73,7 +81,14 @@ function M.inputAck(session,id)
 end
 function M.number(v, lo, hi, default)
     if v == nil then return default end
-    assert(type(v) == 'number' and v == v and v >= lo and v <= hi, 'invalid number')
+    assert(type(v) == 'number' and v == v and v > -math.huge and v < math.huge and v >= lo and v <= hi, 'invalid number')
     return v
+end
+local defaults={act=.25,track=1,go=12,walk=8,approach=30,interact=30,move_local=30,fly=10,evade=4,chain=12,wait_until=30}
+function M.actionSeconds(op,args)
+    return M.number(op=='chain' and args.max_seconds or args.seconds,.02,math.huge,defaults[op] or 8)
+end
+function M.actionTimeout(op,args,base)
+    return base+(defaults[op] and 2*M.actionSeconds(op,args) or 0)
 end
 return M

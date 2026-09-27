@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sqlite3
 import uuid
+from .atlas_routes import AtlasRoutes
 
 
 def distance(a, b):
@@ -22,7 +23,7 @@ def bearing(a, b):
     return math.degrees(math.atan2(b[0]-a[0], b[1]-a[1])) % 360
 
 
-class ExplorationAtlas:
+class ExplorationAtlas(AtlasRoutes):
     def __init__(self, path: Path):
         self.path = path
         # SQLite is the durable authority. Legacy JSON remains untouched for recovery.
@@ -33,6 +34,7 @@ class ExplorationAtlas:
             CREATE TABLE IF NOT EXISTS graphs (ref TEXT PRIMARY KEY, payload TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS checkpoints (key TEXT PRIMARY KEY, payload TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS transitions (key TEXT PRIMARY KEY, profile TEXT NOT NULL, payload TEXT NOT NULL);
         """)
         self.data = {'segments': [json.loads(row[0]) for row in self.db.execute('SELECT payload FROM graphs')], 'markers': []}
         self.profile = self._meta('profile') or uuid.uuid4().hex
@@ -285,10 +287,15 @@ class ExplorationAtlas:
             return None
         if s.get('current_node') != node['ref']:
             node['visits'] += 1
+            history=s.setdefault('visit_history',[])
+            s['loop_detected']=any(v['ref']==node['ref'] and v['nodes']==len(s['nodes']) for v in history)
+            s['visit_history']=(history+[{'ref':node['ref'],'nodes':len(s['nodes'])}])[-20:]
         s['current_node'] = node['ref']
-        node['views'] = (node['views']+[observation.get('screenshot')])[-3:]
-        node['landmarks'] = [o['name'] for o in observation.get('scene', {}).get('objects', [])
-                             if o['kind'] == 'door' and o['distance_m'] < 10][:3]
+        node['location'] = observation.get('location',s['location'])
+        if observation.get('screenshot'): node['views'] = (node['views']+[observation['screenshot']])[-3:]
+        landmarks = [o.get('description') or o['name'] for o in observation.get('scene', {}).get('objects', [])
+                     if o['kind'] == 'door' and o['distance_m'] < 10]
+        node['landmarks'] = sorted(set(node.get('landmarks', []) + landmarks))
         terrain = observation.get('terrain', {})
         if terrain.get('supported'):
             # Probes are observations at this pose, not a filled polygon between rays.
@@ -332,34 +339,34 @@ class ExplorationAtlas:
         matches = [n for n in s['nodes'] if n['ref'] == ref or n['label'] == ref]
         return matches[0] if len(matches) == 1 else None
 
-    def travelled_routes(self):
+    def travelled_routes(self, start=None, space=None):
         """Shortest routes along this branch's actual samples, including their Z.
 
         Only consecutive samples and repeat visits to the same small foot pose
         connect. Nearby map nodes, probes, and missing samples never create edges.
         The motor still collision-checks each segment against the current world.
         """
-        s = self.current()
+        s = space or self.current()
         if not s or not s.get('points'):
             return {}, [], []
-        cache_key = (s['ref'], len(s['points']), len(s['nodes']), tuple(s['pose']))
+        origin = start if start is not None else s['pose']
+        cache_key = (s['ref'], len(s['points']), len(s['nodes']), tuple(origin))
         if self._route_cache and self._route_cache[0] == cache_key: return self._route_cache[1]
         points = [row['p'] for row in s['points']]
         edges = [[] for _ in points]
         buckets = {}
-        reachable_nodes = [n for n in s['nodes'] if math.dist(s['pose'], n['p']) < 100]
+        reachable_nodes = s['nodes']
         def connect(i, j):
             d = math.dist(points[i], points[j])
             edges[i].append((j, d))
             edges[j].append((i, d))
         for i, row in enumerate(s['points']):
             p = row['p']
-            if math.dist(p, s['pose']) >= 100: continue
             if i and not row['gap']:
                 # Do not turn a recorded fall, teleport or large sampling gap
                 # into an instruction to walk back up it.
                 prev = points[i-1]
-                if math.dist(prev, s['pose']) < 100 and math.dist(prev, p) < 2 and abs(prev[2]-p[2]) <= distance(prev, p)*1.1+.15:
+                if math.dist(prev, p) < 2 and abs(prev[2]-p[2]) <= distance(prev, p)*1.1+.15:
                     connect(i-1, i)
             key = tuple(math.floor(v/.075) for v in p)
             for dx in (-1, 0, 1):
@@ -369,7 +376,9 @@ class ExplorationAtlas:
                             if math.dist(points[j], p) <= .075:
                                 connect(i, j)
             buckets.setdefault(key, []).append(i)
-        start = len(points)-1
+        candidates=[i for i,p in enumerate(points) if math.dist(p,origin)<.04]
+        if not candidates:return {},[],points
+        start = min(candidates,key=lambda i:math.dist(points[i],origin))
         costs, parents = {start: 0.0}, {start: None}
         queue = [(0.0, start)]
         while queue:
@@ -419,42 +428,55 @@ class ExplorationAtlas:
                     break
                 reduced.pop()
             reduced.append(p)
-        if len(reduced) > 800 or any(math.dist(p, self.current()['pose']) >= 100 for p in reduced):
-            return None
         return reduced
 
-    def present(self, path: Path, radius=35, archived=False):
+    def summary(self):
+        s=self.current()
+        if not s:return {'supported':False}
+        return {'supported':True,'segment':s['ref'],'current_node':s.get('current_node'),
+                'persistent':s.get('persistent',False),'loop_detected':s.get('loop_detected',False)}
+
+    def present(self, path: Path | None, radius=35, archived=False, page=0, limit=20, level=None):
         s = self.current()
         if not s or 'pose' not in s:
             return {'supported': False}
         pose = s['pose']
+        levels=self.level_rows(s)
+        level_ids={l['ref'] for l in levels if l['ref']==level or l['label']==level} if level else None
         nodes = sorted([n for n in s['nodes'] if distance(n['p'], pose) <= radius],
-                       key=lambda n: distance(n['p'], pose))[:20]
+                       key=lambda n: (abs(n['p'][2]-pose[2])>1.25,distance(n['p'], pose)))
+        if level_ids is not None:nodes=[n for n in nodes if n.get('level') in level_ids]
+        total=len(nodes);nodes=nodes[page*limit:(page+1)*limit]
         rows = []
         routes, _, _ = self.travelled_routes()
         for n in nodes:
             directions = self.untraversed(n)
             relative_bearing = (bearing(pose, n['p'])-s['heading']+180) % 360-180 if distance(n['p'],pose)>.05 else 0
-            rows.append({'ref': n['ref'], 'label': n['label'], 'distance_m': round(distance(n['p'], pose), 2),
+            rows.append({'ref': n['ref'], 'label': n['label'], 'names':n.get('names',[]),'level':n.get('level'),
+                         'location':n.get('location',s['location']), 'distance_m': round(distance(n['p'], pose), 2),
                          'bearing_deg': round(relative_bearing, 1),
                          'height_change_m': round(n['p'][2]-pose[2], 2), 'visits': n['visits'],
                          'can_revisit': n['ref'] in routes or bool(s.get('persistent') and n.get('walkable') and math.dist(n['p'], pose) < 100),
                          'revisit_source': 'recorded_trail' if n['ref'] in routes else 'native_path_required' if s.get('persistent') and n.get('walkable') and math.dist(n['p'], pose) < 100 else 'unavailable',
                          'route_distance_m': round(routes[n['ref']][1], 2) if n['ref'] in routes else None,
                          'untraversed_directions': [{'heading_deg': round(d['heading'], 1), 'meters': d['meters']} for d in directions],
-                         'landmarks': n.get('landmarks', []), 'screenshots': [self.portable_view(v) for v in n['views']]})
+                         'landmarks': n.get('landmarks', []), 'screenshots': [self.portable_view(v) for v in n['views'] if v and Path(v).is_file()]})
         if archived:
             for row in rows:
                 row['can_revisit'] = False
                 row['revisit_source'] = 'different_space'
-        self.render(path, radius, nodes, rows)
+        if path: self.render(path, radius, nodes, rows)
         result = {'supported': True, 'segment': self.segment, 'source': 'travelled_path_and_observed_probes',
-                  'location': s['location'], 'radius_m': radius, 'nodes': rows, 'svg': str(path),
+                  'location': s['location'], 'radius_m': radius, 'nodes': rows,
                   'persistent': s.get('persistent', False), 'spaces': self.catalog(), 'archived':archived,
                   'not_a_full_map': True, 'sampled_path': True,
                   'recorded_points': len(s['points']), 'current_node': s.get('current_node')}
+        result.update(levels=levels,page=page,limit=limit,total=total,has_more=(page+1)*limit<total,
+                      loop_detected=s.get('loop_detected',False),transitions=self.transitions())
+        self.persist()
         if s.get('restored_from_save'): result['restored_from_save'] = s['restored_from_save']
-        converter = shutil.which('rsvg-convert')
+        if path: result['svg'] = str(path)
+        converter = shutil.which('rsvg-convert') if path else None
         if converter:
             png = path.with_suffix('.png')
             completed = subprocess.run([converter, '-o', str(png), str(path)], capture_output=True, timeout=5)

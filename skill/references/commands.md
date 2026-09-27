@@ -71,19 +71,19 @@ In a real observation, use:
 | `passage_…` | `observe` → `terrain.passages[].ref` | `go` | Short-lived local sample; refresh after moving. |
 | `ground_…` | `ground` → `ground_targets[].ref` | `go`, `walk --ref` | Short-lived visible-point sample; use promptly without moving first. |
 | `node_…` | `atlas` / observation → `exploration.nodes[].ref` | `revisit` | Persistent recorded node in this playthrough and space. Check `can_revisit` and `revisit_source`. |
-| `place_…` | `remember`, `recall` | `return-to`, `connect` | A semantic note; returning requires a valid recorded motor marker. |
+| `place_…` | `remember`, `recall` | `return-to`, `connect` | A semantic note linked to its persistent atlas node; legacy unlinked notes need a valid motor marker. |
 | `save_…` | `saves` → `saves[].ref` | `load` | Fetch a fresh save listing immediately before loading. |
 
-Do not pass an NPC ref to `go`, a map label such as `A4` to `revisit`, or an inventory `item_…` ref to `choose`. Those are different handle types. After load/new-game/restart, discard transient refs. `status --player` does not invalidate item/spell handles.
+Do not pass an NPC ref to `go` or an inventory `item_…` ref to `choose`. Prefer persistent node refs; unique remembered names and labels from the current atlas also resolve. Those are different handle types. After load/new-game/restart, discard transient refs. `status --player` does not invalidate item/spell handles.
 
 ## Information commands
 
 | Syntax | Result / purpose |
 |---|---|
-| `status` | Controller/game process state and recording state; **not** character stats. |
+| `status` | Process/recording state and `active_action` with live phase, elapsed time and navigation; available during a long action. |
 | `status --player` | Fast character summary, no menu or screenshot. |
 | `inspect character` | Same character information. |
-| `observe` | Fresh screenshot-bearing observation; world remains paused. |
+| `observe [--full] [--no-screenshot] [--map]` | Compact fresh observation with screenshot by default; full adds detailed sensors/effects/combat. Map files are opt-in. |
 | `inspect stats` | Detailed own attributes and skills. |
 | `inspect inventory` | Owned items, refs, counts, equipment state, carried weight/capacity. |
 | `inspect spells` | Known spells/powers, refs, effects, cost, success chance, selection and availability. |
@@ -93,7 +93,8 @@ Do not pass an NPC ref to `go`, a map label such as `A4` to `revisit`, or an inv
 | `inspect conversations` | Topics already known by the character. |
 | `inspect conversations --topic "EXACT_TOPIC" --page N` | Recorded dialogue for that known topic; not an interaction with an NPC. |
 | `ui` | Current structured UI, including visible item tooltips. |
-| `read [--ref DOCUMENT_REF] [--offset N] [--limit N]` | Text of the currently open book/scroll. Default 4000 characters, maximum 8000 per reply; no page turning or scrolling required. |
+| `read [--ref DOCUMENT_REF] [--offset N] [--limit N]` | Text of the currently open book/scroll. Default 4000 characters, maximum 8000 per chunk; no page turning or scrolling required. |
+| `read --all` / `read --search "TEXT"` | Assemble the opened document internally, or return matching passages with Unicode offsets. |
 
 Character summary includes identity, sign, level, health/magicka/fatigue, eight attributes, skills and progress, weight/capacity, gold, bounty, reputation, equipment/magic and active effects. Effects provide name/source, description, `harmful`, strength where applicable, affected attribute/skill, total/remaining duration or `permanent`. `from_equipment` marks an effect tied to equipped gear.
 
@@ -129,9 +130,9 @@ UI roles: `button`, `link`, `list_item`, `input`, `slider`, `item`, `item_slot`,
 
 ### Books, scrolls and manual repair
 
-Open an owned book with `use-item`, or a book in the world with `interact`. `ui.document` reports its title, kind, ref and total character count. Call `read`; continue with `read --ref DOCUMENT_REF --offset NEXT_OFFSET` until `eof:true`. Offsets count Unicode characters, not UTF-8 bytes. The text covers the whole opened document; observations carry metadata only, so long books do not overflow replies. The ref also works after turning pages. Closing/reopening the book invalidates it. `document_not_open` means no book/scroll is open; `stale_document_ref` requires a new query. Images remain available in the screenshot.
+Open an owned book with `use-item`, or a book in the world with `interact`. `ui.document` reports its title, kind, ref and total character count. Use `read --all` for the whole text or `read --search "TEXT"` for excerpts with offsets. For bounded replies, call `read` and continue with `read --ref DOCUMENT_REF --offset NEXT_OFFSET` until `eof:true`. Offsets count Unicode characters, not UTF-8 bytes. The text covers the whole opened document; observations carry metadata only, so long books do not overflow replies. The ref also works after turning pages. Closing/reopening the book invalidates it. `document_not_open` means no book/scroll is open; `stale_document_ref` requires a new query. Images remain available in the screenshot.
 
-Use an owned repair hammer to open Repair. `ui.elements` includes the actual repairable rows as `role:item`, `panel:repair`, with `condition_current`, `condition_max` and the normal tooltip. Rows outside the viewport can be chosen semantically. Choosing one performs **one normal repair attempt**, consuming tool use and applying the game's skill/RNG rules. Refresh the UI after every attempt; failure is possible, and fully repaired items disappear. The `repair tool: …` slot shows the selected hammer and opens the game's tool selector when chosen.
+Use an owned repair hammer to open Repair. `ui.elements` includes the actual repairable rows as `role:item`, `panel:repair`, with `condition_current`, `condition_max` and the normal tooltip. Rows outside the viewport can be chosen semantically. Choosing one performs **one normal repair attempt**, consuming tool use and applying the game's skill/RNG rules. Refresh the UI after every attempt; failure is possible, and fully repaired items disappear. The `repair tool: …` slot shows the selected hammer and opens the game's tool selector when chosen. `repair "EXACT_ITEM_NAME" --attempts N --condition-pct P` repeats these normal attempts with fresh refs, stopping at the requested percentage, exhausted attempts, a changed menu, ambiguity or cancellation. Defaults are one attempt and 100%. Each attempt reports before/after condition when the row remains; fully repaired rows disappear. Identically named items require manual selection with `choose`; the helper never guesses.
 
 ## Saves and process lifecycle
 
@@ -143,12 +144,34 @@ Use an owned repair hammer to open Repair. `ui.elements` includes the actual rep
 | `save "DESCRIPTION"` | Create a new save slot, description 1…160 UTF-8 bytes. Only when the game permits saving. |
 | `saves` | List slots with descriptions, player names and fresh refs. |
 | `load SAVE_REF` | Load that slot; unsaved progress is lost and transient refs must be refreshed. |
-| `stop` | Clear active controls and request a pause. Does not save or quit. |
+| `stop` | Interrupt immediately through an independent control channel, clear inputs and pause. The interrupted command retains its elapsed time/result. Does not save or quit. |
 | `restart` | Stop/relaunch the game, normally to the menu. Does not autosave. |
 | `restart --load-latest` | Load the newest available slot after restarting; use only if that is actually desired. |
 | `shutdown` | Close controller/game and recording. Does not autosave. |
 
+One gameplay command owns the controller at a time. While it runs, use `status` or `stop`; another gameplay command returns `controller_busy_use_status_or_stop`. `status --player` reads the engine and also needs the gameplay owner. After `stop`, follow the user's requested save/record-stop/shutdown sequence.
+
 If saving is unavailable during the tutorial or a modal UI, do not bypass it. Preserve the paused session or reach a normal save opportunity. Do not treat a developer/test slot as a legitimate gameplay start unless the user explicitly requests that scenario.
+
+## Conditional waits and sequences
+
+`wait-until fatigue --percent 100 --seconds 30` advances simulation until fatigue reaches the percentage. Other conditions are `animation` (idle/recovered), `passage --bearing-deg B --meters M` (locally clear, M≤6), and `ui --ui-mode MODE`. It returns `condition_met` or `condition_timeout`, with ordinary interruption on death, unexpected UI/location or `stop`. Waiting consumes game time.
+
+`sequence` composes ordinary public actions, resolving owned item/spell names against fresh inventory/spell handles:
+
+```sh
+./astra sequence '{"actions":[{"op":"use_item","name":"EXACT_OWNED_ITEM_NAME"},{"op":"wait_until","condition":"animation","seconds":5},{"op":"act","move":1,"seconds":3}],"max_seconds":15,"stop_on_damage":true,"stop_health_pct":35}'
+```
+
+Steps use API names with underscores: `act`, `look`, `go`, `walk`, `revisit`, `return_to`, `approach`, `interact`, `move_local`, `use_item`, `select_spell`, `select_enchanted`, `cast`, `strike`, `chain`, `wait_until`, `trigger`, `choose`, `lock`, `unlock`. Each step contains `op` plus that operation's normal fields. Item/spell selection also accepts an exact unique `name`. Every step is validated before execution; stale UI/scene refs still require stopping and reacquiring. Do not preselect replies from dialogue that has not been opened/read.
+
+Default total simulation budget is 60 seconds; it has no fixed upper cap. Remaining time limits timed steps; atomic UI operations, finite turns and individual casts/strikes finish normally and can overrun the remaining budget. A combat `chain` uses its own continuous motor deadline. `stop_on_damage` defaults to true and `stop_health_pct` to 0 (disabled). Interruptions stop the remaining sequence; already consumed items are not replayed. Only the final observation captures a screenshot. Sequence boundaries retain ordinary brief command pauses; use a combat `chain` for continuous concurrent movement/casting, and `interact --approach` for uninterrupted approach/aim/activation.
+
+## Screenshot storage
+
+Ordinary screenshots are a rolling cache: the latest 128 by default, configurable via `screenshot_keep` (integer ≥8) in local `local-settings.json`. Screenshots explicitly attached by `remember` are protected; those notes retain up to six views each. Old automatic atlas links are returned only while their image exists. SQLite paths, nodes, names and door links survive cache cleanup. Use the screenshots to inspect appearances and obstacles; the atlas stores travel knowledge, not a substitute rendered view.
+
+Map SVG/PNG files are generated only with `observe --map` or `atlas --map`. The atlas map reuses `atlas-current.svg/png`; other generated maps have an eight-file cache. User-named files and recordings are not pruned.
 
 ## Recording
 

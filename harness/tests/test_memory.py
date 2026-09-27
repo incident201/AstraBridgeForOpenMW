@@ -29,7 +29,7 @@ def test_scene_projection_accepts_screen_coordinates_but_rejects_world_state():
     with pytest.raises(BridgeError):check_result(scene)
 
 
-@pytest.mark.parametrize('args',[{'forward_m':100},{'forward_m':float('nan')},{'position':[0,0,0]}])
+@pytest.mark.parametrize('args',[{'forward_m':float('inf')},{'forward_m':float('nan')},{'position':[0,0,0]}])
 def test_local_movement_remains_bounded(args):
     with pytest.raises(BridgeError):validate('move_local',args)
 

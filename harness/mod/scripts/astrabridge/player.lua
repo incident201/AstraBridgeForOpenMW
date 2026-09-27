@@ -259,6 +259,7 @@ local function observation(args)
     out.body=bodyState()
     out.trajectory=Trajectory.report(args and args._trail_after,args and args._trail_segment)
     out._atlas_frame=Trajectory.frame()
+    out._atlas_travel=Trajectory.flush()
     out.combat=combatInfo()
     out.effects=activeEffects()
     if not I.UI.getMode() and not out.ui.modal then
@@ -732,13 +733,13 @@ local function dispatch(cmd)
         if I.UI.getMode() then pause(cmd,nil,'ui_open');return end
         if not controlsAllowed() then pause(cmd,nil,'action_unavailable');return end
         if not ui._astraCombatInfo then pause(cmd,nil,'native_ui_unavailable');return end
-        assert(type(args.actions)=='table' and #args.actions>=1 and #args.actions<=32)
+        assert(type(args.actions)=='table' and #args.actions>=1)
         local plan={}
         for _,step in ipairs(args.actions) do
             assert(step.op=='strike' or step.op=='cast' or step.op=='wait')
             local switch=step.op=='cast' and Player.CONTROL_SWITCH.Magic or Player.CONTROL_SWITCH.Fighting
             if step.op~='wait' and not Player.getControlSwitch(self,switch) then pause(cmd,nil,'action_unavailable');return end
-            local entry={op=step.op,charge=P.number(step.charge,.1,1.5,.8),seconds=step.op=='wait' and P.number(step.seconds,.02,3,.5) or nil}
+            local entry={op=step.op,charge=P.number(step.charge,.1,1.5,.8),seconds=step.op=='wait' and P.number(step.seconds,.02,math.huge,.5) or nil}
             if step.spell then
                 for _,spell in pairs(A.spells(self)) do
                     if spell.name==step.spell and (spell.type==core.magic.SPELL_TYPE.Spell or spell.type==core.magic.SPELL_TYPE.Power) then
@@ -784,12 +785,12 @@ local function dispatch(cmd)
             if not g or not A.objectIsInstance(g.obj) then pause(cmd,nil,'target_not_visible');return end
             targetLock={ref=target,name=g.obj.type.record(g.obj).name,status=A.isDead(g.obj) and 'down' or 'locked',cell=Space.key(self.cell)}
         end
-        local p={cmd=cmd,phase='resuming',start=Scene.pose(),elapsed=0,deadline=core.getRealTime()+45,
-            chain={plan=plan,ref=target,air=args.air,limit=P.number(args.max_seconds,.5,20,12),elapsed=0,
+        local p={cmd=cmd,phase='resuming',start=Scene.pose(),elapsed=0,deadline=core.getRealTime()+P.actionTimeout(op,args,45),
+            chain={plan=plan,ref=target,air=args.air,limit=P.number(args.max_seconds,.5,math.huge,12),elapsed=0,
                 stopHealth=P.number(args.stop_health_pct,0,100,0),results=P.array(),completed=0,initial=resources()}}
         if args.movement then
             local m=args.movement
-            p.evade=Evasion.new(m.direction,P.number(m.meters,.25,8,2),p.chain.limit)
+            p.evade=Evasion.new(m.direction,P.number(m.meters,.25,math.huge,2),p.chain.limit)
             p.evadePosition=self.position;p.evadeRun=m.run or false
             p.evadeFaceTarget=m.face_target~=false and target~=nil
             p.evadeTarget=target
@@ -830,7 +831,7 @@ local function dispatch(cmd)
         local charge=P.number(args.charge,.1,1.5,.8)
         active={move=0,strafe=0,attack=false,sneak=pausedSneak}
         local ammoRecord=op=='strike' and selected.kind=='ranged' and ammunition() or nil
-        pending={cmd=cmd,phase='resuming',start=Scene.pose(),elapsed=0,deadline=core.getRealTime()+45,
+        pending={cmd=cmd,phase='resuming',start=Scene.pose(),elapsed=0,deadline=core.getRealTime()+P.actionTimeout(op,args,45),
             combat=Combat.new(op,charge),resources=resources(ammoRecord),ammoRecord=ammoRecord,spendKind=spendingKind(op,selected),firstFrame=lastFrame,target=target,
             rangeCheck=op=='strike' and selected.kind~='ranged' and 'melee_in_reach' or touch and 'touch_in_reach' or nil}
         pending.castableName=selected.name
@@ -849,12 +850,12 @@ local function dispatch(cmd)
         if not A.objectIsInstance(g.obj) then pause(cmd,nil,'invalid_lock_target');return end
         if A.isDead(g.obj) then pause(cmd,{paused=true,reason='target_down'});return end
         assert(args.direction=='back' or args.direction=='left' or args.direction=='right')
-        local meters=P.number(args.meters,.25,8,2)
-        local seconds=P.number(args.seconds,.2,8,4)
+        local meters=P.number(args.meters,.25,math.huge,2)
+        local seconds=P.number(args.seconds,.2,math.huge,4)
         targetLock={ref=target,name=g.obj.type.record(g.obj).name,status='locked',cell=Space.key(self.cell)}
         routes={};walkingRoute=nil
         active={move=0,strafe=0,run=args.run or false,sneak=pausedSneak}
-        pending={cmd=cmd,phase='resuming',start=Scene.pose(),elapsed=0,deadline=core.getRealTime()+30,
+        pending={cmd=cmd,phase='resuming',start=Scene.pose(),elapsed=0,deadline=core.getRealTime()+P.actionTimeout(op,args,30),
             kind='evade',evade=Evasion.new(args.direction,meters,seconds),evadePosition=self.position,
             evadeRun=args.run or false,evadeFaceTarget=true,evadeTarget=target}
         invalidate();core.sendGlobalEvent('AstraResume',{id=cmd.id})
@@ -863,16 +864,16 @@ local function dispatch(cmd)
         if not controlsAllowed() or not Player.getControlSwitch(self,Player.CONTROL_SWITCH.Looking) then pause(cmd,nil,'action_unavailable');return end
         if not Mobility.has('Levitate') then pause(cmd,nil,'levitation_required');return end
         if targetLock and targetLock.status~='down' then pause(cmd,nil,'target_locked_unlock_first');return end
-        local f=P.number(args.forward_m,-20,20,0)
-        local s=P.number(args.sideways_m,-20,20,0)
-        local z=P.number(args.vertical_m,-20,20,0)
-        assert(f*f+s*s+z*z>.01 and f*f+s*s+z*z<=400)
+        local f=P.number(args.forward_m,-math.huge,math.huge,0)
+        local s=P.number(args.sideways_m,-math.huge,math.huge,0)
+        local z=P.number(args.vertical_m,-math.huge,math.huge,0)
+        assert(f*f+s*s+z*z>.01)
         local yaw=camera.getYaw()
         local delta=util.vector3(f*math.sin(yaw)+s*math.cos(yaw),f*math.cos(yaw)-s*math.sin(yaw),z)*Scene.unitsPerMeter
         active={move=0,strafe=0,run=false,sneak=pausedSneak}
         walkingRoute=nil
-        pending={cmd=cmd,phase='resuming',start=Scene.pose(),elapsed=0,deadline=core.getRealTime()+60,
-            kind='fly',flight=require('scripts.astrabridge.flight').new(P.number(args.seconds,.2,15,10),f==0 and s==0),
+        pending={cmd=cmd,phase='resuming',start=Scene.pose(),elapsed=0,deadline=core.getRealTime()+P.actionTimeout(op,args,60),
+            kind='fly',flight=require('scripts.astrabridge.flight').new(P.number(args.seconds,.2,math.huge,10),f==0 and s==0),
             destination=self.position+delta,previousPosition=self.position,lastHealth=not args.under_fire and ownHealth() or nil}
         invalidate();core.sendGlobalEvent('AstraResume',{id=cmd.id})
     elseif op=='walk' or op=='go' then
@@ -904,11 +905,13 @@ local function dispatch(cmd)
         local goalDelta=walkingRoute.nav.goal-self.position
         walkingRoute.nav.arrivalTolerance=op=='go' and args.ref:sub(1,8)=='passage_'
             and math.min(84,math.max(25,math.sqrt(goalDelta.x^2+goalDelta.y^2)*.25)) or 25
-        pending={cmd=cmd,phase='resuming',start=Scene.pose(),elapsed=0,deadline=core.getRealTime()+45,
+        pending={cmd=cmd,phase='resuming',start=Scene.pose(),elapsed=0,deadline=core.getRealTime()+P.actionTimeout(op,args,45),
             kind='walk',navigator=walkingRoute.nav,walkRef=walkingRoute.ref,
-            lastHealth=not args.under_fire and ownHealth() or nil,progressPosition=self.position,progressTime=0,maxSeconds=P.number(args.seconds,.5,20,op=='go' and 12 or 8)}
+            lastHealth=not args.under_fire and ownHealth() or nil,progressPosition=self.position,progressTime=0,maxSeconds=P.number(args.seconds,.5,math.huge,op=='go' and 12 or 8)}
         invalidate();core.sendGlobalEvent('AstraResume',{id=cmd.id})
-    elseif op=='focus' or op=='approach' or op=='move_local' or op=='track' or op=='lock' then
+    elseif op=='focus' or op=='approach' or op=='interact' or op=='move_local' or op=='track' or op=='lock' then
+        local interaction=op=='interact'
+        if interaction then op=args.approach and 'approach' or 'focus' end
         if (op=='approach' or op=='move_local') and Mobility.has('Levitate') then pause(cmd,nil,'flight_requires_fly');return end
         if op=='approach' or op=='move_local' then walkingRoute=nil end
         if I.UI.getMode() then pause(cmd,nil,'ui_open');return end
@@ -933,17 +936,18 @@ local function dispatch(cmd)
             pause(cmd,nil,'target_locked_unlock_first');return
         end
         active={move=0,strafe=0,sneak=pausedSneak,run=args.run or false}
-        pending={cmd=cmd,phase='resuming',start=start,elapsed=0,seconds=8,deadline=core.getRealTime()+45,
-            kind=op=='lock' and 'focus' or op,target=args.ref,progressTime=0,progressPosition=self.position,
+        pending={cmd=cmd,phase='resuming',start=start,elapsed=0,seconds=P.actionSeconds(op,args),deadline=core.getRealTime()+P.actionTimeout(op,args,45),
+            kind=op=='lock' and 'focus' or op,target=args.ref,progressTime=0,progressPosition=self.position,interact=interaction,
             reachKind=args.reach,waitReady=args.wait_ready}
         if op=='track' then
-            pending.seconds=P.number(args.seconds,.1,3,1)
+            pending.seconds=P.number(args.seconds,.1,math.huge,1)
+            pending.deadline=core.getRealTime()+P.actionTimeout(op,args,45)
             assert(args.attack==nil or type(args.attack)=='boolean')
             pending.attack=args.attack or false
         end
         if op=='move_local' then
-            local forward=P.number(args.forward_m,-4,4,0)*Scene.unitsPerMeter
-            local side=P.number(args.sideways_m,-4,4,0)*Scene.unitsPerMeter
+            local forward=P.number(args.forward_m,-math.huge,math.huge,0)*Scene.unitsPerMeter
+            local side=P.number(args.sideways_m,-math.huge,math.huge,0)*Scene.unitsPerMeter
             pending.destination=self.position+util.vector3(forward*math.sin(start.yaw)+side*math.cos(start.yaw),
                 forward*math.cos(start.yaw)-side*math.sin(start.yaw),0)
         end
@@ -957,7 +961,12 @@ local function dispatch(cmd)
         elseif op=='move_local' then routes={} end
         invalidate()
         core.sendGlobalEvent('AstraResume',{id=cmd.id})
-    elseif op == 'act' or op=='look' then
+    elseif op == 'act' or op=='look' or op=='wait_until' then
+        local waitCondition
+        if op=='wait_until' then
+            waitCondition=args
+            args={seconds=P.actionSeconds(op,args)}
+        end
         if op=='look' then
             local heading=P.number(args.heading_deg,0,360,nil)
             local pitch=P.number(args.pitch_deg,-80,80,nil)
@@ -986,7 +995,7 @@ local function dispatch(cmd)
                 expected.item=g.obj.recordId;expected.count=A.inventory(self):countOf(expected.item)
             end
         end
-        local seconds = P.number(args.seconds,0.02,3,0.25)
+        local seconds = P.number(args.seconds,0.02,math.huge,0.25)
         P.number(args.move,-1,1,0); P.number(args.strafe,-1,1,0)
         P.number(args.yaw,-180,180,0); P.number(args.pitch,op=='look' and -180 or -90,op=='look' and 180 or 90,0)
         for _, k in ipairs({'attack','run','sneak'}) do assert(args[k] == nil or type(args[k]) == 'boolean') end
@@ -999,13 +1008,18 @@ local function dispatch(cmd)
         invalidate()
         active = args
         local start=Scene.pose()
-        pending = {cmd=cmd,phase='resuming',seconds=seconds,elapsed=0,deadline=core.getRealTime()+30,start=start,
+        pending = {cmd=cmd,phase='resuming',seconds=seconds,elapsed=0,deadline=core.getRealTime()+P.actionTimeout(op,args,30),start=start,
             turnYaw=args.yaw~=nil,turnPitch=args.pitch~=nil,
             yaw=start.yaw+math.rad(args.yaw or 0),pitch=args.pitch and math.max(-1.45,math.min(1.45,start.pitch+math.rad(args.pitch))) or start.pitch,expected=expected,
-            requestedAttack=args.attack or false}
+            requestedAttack=args.attack or false,waitCondition=waitCondition}
         pending.requestedMove=args.move or 0;pending.requestedStrafe=args.strafe or 0
         core.sendGlobalEvent('AstraResume', {id=cmd.id})
     elseif op == 'trigger' then
+        if args.name=='Rest' then
+            if not ui._astraRest then pause(cmd,nil,'native_ui_unavailable');return end
+            local opened=ui._astraRest()
+            pause(cmd,{paused=true,submitted=opened,reason=opened and 'ui_opened' or 'rest_unavailable'});return
+        end
         assert(allowedTriggers[args.name])
         -- Activation/jump need simulation and therefore belong in act.
         if args.name == 'Activate' or args.name == 'Jump' then pause(cmd,nil,'use_act'); return end
@@ -1283,6 +1297,19 @@ local function combatFrame(p,dt)
     if command.done then finishCombat(p) end
 end
 
+local function conditionMet(c)
+    if c.condition=='fatigue' then
+        local f=A.stats.dynamic.fatigue(self)
+        return f.current>=math.max(1,(f.base or f.current)+(f.modifier or 0))*(c.percent or 100)/100
+    elseif c.condition=='animation' then
+        local b=bodyState();return not b.animation_busy and not b.recovering
+    elseif c.condition=='ui' then return (I.UI.getMode() or 'Gameplay')==c.ui_mode
+    elseif c.condition=='passage' and Terrain then
+        local p=Terrain.probe(camera.getYaw()+math.rad(c.bearing_deg or 0),c.meters or 1)
+        return not p.obstacle and p.distance>=((c.meters or 1)*Scene.unitsPerMeter-4)
+    end
+    return false
+end
 local function onFrame(dt)
     Trajectory.sample(false)
     Scene.fov(desiredFov)
@@ -1316,8 +1343,10 @@ local function onFrame(dt)
         and I.UI.getMode() == nil and core.isWorldPaused())
     if bus:get('cancel') then
         bus:set('cancel',false)
-        if pending and pending.combat then finishCombat(pending,'cancelled')
-        else pause(pending and pending.cmd, nil, pending and 'cancelled' or nil) end
+        pausedSneak=false
+        if pending and pending.phase=='pausing' then clearInput()
+        elseif pending and pending.combat then finishCombat(pending,'cancelled')
+        else pause(pending and pending.cmd, {paused=true,reason='cancelled',elapsed=pending and pending.elapsed or 0}) end
     end
     if pending then
         if pending.phase == 'pausing' then
@@ -1334,6 +1363,13 @@ local function onFrame(dt)
             end
         elseif pending.phase == 'running' then
             local p = pending
+            if not p.lastProgress or core.getRealTime()-p.lastProgress>=.5 then
+                p.lastProgress=core.getRealTime()
+                local progress={operation=p.cmd.op,elapsed=p.elapsed or 0,phase=p.phase}
+                progress._atlas_travel=Trajectory.flush()
+                if p.navigator then progress.navigation=require('scripts.astrabridge.navigation').report(p.navigator) end
+                P.emit({version=1,session=bus:get('session'),event='progress',result=progress})
+            end
             local damage=0
             if p.lastHealth then
                 local health=ownHealth();damage=p.lastHealth-health;p.lastHealth=health
@@ -1345,6 +1381,10 @@ local function onFrame(dt)
             elseif A.isDead and A.isDead(self) then
                 if p.combat then finishCombat(p,'player_down')
                 else pause(p.cmd,{paused=true,elapsed=p.elapsed,reason='player_down'}) end
+            elseif p.waitCondition and conditionMet(p.waitCondition) then pause(p.cmd,{paused=true,elapsed=p.elapsed,reason='condition_met'})
+            elseif p.interactionSubmitted then
+                p.elapsed=p.elapsed+dt
+                if p.elapsed-p.interactionSubmitted>=.2 or I.UI.getMode() then pause(p.cmd,{paused=true,elapsed=p.elapsed,reason='completed'}) end
             elseif p.combat then combatFrame(p,dt)
             elseif I.UI.getMode() then pause(p.cmd,{paused=true,elapsed=p.elapsed,reason='ui_open'})
             elseif damage>.01 then pause(p.cmd,{paused=true,reason=A.isDead(self) and 'player_down' or 'player_hurt',damage_taken=math.floor(damage*100+.5)/100})
@@ -1456,7 +1496,8 @@ local function onFrame(dt)
                             reached=visible and ui._astraTargetReach(g.obj)[p.reachKind..'_in_reach']
                         end
                         if p.kind=='approach' and reached then
-                            pause(p.cmd,{paused=true,reason='within_reach'});return
+                            if p.interact then p.kind='focus';p.navigator=nil;stopMovement()
+                            else pause(p.cmd,{paused=true,reason='within_reach'});return end
                         end
                         if p.kind=='focus' and math.abs(pitch)>math.rad(80) then
                             pause(p.cmd,{paused=true,reason='viewpoint_adjustment_needed'});return
@@ -1465,7 +1506,7 @@ local function onFrame(dt)
                             local waypoint=require('scripts.astrabridge.navigation').step(p.navigator,visible and g or nil,dt)
                             if p.navigator.status=='waiting' then
                                 stopMovement();p.elapsed=p.elapsed+dt;p.progressTime=p.elapsed
-                                if p.elapsed>=8 then pause(p.cmd,{paused=true,reason='step_limit'}) end
+                                if p.elapsed>=p.seconds then pause(p.cmd,{paused=true,reason='step_limit'}) end
                                 return
                             end
                             if not reached and not p.navigator.path then
@@ -1495,6 +1536,18 @@ local function onFrame(dt)
                         if p.elapsed>=p.seconds then finishStep(p,{paused=true,reason='tracked',elapsed=p.elapsed});return end
                     end
                     if p.kind=='focus' and aimed and not (p.waitReady and Scene.lootReady(aimTarget)==false) then
+                        if p.interact then
+                            if not Scene.reach(aimTarget) then pause(p.cmd,{paused=true,reason='out_of_reach'});return end
+                            if not Scene.crosshair(aimTarget) then pause(p.cmd,{paused=true,reason='target_not_aimed'});return end
+                            if not ui._astraActivate then pause(p.cmd,nil,'native_ui_unavailable');return end
+                            p.expected={cell=Space.key(self.cell)}
+                            if types.Item and types.Item.objectIsInstance(aimTarget.obj) then
+                                p.expected.item=aimTarget.obj.recordId;p.expected.count=A.inventory(self):countOf(p.expected.item)
+                            end
+                            stopMovement()
+                            if not ui._astraActivate() then pause(p.cmd,nil,'action_unavailable');return end
+                            p.interactionSubmitted=p.elapsed;return
+                        end
                         pause(p.cmd,{paused=true,reason='focused'});return
                     elseif p.kind=='approach' then
                         if math.abs(ye)<math.rad(20) and not reached then active.move=moveFraction end
@@ -1514,7 +1567,7 @@ local function onFrame(dt)
                         if p.navigator and require('scripts.astrabridge.navigation').recover(p.navigator,yaw) then p.progressTime=p.elapsed;p.progressPosition=self.position
                         else pause(p.cmd,{paused=true,reason='blocked'});return end
                     end
-                    if p.elapsed>8 then pause(p.cmd,{paused=true,reason='step_limit'});return end
+                    if p.kind~='track' and p.elapsed>p.seconds then pause(p.cmd,{paused=true,reason='step_limit'});return end
                     return
                 end
                 if not p.triggered then
@@ -1567,7 +1620,7 @@ local function onFrame(dt)
                 local pe=turnPitch and p.pitch-camera.getPitch() or 0
                 if lockGoal then active.attack=p.requestedAttack and (Scene.combatAligned and Scene.combatAligned(lockGoal) or Scene.aimedAt(lockGoal)) end
                 if p.elapsed>=p.seconds and (lockGoal or math.abs(ye)<math.rad(.5) and math.abs(pe)<math.rad(.5)) then
-                    finishStep(p,{paused=true,elapsed=p.elapsed,reason='duration'});return
+                    finishStep(p,{paused=true,elapsed=p.elapsed,reason=p.waitCondition and 'condition_timeout' or 'duration'});return
                 end
                 if p.elapsed>=p.seconds then active.move=0;active.strafe=0;active.attack=false end
                 if p.elapsed>math.max(p.seconds,1.5)+1 then

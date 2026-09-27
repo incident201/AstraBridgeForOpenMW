@@ -11,7 +11,7 @@ def test_local_survey():
     r=subprocess.run(['lua','tests/terrain.lua'],cwd=root,capture_output=True,text=True)
     assert r.returncode==0,r.stdout+r.stderr
 
-@pytest.mark.parametrize('args',[{'ref':'raw_world_id'},{'ref':'passage_x','seconds':99},{'ref':'passage_x','position':[1,2,3]},{'ref':'passage_x','run':1}])
+@pytest.mark.parametrize('args',[{'ref':'raw_world_id'},{'ref':'passage_x','seconds':0},{'ref':'passage_x','position':[1,2,3]},{'ref':'passage_x','run':1}])
 def test_go_stays_bounded(args):
     with pytest.raises(BridgeError):validate('go',args)
 

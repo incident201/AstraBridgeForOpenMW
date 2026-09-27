@@ -25,7 +25,7 @@ Selection/use invalidates ephemeral item/spell handles. The selection itself per
 | `strike --air --charge C` | Intentional untargeted attack. Use `unlock` first, including after a down target; do not use it to bypass visibility/reach checks for a specific enemy. |
 | `cast [ACTOR_REF]` | Cast the selected spell/enchantment. Self-only effects need no actor. Touch/target effects require a visible actor or suitable current lock. |
 | `cast --air` | Intentional untargeted cast where appropriate; not compatible with a supplied ref or a retained lock; use `unlock` first. |
-| `track ACTOR_REF --seconds S --attack` | Low-level short target tracking, S=0.1…3 (default 1); optional held attack. Prefer `strike`/`chain` when a complete attack cycle matters. |
+| `track ACTOR_REF --seconds S --attack` | Target tracking for any finite S≥0.1 (default 1), with no fixed upper limit; optional held attack. Prefer `strike`/`chain` when a complete attack cycle matters. |
 
 A lock rotates the **character** with finite turn speed; it is not a detached camera. It cannot authorize following an actor through walls. Inspect `target_lock.status`. If an existing lock conflicts with a command, explicitly switch with `lock NEW_ACTOR_REF` or clear it with `unlock`.
 
@@ -47,9 +47,9 @@ Top-level fields:
 
 | Field | Allowed values / default |
 |---|---|
-| `actions` | Required array of 1…32 steps, listed below. |
+| `actions` | Required nonempty array of steps (subject to the 32 KiB command transport limit), listed below. |
 | `ref` | One actor target for target-dependent steps; omitted to use a live lock or for self-only actions. |
-| `max_seconds` | Total simulation budget 0.5…20, default 12; includes approach/preparation. |
+| `max_seconds` | Total finite simulation budget ≥0.5, default 12; includes approach/preparation. |
 | `stop_health_pct` | Stop when own health reaches this percentage, 0…100; default 0 disables the condition. Not protection against a lethal hit. |
 | `pursue` | Boolean, default false. Follow the selected visible actor and regain range as it moves. Incompatible with `movement` or `air`. |
 | `movement` | Optional simultaneous directional maneuver, described below. |
@@ -65,7 +65,7 @@ Step types are exactly:
 {"op":"wait","seconds":1}
 ```
 
-- Strike charge: 0.1…1.5, default 0.8. Wait: 0.02…3, default 0.5.
+- Strike charge: 0.1…1.5, default 0.8. Wait: any finite duration ≥0.02, default 0.5; the whole queue still stops at its `max_seconds` budget.
 - A cast step can specify `spell` **or** `item`, never both. These are exact, unique display names from known spells/owned inventory, not engine IDs or refs. If ambiguous, select by a fresh ref first and use `{"op":"cast"}`.
 - No UI click, inventory pickup, arbitrary key, movement command, or console command can be inserted as a step.
 - Resource exhaustion, a changed UI/location, target loss/death, limits or health condition can stop a queue. Death of the target stops remaining target-dependent work; a different enemy is not selected automatically.
@@ -80,7 +80,7 @@ The `movement` object within a chain accepts:
 {"direction":"back","meters":2,"run":false,"face_target":true}
 ```
 
-Directions: `forward`, `back`, `left`, `right`. Distance: 0.25…8 m, default 2. `run` and `face_target` are optional booleans. `face_target:true` requires a valid actor target/lock and keeps it in view. For deliberate movement without facing an actor, use `face_target:false` with **no** `ref` and no conflicting lock. A maneuver ends at its distance bound while the queue may still need to finish, or vice versa; inspect both action and movement reasons.
+Directions: `forward`, `back`, `left`, `right`. Distance: ≥0.25 m, default 2. `run` and `face_target` are optional booleans. `face_target:true` requires a valid actor target/lock and keeps it in view. For deliberate movement without facing an actor, use `face_target:false` with **no** `ref` and no conflicting lock. A maneuver ends at its distance bound while the queue may still need to finish, or vice versa; inspect both action and movement reasons.
 
 Examples:
 
@@ -107,7 +107,7 @@ These are ground maneuvers, not flight/swimming autopilots. They check local sur
 ./astra retreat ACTOR_REF --meters 2 --seconds 8 --actions '[{"op":"cast","spell":"EXACT_KNOWN_SELF_HEAL_NAME"}]'
 ```
 
-`retreat` means `evade back`. The actor ref is optional only when a valid lock supplies it. `--run` is optional. Without `--actions`, seconds are 0.2…8 (default 4), distance 0.25…8 m (default 2). With `--actions`, the shortcut creates a face-target chain and uses `--seconds` as its total budget; use 0.5…8. It does not mean "move, pause, then cast": movement and the queued uses run together.
+`retreat` means `evade back`. The actor ref is optional only when a valid lock supplies it. `--run` is optional. Without `--actions`, seconds are ≥0.2 (default 4), distance ≥0.25 m (default 2). With `--actions`, the shortcut creates a face-target chain and uses `--seconds` as its total budget; use ≥0.5. No fixed upper cap is imposed. It does not mean "move, pause, then cast": movement and the queued uses run together.
 
 ## Ranged combat and multiple actors
 

@@ -38,7 +38,7 @@ def test_native_wheel_rejects_invalid_steps(steps):
 
 @pytest.mark.parametrize("op,args", [
     ("eval", {"code": "x"}), ("act", {"position": [0, 0, 0]}),
-    ("act", {"seconds": 30}), ("act", {"seconds": float("nan")}),
+    ("act", {"seconds": -1}), ("act", {"seconds": float("nan")}),
     ("act", {"move": True}), ("act", {"trigger": "Console"}),
     ("trigger", {"name": "ToggleDebug"}), ("inspect", {"view": "nearby"}),
     ("inspect", {"view": "journal", "page": 0.5}), ("save", {"description": ""}),
@@ -49,7 +49,7 @@ def test_native_wheel_rejects_invalid_steps(steps):
     ("strike", {"air":"yes"}), ("cast", {"seconds":30}),
     ("chain", {"actions":[]}), ("chain", {"actions":[{"op":"eval"}]}),
     ("chain", {"actions":[{"op":"cast","spell":"A","item":"B"}]}),
-    ("chain", {"actions":[{"op":"cast"}],"max_seconds":999}),
+    ("chain", {"actions":[{"op":"cast"}],"max_seconds":float('inf')}),
     ("chain", {"actions":[{"op":"strike","charge":0}]}),
     ("walk", {"x":1,"y":2}), ("walk", {"x":1.5,"y":2,"observation":3}),
     ("walk", {"ref":"walk_test","x":1}), ("walk", {"x":1,"y":2,"observation":True}),

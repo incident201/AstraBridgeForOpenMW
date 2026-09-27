@@ -233,11 +233,11 @@ print('Opt-in health stop and death while finishing movement passed')
 
 playerDead=false;health=50;charge=8;before=pauseEvents;previousCasts=casts;previousAim=aimCalls
 data.response=nil;data.request={session='adapter',id=11,op='chain',args={ref='visible_enemy',
- actions={{op='cast'},{op='wait',seconds=1.2},{op='cast'}},max_seconds=10}}
+ actions={{op='cast'},{op='wait',seconds=6},{op='cast'}},max_seconds=20}}
 for _=1,200 do tick();if data.response then break end end
 result=data.response.result
 assert(result.reason=='completed' and result.completed_actions==3 and casts==previousCasts+2 and charge==0)
-assert(result.steps[2].operation=='wait' and not result.steps[2].attempted and result.steps[2].elapsed>=1.2)
+assert(result.steps[2].operation=='wait' and not result.steps[2].attempted and result.steps[2].elapsed>=6)
 assert(pauseEvents==before+1 and aimCalls>previousAim+10,'stationary healing and waiting keep the view lock and share one pause')
 if direct then
     assert(movementOverridden and bindings.MoveForward==nil,'stock movement must not overwrite the agent, while Use stays stock')
@@ -255,3 +255,29 @@ if direct then
     assert(jumpPulses==oldJumps+1,'one Jump trigger must create exactly one normal jump pulse')
     assert(not object.controls.jump and object.controls.movement==0 and object.controls.sideMovement==0)
 end
+
+-- Independent cancellation retains the interrupted motor result and one pause.
+playerDead=false;health=50;before=pauseEvents
+data.response=nil;data.request={session='adapter',id=20,op='act',args={seconds=140,move=1}}
+for _=1,15 do tick()end
+assert(not data.response and not paused)
+data.cancel=true
+for _=1,15 do tick();if data.response then break end end
+assert(data.response.result.reason=='cancelled' and data.response.result.elapsed>0)
+assert(paused and pauseEvents==before+1 and not object.controls.sneak)
+for id,condition in ipairs({'fatigue','animation','passage'}) do
+    surfaceClear=true;shotBusy=false;data.response=nil
+    data.request={session='adapter',id=20+id,op='wait_until',args={condition=condition,percent=100,seconds=10}}
+    for _=1,20 do tick();if data.response then break end end
+    assert(data.response and data.response.result.reason=='condition_met',condition)
+end
+surfaceClear=false;data.response=nil
+data.request={session='adapter',id=24,op='wait_until',args={condition='passage',seconds=2}}
+for _=1,40 do tick();if data.response then break end end
+assert(data.response.result.reason=='condition_timeout' and paused)
+local ui=require('openmw.ui');local opened=0
+ui._astraRest=function()opened=opened+1;return true end
+data.response=nil;data.request={session='adapter',id=25,op='trigger',args={name='Rest'}}
+for _=1,20 do tick();if data.response then break end end
+assert(opened==1 and data.response.result.reason=='ui_opened')
+print('Interrupting long motor action, conditional waits and native Rest passed')

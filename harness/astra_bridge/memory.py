@@ -18,6 +18,22 @@ class SpatialMemory:
         temporary.write_text(json.dumps(self.data, ensure_ascii=False, indent=2)+'\n')
         temporary.replace(self.path)
 
+    def attach_atlas(self,atlas):
+        """Upgrade old notes only when an existing marker or image proves the link."""
+        changed=False
+        for place in self.data['places']:
+            if place.get('atlas_node'):continue
+            views={v.get('screenshot') for v in place.get('views',[]) if v.get('screenshot')}
+            matches=[]
+            for graph in atlas.data['segments']:
+                if graph.get('profile',atlas.profile)!=atlas.profile:continue
+                for node in graph['nodes']:
+                    same_marker=place.get('motor_ref') and place['motor_ref']==node.get('motor_ref')
+                    if same_marker or views.intersection(node.get('views',[])):matches.append(node)
+            if len(matches)==1:
+                place['atlas_node']=matches[0]['ref'];changed=True
+        if changed:self.persist()
+
     def branch(self, reason):
         self.data['branch'] = uuid.uuid4().hex[:8]
         self.data['anchor'] = None

@@ -76,6 +76,14 @@ if 'std::vector<AstraRun> astraVisibleRuns' not in (root/'apps/openmw/mwgui/book
         }
         void setFocusItem(BookTypesetter::Style* itemStyle) override''')
 replace('apps/openmw/mwlua/uibindings.cpp','        api["_astraActivate"]',
+'''        api["_astraRest"] = [context, windowManager]() {
+            if (context.mType != Context::Local || !context.mLuaManager->isSynchronizedUpdateRunning()) return false;
+            if (windowManager->isGuiMode()) return false;
+            MWBase::Environment::get().getInputManager()->executeAction(MWInput::A_Rest);
+            return windowManager->containsMode(MWGui::GM_Rest);
+        };
+        api["_astraActivate"]''')
+replace('apps/openmw/mwlua/uibindings.cpp','        api["_astraActivate"]',
 '''        api["_astraPlayerState"] = [context](sol::this_state state) {
             if (context.mType != Context::Local || !context.mLuaManager->isSynchronizedUpdateRunning())
                 throw std::runtime_error("Astra player state requires player onFrame");

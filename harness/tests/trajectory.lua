@@ -32,3 +32,18 @@ local old=r.ref
 self.position=V.new(900000,400000,200);r=T.report(r.sequence,old)
 assert(r.ref~=old and r.samples[1].forward_m==0,'same-space travel must never draw a path across unseen territory')
 print('Own-motion trajectory: relative origin, cursor, pauses, exterior continuity, teleports and bounded gaps passed')
+
+T.reset('stream');self.cell={id='first'};self.position=V.new(0,0,0)
+T.sample(true);T.flush()
+self.position=V.new(70,0,0);T.sample(true)
+self.cell={id='second'};self.position=V.new(300,0,0);T.sample(true)
+local chunks=T.flush()
+assert(#chunks==2 and chunks[1].frame.space=='first' and chunks[2].frame.space=='second')
+assert(chunks[1].trajectory.samples[1].forward_m==1,'preserve the last old-cell points')
+assert(#T.flush()==0,'do not replay acknowledged samples')
+local count=0
+for i=1,1000 do
+    self.position=V.new(300+i*70,0,0);T.sample(true)
+    if i%5==0 then for _,chunk in ipairs(T.flush()) do count=count+#chunk.trajectory.samples end end
+end
+assert(count==1000,'streaming must preserve a path longer than the bounded Lua ring')

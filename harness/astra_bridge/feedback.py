@@ -2,12 +2,12 @@
 
 def feedback(op, action, before, after, inputs=None):
     why=action.get('reason')
-    if why in {'arrived','within_reach','focused','duration','tracked','completed','use_completed','target_down','maneuver_complete'}:
+    if why in {'arrived','within_reach','focused','duration','tracked','completed','use_completed','target_down','maneuver_complete','condition_met','ui_opened'}:
         state='succeeded'
-    elif why in {'step_limit','wall_time_limit','turn_limit','chain_time_limit','settled_outside_goal'}:
+    elif why in {'step_limit','wall_time_limit','turn_limit','chain_time_limit','settled_outside_goal','condition_timeout'}:
         state='partial'
     elif why in {'insufficient_magicka','insufficient_charge','no_ammunition','power_already_used',
-                 'nothing_selected','item_unavailable','not_a_weapon','silenced','out_of_reach','underwater_ranged_unavailable','ballistic_unreachable'}:
+                 'nothing_selected','item_unavailable','not_a_weapon','silenced','out_of_reach','underwater_ranged_unavailable','ballistic_unreachable','rest_unavailable'}:
         state='rejected'
     elif why in {'player_down','action_not_started'}:
         state='failed'

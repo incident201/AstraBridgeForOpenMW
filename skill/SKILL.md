@@ -1,6 +1,6 @@
 ---
 name: openmw-play
-description: "Play Morrowind through a configured AstraBridge/OpenMW installation: navigate, talk, fight, read opened books and scrolls, repair equipment, and maintain travel memory and recordings. Includes emergency recovery of displaced NPCs. Use for gameplay, not harness or engine development."
+description: "Play Morrowind through a configured AstraBridge/OpenMW installation: navigate, talk, fight, read opened books and scrolls, repair equipment, and maintain persistent named travel memory and recordings. Supports interruptible actions, action sequences and emergency recovery of displaced NPCs. Use for gameplay, not harness or engine development."
 ---
 
 # Play OpenMW through AstraBridge
@@ -40,13 +40,15 @@ cd "$ASTRA_HOME"
 | Walk through a nearby opening | Choose `terrain.passages[].ref`, then `go` |
 | Walk to a point visible on screen | `ground`, then `go` with a returned ground ref |
 | Approach/talk to a visible NPC, open a door, pick up an item | `interact REF --approach` |
+| Combine ordinary actions | `sequence` with a JSON action list and explicit time budget |
+| Wait for fatigue, animation or clear passage | `wait-until` with condition and time budget |
 | Select a menu response or item | `ui`, then `choose` using its ref or exact caption |
-| Read an open book or scroll | `read`, then continue with its document ref and `next_offset` until `eof` |
-| Repair gear with a hammer | `use-item` the hammer, then `choose` a current `panel:repair` item |
+| Read an open book or scroll | `read --all` or `read --search "TEXT"` (chunked `read` remains available) |
+| Repair gear with a hammer | `use-item` the hammer, then `repair "EXACT_ITEM_NAME" --attempts N` |
 | Attack a moving target repeatedly | `chain` with the actor ref and `pursue:true` |
 | Retreat or strafe while keeping a target in view | `retreat` or `evade` |
 | Fly while a levitation effect is active | `fly` with relative distances |
-| Return to an already visited location | `atlas` → `revisit`, or `recall` → `return-to` |
+| Return to an already visited location | `atlas --query "NAME"` → `revisit`, or `recall` → `return-to` |
 
 Read the reference relevant to the next action:
 
@@ -58,9 +60,13 @@ These references describe the public interface; no source-code inspection is nee
 
 ## Observe → act → verify → remember
 
-The harness pauses the world between bounded actions. Reasoning time does not consume effect duration or let enemies move. Turning, waiting, and moving within an action do consume simulation time. A `chain` has no mandatory thinking pause between its steps.
+The harness pauses the world after each action completes or is interrupted. Reasoning time does not consume effect duration or let enemies move. Turning, waiting, and moving within an action do consume simulation time. Choose `act.seconds` for the intended duration; there is no three-second cap or periodic pause within an action. A `chain` has no mandatory thinking pause between its steps.
 
-This also pauses NPC animation and time-dependent game scripts. During the opening ship scene, movement can return `action_unavailable` while the game has disabled controls and waits for the guard to arrive. Do not infer a broken script from a still image or an unchanged scene between commands. Advance the scene with `act '{"seconds":3}'` (repeat if needed), then inspect the new observation, NPC positions, messages, and `feedback`. If an action ends with `game_paused`, inspect the current UI and handle the game's tutorial prompt before continuing.
+This also pauses NPC animation and time-dependent game scripts. During the opening ship scene, movement can return `action_unavailable` while the game has disabled controls and waits for the guard to arrive. Do not infer a broken script from a still image or an unchanged scene between commands. Advance the scene with `act '{"seconds":10}'` (repeat if needed), then inspect the new observation, NPC positions, messages, and `feedback`. If an action ends with `game_paused`, inspect the current UI and handle the game's tutorial prompt before continuing.
+
+During a long action, `status` returns live progress and `stop` interrupts independently of that action. After stopping, save, stop recording and shut down as requested; these are separate operations. Never wait out a long action after the user asks to stop.
+
+Normal observations include a screenshot and compact structured information. Use `--full` for detailed sensors/effects/combat; `atlas --map` or `observe --map` explicitly requests map images. The cache keeps the latest 128 ordinary screenshots by default; explicit `remember` note images are protected. The atlas retains learned paths in SQLite independently of cached screenshots.
 
 After an action, check `feedback`, `action.reason`, observed movement, messages, and the new observation. Submission, a finished animation, or mana spent does not by itself confirm the intended outcome. Inspect the result before sending the next dependent action.
 

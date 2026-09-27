@@ -23,7 +23,6 @@ function M.step(s,c,dt)
     local animated=c.animation_active
     if animated==nil then animated=c.busy or false end
     if c.dead then return finish(s,'player_down') end
-    if s.elapsed-(s.rangeWait or 0)>=6 then return finish(s,'step_limit') end
     if s.kind=='wait' then
         s.released=true;s.quiet=s.elapsed
         if c.target_down then return finish(s,'target_down') end
@@ -31,6 +30,7 @@ function M.step(s,c,dt)
         if s.elapsed>=s.waitDuration then return finish(s,'completed') end
         return {attack=false}
     end
+    if s.elapsed-(s.rangeWait or 0)>=6 then return finish(s,'step_limit') end
     if not c.can_move then return finish(s,'cannot_act') end
     if c.target_down then
         s.targetDown=true

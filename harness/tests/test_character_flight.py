@@ -22,8 +22,8 @@ def test_player_status_is_one_read_without_screenshot_or_inventory_ref_reset():
     assert calls==[('inspect',{'view':'character'})]
 
 
-@pytest.mark.parametrize('args',[{}, {'vertical_m':30}, {'vertical_m':float('nan')},
-                                {'vertical_m':10,'seconds':100},{'vertical_m':20,'forward_m':20}])
+@pytest.mark.parametrize('args',[{}, {'vertical_m':float('inf')}, {'vertical_m':float('nan')},
+                                {'vertical_m':10,'seconds':0},{'vertical_m':20,'forward_m':True}])
 def test_invalid_flight_is_rejected(args):
     with pytest.raises(BridgeError):validate('fly',args)
 

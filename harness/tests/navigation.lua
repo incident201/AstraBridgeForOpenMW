@@ -162,3 +162,29 @@ self.position=join
 assert(N.step(crowded,nil,.1) and not crowded.detour and crowded.recorded)
 crowded.attempts=4
 assert(not N.recover(crowded,0),'dynamic recovery remains bounded')
+
+-- Static door origin is inside a wall, but an activation standing point exists.
+self.position=V.new(0,0,0)
+require('openmw.types').Actor.objectIsInstance=function()return false end
+require('openmw.core').getGMST=function()return 140 end
+local door={};local goal={obj=door,center=V.new(0,350,70),half=V.new(20,20,70)}
+nearby.castRay=function()return {hit=true,hitObject=door}end
+nearby.findPath=function(_,dest)
+    if dest.x==0 and dest.y==350 then return 99,{} end
+    return 1,{self.position,dest}
+end
+local plan=N.new(goal)
+assert(plan.standingPoint and plan.status=='planned' and plan.goal.y==350,
+    'a door inside a wall needs a reachable activation standing point')
+nearby.castRay=function()return {hit=true,hitObject={}}end
+assert(not N.new(goal).standingPoint,'a standing point behind intervening geometry cannot activate the door')
+
+-- A coarse native endpoint must not strand the actor just short of its known point.
+self.position=V.new(0,0,0)
+local terrain=require('scripts.astrabridge.terrain')
+terrain.walkLine=function(from,to)return {from,to}end
+local endpoint={goal=V.new(45,0,0),path={V.new(10,0,0)},index=1,sincePlan=0,lastGoal={groundPoint=V.new(45,0,0)}}
+assert(N.step(endpoint,nil,.1).x==45 and endpoint.localPath)
+terrain.walkLine=function()return nil end
+endpoint={goal=V.new(45,0,0),path={V.new(10,0,0)},index=1,sincePlan=0,lastGoal={groundPoint=V.new(45,0,0)}}
+assert(N.step(endpoint,nil,.1)==nil,'do not finish a short gap without safe floor support')

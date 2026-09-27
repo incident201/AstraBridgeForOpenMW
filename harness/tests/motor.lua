@@ -47,12 +47,12 @@ package.preload['scripts.astrabridge.navigation']=function()return {
     step=function()return nil end,report=function()return {status='path_end',remaining_m=0,replans=1}end,
 }end
 local player=require('scripts.astrabridge.player')
-local attackFrames,lastAttack=0,false
+local attackFrames,lastAttack,pauseEvents=0,false,0
 local function tick()
     now=now+.02
     local queue=events;events={}
     for _,event in ipairs(queue)do
-        if event[1]=='AstraPause' then paused=true;player.eventHandlers.AstraPaused(event[2])end
+        if event[1]=='AstraPause' then paused=true;pauseEvents=pauseEvents+1;player.eventHandlers.AstraPaused(event[2])end
         if event[1]=='AstraResume' then paused=false;player.eventHandlers.AstraResumed(event[2])end
     end
     if not paused then
@@ -70,12 +70,22 @@ player.eventHandlers.AstraReset();for _=1,10 do tick()end
 local id=0
 local function command(op,args,during)
     id=id+1;data.response=nil;data.request={session='motor',id=id,op=op,args=args or {}}
-    for n=1,1000 do
+    for n=1,10000 do
         if during then during(n)end
         tick();if data.response then return data.response end
     end
     error('no reply')
 end
+-- Cross the former input cap and every fixed transport/watchdog duration.
+local pausesBefore=pauseEvents
+local long=command('act',{seconds=140,move=1})
+assert(not long.error and long.result.reason=='duration' and long.result.elapsed>=140)
+assert(long.result.motion.moved_m>90 and paused and self.controls.movement==0)
+assert(pauseEvents==pausesBefore+1,'a long action must have only its final pause')
+pausesBefore=pauseEvents
+long=command('track',{ref='visible_test',seconds=140})
+assert(not long.error and long.result.reason=='tracked' and long.result.elapsed>=140)
+assert(pauseEvents==pausesBefore+1 and paused,'long tracking must not pause at three seconds')
 local r=command('lock',{ref='visible_test'});assert(not r.error and paused)
 r=command('act',{seconds=1,move=1,attack=true})
 assert(not r.error and paused and attackFrames>0)
