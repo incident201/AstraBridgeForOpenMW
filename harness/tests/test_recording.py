@@ -65,6 +65,14 @@ def test_slow_source_reports_repeats_and_keeps_duration():
     assert len(frames)==600 and pacer.repeated==400
 
 
+def test_render_jitter_does_not_discard_distinct_60hz_frames():
+    frames=[];pacer=FramePacer(60,lambda f:frames.append(f['sequence']))
+    for i in range(600):
+        pacer.push((i+.5)/60+(.006 if i%3==0 else -.003),{'sequence':i})
+    pacer.flush(10)
+    assert frames==list(range(600))
+
+
 def test_ring_rejects_in_progress_and_overwritten_frames(tmp_path):
     stream=FrameStream(tmp_path/'frames.bin',capacity=16,slots=2)
     try:

@@ -67,8 +67,10 @@ class FrameStream:
         if not 0 < size <= self.capacity or size != width*height*4:
             raise BridgeError('video_invalid_frame')
         data = self.mapping[offset+64:offset+64+size]
+        start, end, flags = struct.unpack_from('<QQI', self.mapping, offset+32)
         if struct.unpack_from('<Q', self.mapping, offset)[0] != version: return None
-        return {'sequence': sequence, 'timestamp': timestamp, 'width': width, 'height': height, 'bgra': data}
+        return {'sequence': sequence, 'timestamp': timestamp, 'width': width, 'height': height, 'bgra': data,
+                'sample_start':start, 'sample_end':end, 'media_flags':flags}
 
     def fresh(self, timeout=3):
         with self.active():
@@ -85,13 +87,6 @@ class FrameStream:
         raise BridgeError('engine_frame_unavailable_rebuild_engine')
 
     def capture(self, path):
-        import mss.tools
-        from mss.screenshot import ScreenShot
+        from .screenshots import save_bgra
         frame = self.fresh()
-        w, h = frame['width'], frame['height']
-        stride = w*4
-        bottom_up = frame['bgra']
-        pixels = bytearray().join(bottom_up[i*stride:(i+1)*stride] for i in range(h-1, -1, -1))
-        shot = ScreenShot(pixels, {'left':0, 'top':0, 'width':w, 'height':h})
-        mss.tools.to_png(shot.rgb, shot.size, output=str(path))
-        return {'width':w, 'height':h}
+        return save_bgra(path, frame['bgra'], frame['width'], frame['height'], bottom_up=True)

@@ -24,6 +24,9 @@
 #include "sound.hpp"
 #include "sounddecoder.hpp"
 #include "soundmanagerimp.hpp"
+#include <components/sdlutil/astramedia.hpp>
+#include <SDL_audio.h>
+#include <SDL.h>
 
 #ifndef ALC_ALL_DEVICES_SPECIFIER
 #define ALC_ALL_DEVICES_SPECIFIER 0x1013
@@ -710,7 +713,16 @@ namespace MWSound
         Log(Debug::Info) << "Initializing OpenAL...";
 
         mDeviceName = devname;
-        mDevice = alcOpenDevice(devname.c_str());
+        mAstraLoopback = AstraMedia::stream().enabled();
+        if (mAstraLoopback)
+        {
+            LPALCLOOPBACKOPENDEVICESOFT openLoopback = nullptr;
+            getALCFunc(openLoopback, nullptr, "alcLoopbackOpenDeviceSOFT");
+            if (!openLoopback) return false;
+            mDevice = openLoopback(nullptr);
+            if (!mDevice) return false;
+        }
+        else mDevice = alcOpenDevice(devname.c_str());
         if (!mDevice && !devname.empty())
         {
             Log(Debug::Warning) << "Failed to open \"" << devname << "\", trying default";
@@ -737,7 +749,11 @@ namespace MWSound
         ALC.SOFT_HRTF = alcIsExtensionPresent(mDevice, "ALC_SOFT_HRTF");
 
         mContextAttributes.clear();
-        mContextAttributes.reserve(15);
+        mContextAttributes.reserve(23);
+        if (mAstraLoopback)
+            mContextAttributes.insert(mContextAttributes.end(), {
+                ALC_FORMAT_CHANNELS_SOFT, ALC_STEREO_SOFT,
+                ALC_FORMAT_TYPE_SOFT, ALC_FLOAT_SOFT, ALC_FREQUENCY, 48000});
         if (ALC.SOFT_HRTF)
         {
             LPALCGETSTRINGISOFT alcGetStringiSOFT = nullptr;
@@ -796,7 +812,7 @@ namespace MWSound
             getALFunc(alEventControlSOFT, "alEventControlSOFT");
             getALFunc(alEventCallbackSOFT, "alEventCallbackSOFT");
         }
-        if (alcIsExtensionPresent(mDevice, "ALC_SOFT_reopen_device"))
+        if (!mAstraLoopback && alcIsExtensionPresent(mDevice, "ALC_SOFT_reopen_device"))
             getALFunc(alcReopenDeviceSOFT, "alcReopenDeviceSOFT");
         if (alEventControlSOFT)
         {
@@ -806,7 +822,7 @@ namespace MWSound
         }
         else
             Log(Debug::Warning) << "Cannot detect audio device changes";
-        if (mDeviceName.empty() && !name.empty())
+        if (!mAstraLoopback && mDeviceName.empty() && !name.empty())
         {
             // If we opened the default device, switch devices if a new default is selected
             if (alcReopenDeviceSOFT)
@@ -967,12 +983,46 @@ namespace MWSound
         alDopplerFactor(Settings::sound().mDopplerFactor);
         alGetError();
 
+        if (mAstraLoopback)
+        {
+            SDL_AudioSpec spec{};
+            spec.freq=48000; spec.format=AUDIO_F32SYS; spec.channels=2; spec.samples=1024;
+            if (SDL_InitSubSystem(SDL_INIT_AUDIO)==0)
+                mAstraMonitor=SDL_OpenAudioDevice(nullptr,0,&spec,nullptr,0);
+            if (mAstraMonitor) SDL_PauseAudioDevice(mAstraMonitor,0);
+            else Log(Debug::Warning) << "Astra audio monitoring unavailable: " << SDL_GetError();
+            AstraMedia::stream().monitor(mAstraMonitor!=0);
+            AstraMedia::stream().mixer([this](float* pcm,unsigned count) { astraMix(pcm,count); });
+        }
         mInitialized = true;
         return true;
     }
 
+    void OpenALOutput::astraMix(float* samples, unsigned count)
+    {
+        LPALCRENDERSAMPLESSOFT render = nullptr;
+        getALCFunc(render,mDevice,"alcRenderSamplesSOFT");
+        // Refill streams before every mix, including the first frame of a voice.
+        // The background refill thread may sleep for 50 ms; it must not control
+        // progress on the sample clock or cause loopback underruns.
+        std::lock_guard<std::mutex> lock(mStreamThread->mMutex);
+        for (auto* stream : mStreamThread->mStreams) stream->process();
+        render(mDevice,samples,count);
+        if (mAstraMonitor)
+        {
+            bool overflow=SDL_GetQueuedAudioSize(mAstraMonitor)>48000*8/4;
+            if (overflow) SDL_ClearQueuedAudio(mAstraMonitor);
+            AstraMedia::stream().monitor(true,overflow);
+            SDL_QueueAudio(mAstraMonitor,samples,count*8);
+        }
+    }
+
     void OpenALOutput::deinit()
     {
+        if (mAstraLoopback) AstraMedia::stream().mixer({});
+        if (mAstraMonitor) SDL_CloseAudioDevice(mAstraMonitor);
+        mAstraMonitor=0;
+        mAstraLoopback=false;
         mStreamThread->removeAll();
         mDefaultDeviceThread.reset();
 
@@ -1530,6 +1580,7 @@ namespace MWSound
 
     void OpenALOutput::pauseActiveDevice()
     {
+        if (mAstraLoopback) return;
         if (mDevice == nullptr)
             return;
 
@@ -1546,6 +1597,7 @@ namespace MWSound
 
     void OpenALOutput::resumeActiveDevice()
     {
+        if (mAstraLoopback) return;
         if (mDevice == nullptr)
             return;
 

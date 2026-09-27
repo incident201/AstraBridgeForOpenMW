@@ -114,7 +114,7 @@ Reading inventory does not open the inventory UI. `use-item` is for **owned** it
 | `adjust UI_REF N` | Set a slider to integer position N, within its reported `slider_max`. This is a position, not an assumed percentage. |
 | `hover UI_REF` | Move the cursor onto a current UI element and observe its normal tooltip. Requires an open UI. |
 | `scroll N --observation OBS` | Scroll under the native UI cursor: −10…10 integer steps, negative = down. Hover the intended region first. |
-| `click X Y --button B --observation OBS` | Window-relative pixels from the current screenshot; B=1/2/3 (left/middle/right), default 1. |
+| `click X Y --button B --observation OBS` | Pixels from the current 720p screenshot; B=1/2/3 (left/middle/right), default 1. |
 | `key KEY --observation OBS` | Allowed: `escape`, `enter`, `tab`, `space`, `up`, `down`, `left`, `right`, `backspace`, `delete`, `pageup`, `pagedown`. No arbitrary keys/chords. |
 | `text "TEXT" --observation OBS` | Type 1…160 characters, no control characters, into the currently focused UI field. Prefer `edit` for identified inputs. |
 
@@ -145,7 +145,7 @@ Use an owned repair hammer to open Repair. `ui.elements` includes the actual rep
 | `saves` | List slots with descriptions, player names and fresh refs. |
 | `load SAVE_REF` | Load that slot; unsaved progress is lost and transient refs must be refreshed. |
 | `stop` | Interrupt immediately through an independent control channel, clear inputs and pause. The interrupted command retains its elapsed time/result. Does not save or quit. |
-| `restart` | Stop/relaunch the game, normally to the menu. Does not autosave. |
+| `restart` | Finalize any recording and relaunch the game, normally to the menu. Does not autosave or restart recording. |
 | `restart --load-latest` | Load the newest available slot after restarting; use only if that is actually desired. |
 | `autosave [--enabled/--no-enabled] [--interval S] [--slots N]` | Configure or inspect the persistent autosave ring. Default: enabled, 300 simulation seconds, three slots. Saves only at a legal paused command boundary; long actions are not forcibly paused. Failed saves are reported/deferred. Manual slots are preserved. |
 | `finish-session --description "TEXT"` | Interrupt the active command, save, finalize recording and close. Reports each stage; keeps the game open if saving or recording finalization fails. |
@@ -178,11 +178,15 @@ Map SVG/PNG files are generated only with `observe --map` or `atlas --map`. The 
 
 ## Recording
 
-`record-start` starts a new H.264 MP4 in the configured directory. `record-status` returns its `path`, frames/duration, `recording`, `capturing`, backend and any `error`. `record-stop` finalizes it.
+`record-start` starts a new MP4 in the configured directory. `record-status` reports its path, recording/capture state and errors. `record-stop` finalizes it for upload; successful nonempty recordings report `upload_ready:true`. Finalization copies encoded streams without recompressing, and may take time for large files.
 
-The timeline includes active gameplay and UI work, excludes thinking pauses, and has no audio. Output is 60 fps H.264 (CRF 18), sampled from completed OpenMW back-buffer frames before buffer swap. Capture and encoding run separately; the video uses a uniform 1/60-second timeline. No file-size limit is imposed. Keep the window size stable while recording.
+The default is 1920×1080 at 60 fps: H.264 High (CRF 18, BT.709, 4:2:0) and stereo AAC-LC at 48 kHz / 384 kbps. The final MP4 uses fast start and no edit lists for YouTube uploads. Active gameplay and UI work are included. Thinking pauses freeze the native sound mix as well as the recording clock, preserving music, voices, effects and reverberation. `look` and `scan` remain real recorded turns. There is no hidden camera inspection mode. Starting with `--no-sound` explicitly produces video without an audio track.
 
-`rendered_frames`, `repeated_frames`, `ring_dropped_frames`, `encoder_queue_peak` and `frame_interval_ms` expose actual capture performance. Engine stalls, including loading, can still require repeated frames to preserve duration. Check these counters rather than trusting nominal FPS. The render hook requires the matching patched engine; an older binary reports `engine_frame_unavailable_rebuild_engine`. Screenshots also use completed frames (`capture_sync: render_complete`) when available. There is no desktop/compositor readback in this recording backend. `video_window_resized` requires a new recording. Do not claim a recording succeeded without checking its final status.
+Video and audio share the engine's sample clock; speaker latency does not alter the recording. `rendered_frames`, `repeated_frames`, `ring_dropped_frames`, `encoder_queue_peak` and `frame_interval_ms` expose capture performance. Audio gaps/overruns are explicit errors. `av_difference_ms` compares encoded video duration with source audio duration, including final frame rounding; it is not a measurement of audible lip sync. `audio_monitor` reports speaker availability; monitoring failure does not discard recorded audio. An empty recording has no uploadable video.
+
+Keep the game window size stable during recording. `video_window_resized` requires a new recording. Matching native engine hooks are required. Screenshots use completed frames and are resized before PNG encoding, so no full-size screenshot files accumulate. All public pixel inputs, `rect` and `aim_point` use screenshot coordinates; `screen.render_width/render_height` describe the separate game/video dimensions. Existing screenshot retention applies.
+
+Recording is fragmented while active for crash recovery. Normal stop prepares the upload file; if finalization fails, the original capture is preserved and the error is reported. Do not claim a recording succeeded without checking its final status. No automatic upload or file-size limit is imposed.
 
 ## Recovery
 

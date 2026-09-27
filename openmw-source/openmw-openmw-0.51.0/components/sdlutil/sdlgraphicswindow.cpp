@@ -231,7 +231,8 @@ namespace SDLUtil
         if (!mRealized)
             return;
 
-        AstraFrame::capture(mWindow);
+        const auto* stamp=getState()->getFrameStamp();
+        AstraFrame::capture(mWindow,stamp ? stamp->getFrameNumber() : 0);
         SDL_GL_SwapWindow(mWindow);
     }
 

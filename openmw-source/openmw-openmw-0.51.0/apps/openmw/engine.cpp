@@ -1,4 +1,5 @@
 #include "engine.hpp"
+#include <components/sdlutil/astramedia.hpp>
 
 #include <cerrno>
 #include <chrono>
@@ -219,7 +220,7 @@ bool OMW::Engine::frame(unsigned frameNumber, float frametime)
                 mSoundManager->resumePlayback();
 
             // sound
-            if (mUseSound)
+            if (mUseSound && !AstraMedia::stream().enabled())
                 mSoundManager->update(frametime);
         }
 
@@ -237,6 +238,8 @@ bool OMW::Engine::frame(unsigned frameNumber, float frametime)
         }
 
         bool paused = mWorld->getTimeManager()->isPaused();
+        AstraMedia::stream().begin(frametime, !paused
+            && mStateManager->getState() != MWBase::StateManager::State_NoGame);
 
         {
             ScopedProfile<UserStatsType::Script> profile(frameStart, frameNumber, *timer, *stats);
@@ -307,6 +310,11 @@ bool OMW::Engine::frame(unsigned frameNumber, float frametime)
         {
             ScopedProfile<UserStatsType::Gui> profile(frameStart, frameNumber, *timer, *stats);
             mWindowManager->update(frametime);
+        }
+        if (AstraMedia::stream().enabled())
+        {
+            if (mUseSound && AstraMedia::stream().active) mSoundManager->update(frametime);
+            AstraMedia::stream().render(mViewer->getFrameStamp()->getFrameNumber());
         }
     }
     catch (const std::exception& e)

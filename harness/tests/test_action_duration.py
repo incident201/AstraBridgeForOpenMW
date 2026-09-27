@@ -29,6 +29,7 @@ def test_session_waits_for_long_action_result(tmp_path, monkeypatch, op):
     s = Session.__new__(Session)
     s.inbox = tmp_path / 'inbox.json'
     s.knowledge=SimpleNamespace(ingest=lambda *args:None)
+    s.display=SimpleNamespace(public_coordinates=lambda value:value)
     s.process = SimpleNamespace(poll=lambda: None)
     s.uncertain = False; s.command_id = 0; s.session_id = 'test'; s.responses = {}
     clock = [0.0]

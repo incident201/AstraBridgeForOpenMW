@@ -15,6 +15,7 @@
 #include <unistd.h>
 #include <SDL_video.h>
 #include <osg/GL>
+#include "astramedia.hpp"
 
 namespace AstraFrame
 {
@@ -46,7 +47,7 @@ namespace AstraFrame
             { munmap(mData, mSize); mData = nullptr; }
         }
         ~Stream() { if (mData) munmap(mData, mSize); }
-        void capture(SDL_Window* window)
+        void capture(SDL_Window* window, unsigned frameNumber)
         {
             if (!mData) return;
             __atomic_add_fetch(at<std::uint64_t>(32), 1, __ATOMIC_RELEASE);
@@ -80,6 +81,10 @@ namespace AstraFrame
             *at<double>(offset+8) = timestamp;
             *at<std::uint32_t>(offset+16) = w; *at<std::uint32_t>(offset+20) = h;
             *at<std::uint32_t>(offset+24) = bytes;
+            const auto media = AstraMedia::stream().frame(frameNumber);
+            *at<std::uint64_t>(offset+32) = media.start;
+            *at<std::uint64_t>(offset+40) = media.end;
+            *at<std::uint32_t>(offset+48) = media.flags;
             __atomic_store_n(at<std::uint64_t>(offset), sequence*2, __ATOMIC_RELEASE);
             __atomic_store_n(at<std::uint64_t>(24), sequence, __ATOMIC_RELEASE);
             glReadBuffer(readBuffer); glPixelStorei(GL_PACK_ALIGNMENT, pack); glPixelStorei(GL_PACK_ROW_LENGTH, row);
@@ -88,9 +93,9 @@ namespace AstraFrame
             if (bindFramebuffer) bindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer);
         }
     };
-    inline void capture(SDL_Window* window) { static Stream stream; stream.capture(window); }
+    inline void capture(SDL_Window* window, unsigned frameNumber) { static Stream stream; stream.capture(window,frameNumber); }
 }
 #else
-namespace AstraFrame { inline void capture(SDL_Window*) {} }
+namespace AstraFrame { inline void capture(SDL_Window*, unsigned) {} }
 #endif
 #endif

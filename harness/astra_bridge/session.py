@@ -15,6 +15,7 @@ from .display import Display
 from .protocol import BridgeError, ERRORS, atomic_json, check_result, validate, number, LogDecoder, action_timeout
 from .recording import Recorder
 from .frame_stream import FrameStream
+from .media_stream import MediaStream
 from .memory import SpatialMemory
 from .terrain_map import render_terrain
 from .feedback import feedback
@@ -61,6 +62,7 @@ class Session:
         self.inbox.parent.mkdir(parents=True, exist_ok=True)
         self.display = Display(root, self.runtime, display, headless)
         self.sound = sound
+        self.display.sound = sound
         self.process = None
         self.condition = threading.Condition()
         self.responses = {}
@@ -86,7 +88,7 @@ class Session:
         (self.profile / "openmw.cfg").write_text(cfg)
         settings = (self.installation / "config/settings.cfg").read_text()
         border='false' if self.display.headless else 'true'
-        settings += f"\n[Video]\nfullscreen = false\nwindow border = {border}\nresolution x = 1280\nresolution y = 720\nvsync = false\nframerate limit = 60\n[GUI]\nsubtitles = true\n"
+        settings += f"\n[Video]\nfullscreen = false\nwindow border = {border}\nresolution x = 1920\nresolution y = 1080\nvsync = false\nframerate limit = 60\n[GUI]\nsubtitles = true\n"
         # Write initial settings only once; later UI changes persist in the isolated profile.
         if not (self.profile / "settings.cfg").exists():
             (self.profile / "settings.cfg").write_text(settings)
@@ -97,6 +99,11 @@ class Session:
         profile_settings = configparser.ConfigParser(interpolation=None, strict=False)
         profile_settings.read(settings_path)
         settings_changed = False
+        # Game/video are 1080p; the public screenshot coordinate space is 720p.
+        if not profile_settings.has_section('Video'): profile_settings.add_section('Video')
+        for key,value in {'resolution x':'1920','resolution y':'1080'}.items():
+            if profile_settings.get('Video',key,fallback=None)!=value:
+                profile_settings.set('Video',key,value);settings_changed=True
         if profile_settings.get('Physics', 'async num threads', fallback=None) != '0':
             if not profile_settings.has_section('Physics'): profile_settings.add_section('Physics')
             profile_settings.set('Physics', 'async num threads', '0')
@@ -140,6 +147,9 @@ class Session:
         self.display.frame_stream = FrameStream(self.runtime / 'engine-frames.bin')
         env = self.display.env.copy()
         env['ASTRA_FRAME_STREAM'] = str(self.display.frame_stream.path)
+        if self.display.media_stream: self.display.media_stream.close()
+        self.display.media_stream = MediaStream(self.runtime/'engine-media.bin')
+        env['ASTRA_MEDIA_STREAM'] = str(self.display.media_stream.path)
         env["LD_LIBRARY_PATH"] = self.engine_libraries or str(packaged.parent / "lib")
         env["XDG_CACHE_HOME"] = str(self.runtime / "cache")
         env["SDL_VIDEODRIVER"] = "x11"
@@ -214,6 +224,11 @@ class Session:
         validate(op, args)
         if getattr(self, 'control', None) and self.control.cancelled.is_set() and op not in {'stop','observe','ping','quit','inspect','ui'}:
             raise BridgeError('cancelled')
+        if op in {'pick','walk'} and 'x' in args and 'y' in args:
+            x,y=self.display.native_point(args['x'],args['y'])
+            args={**args,'x':x,'y':y}
+            if 'radius' in args:
+                args['radius']=args['radius']*self.display.width/self.display.observation_size()[0]
         timeout = action_timeout(op, args, max(timeout, 70))
         if getattr(self,'sequence_guard',None) and op not in {'observe','inspect','ui','mark','stop'}:
             args={**args,'_guard':self.sequence_guard}
@@ -265,7 +280,7 @@ class Session:
         frame = raw.pop('_atlas_frame', None) if op == 'observe' else None
         if frame is not None:
             self._validate_frame(frame)
-        result = check_result(raw)
+        result = self.display.public_coordinates(check_result(raw))
         if inventory is not None:result['inventory_summary']=inventory
         if op in {'load','new_game'}:
             self.autosave.clock=None
@@ -363,11 +378,14 @@ class Session:
     @contextmanager
     def record_ui(self):
         recorder = self.recorder
+        media = getattr(self.display,'media_stream',None)
+        if media: media.ui(True)
         if recorder:
             recorder.set_active('ui', True)
         try:
             yield
         finally:
+            if media: media.ui(False)
             if recorder:
                 recorder.set_active('ui', False)
 
@@ -625,8 +643,12 @@ class Session:
 
     def stop_game(self):
         if self.recorder:
-            self.recorder.set_active('simulation', False)
-            self.recorder.set_active('camera_motion', False)
+            if self.process and self.process.poll() is None:
+                try: self.command('stop',timeout=3)
+                except BridgeError: pass
+            # Finalize while the engine can acknowledge the last sample/frame.
+            # Restart must also release transports before launch replaces them.
+            self.stop_recording()
         if not self.process:
             return
         if self.process.poll() is None:

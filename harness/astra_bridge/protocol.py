@@ -166,6 +166,7 @@ ACTION_DEFAULTS = {'act':.25, 'track':1, 'go':12, 'walk':8, 'approach':30,
 
 def action_timeout(op, args, base):
     """Watchdogs bound stalled requests, not caller-selected action durations."""
+    if op in {'record_stop','finish_session','shutdown'}: return max(base,600)
     if op in ACTION_DEFAULTS and isinstance(args, dict):
         seconds = args.get('max_seconds' if op in {'chain','sequence'} else 'seconds', ACTION_DEFAULTS[op])
         number(seconds, .02, math.inf)

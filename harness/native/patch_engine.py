@@ -274,8 +274,11 @@ if not frame_target.exists() or frame_target.read_bytes()!=frame_source.read_byt
     shutil.copyfile(frame_source,frame_target)
 replace('components/sdlutil/sdlgraphicswindow.cpp', '#include "sdlgraphicswindow.hpp"',
         '#include "sdlgraphicswindow.hpp"\n#include "astraframe.hpp"')
+frame_hook = '        const auto* stamp=getState()->getFrameStamp();\n        AstraFrame::capture(mWindow,stamp ? stamp->getFrameNumber() : 0);'
+if '        AstraFrame::capture(mWindow);' in (root/'components/sdlutil/sdlgraphicswindow.cpp').read_text():
+    replace('components/sdlutil/sdlgraphicswindow.cpp','        AstraFrame::capture(mWindow);',frame_hook)
 replace('components/sdlutil/sdlgraphicswindow.cpp', '        SDL_GL_SwapWindow(mWindow);',
-        '        AstraFrame::capture(mWindow);\n        SDL_GL_SwapWindow(mWindow);')
+        frame_hook+'\n        SDL_GL_SwapWindow(mWindow);')
 
 replace('apps/openmw/mwlua/uibindings.cpp',
     'api["_astraUiSnapshot"] = [context, windowManager](sol::this_state state) {',
@@ -288,3 +291,98 @@ replace('apps/openmw/mwlua/uibindings.cpp','        api["_astraDoorDescription"]
             return AstraUI::ownedItemInfo(state,object);
         };
         api["_astraDoorDescription"]''')
+
+# Engine-owned audiovisual timeline and synchronous OpenAL loopback mixing.
+shutil.copyfile(Path(__file__).with_name('astramedia.hpp'), root/'components/sdlutil/astramedia.hpp')
+replace('apps/openmw/engine.cpp', '#include "engine.hpp"', '#include "engine.hpp"\n#include <components/sdlutil/astramedia.hpp>')
+replace('apps/openmw/engine.cpp', '            if (mUseSound)\n                mSoundManager->update(frametime);',
+        '            if (mUseSound && !AstraMedia::stream().enabled())\n                mSoundManager->update(frametime);')
+replace('apps/openmw/engine.cpp', '        bool paused = mWorld->getTimeManager()->isPaused();',
+'''        bool paused = mWorld->getTimeManager()->isPaused();
+        AstraMedia::stream().begin(frametime, !paused
+            && mStateManager->getState() != MWBase::StateManager::State_NoGame);''')
+if '            AstraMedia::stream().render();' in (root/'apps/openmw/engine.cpp').read_text():
+    replace('apps/openmw/engine.cpp','            AstraMedia::stream().render();',
+        '            AstraMedia::stream().render(mViewer->getFrameStamp()->getFrameNumber());')
+replace('apps/openmw/engine.cpp', '            mWindowManager->update(frametime);\n        }',
+'''            mWindowManager->update(frametime);
+        }
+        if (AstraMedia::stream().enabled())
+        {
+            if (mUseSound && AstraMedia::stream().active) mSoundManager->update(frametime);
+            AstraMedia::stream().render(mViewer->getFrameStamp()->getFrameNumber());
+        }''')
+replace('apps/openmw/mwsound/openaloutput.hpp', '        ALCcontext* mContext;',
+'''        ALCcontext* mContext;
+        bool mAstraLoopback = false;
+        unsigned mAstraMonitor = 0;
+        void astraMix(float* samples, unsigned count);''')
+replace('apps/openmw/mwsound/openaloutput.cpp', '#include "soundmanagerimp.hpp"',
+'''#include "soundmanagerimp.hpp"
+#include <components/sdlutil/astramedia.hpp>
+#include <SDL_audio.h>
+#include <SDL.h>''')
+replace('apps/openmw/mwsound/openaloutput.cpp', '        mDevice = alcOpenDevice(devname.c_str());',
+'''        mAstraLoopback = AstraMedia::stream().enabled();
+        if (mAstraLoopback)
+        {
+            LPALCLOOPBACKOPENDEVICESOFT openLoopback = nullptr;
+            getALCFunc(openLoopback, nullptr, "alcLoopbackOpenDeviceSOFT");
+            if (!openLoopback) return false;
+            mDevice = openLoopback(nullptr);
+            if (!mDevice) return false;
+        }
+        else mDevice = alcOpenDevice(devname.c_str());''')
+replace('apps/openmw/mwsound/openaloutput.cpp', '        mContextAttributes.reserve(15);',
+'''        mContextAttributes.reserve(23);
+        if (mAstraLoopback)
+            mContextAttributes.insert(mContextAttributes.end(), {
+                ALC_FORMAT_CHANNELS_SOFT, ALC_STEREO_SOFT,
+                ALC_FORMAT_TYPE_SOFT, ALC_FLOAT_SOFT, ALC_FREQUENCY, 48000});''')
+replace('apps/openmw/mwsound/openaloutput.cpp', '        if (alcIsExtensionPresent(mDevice, "ALC_SOFT_reopen_device"))',
+        '        if (!mAstraLoopback && alcIsExtensionPresent(mDevice, "ALC_SOFT_reopen_device"))')
+replace('apps/openmw/mwsound/openaloutput.cpp', '        if (mDeviceName.empty() && !name.empty())',
+        '        if (!mAstraLoopback && mDeviceName.empty() && !name.empty())')
+replace('apps/openmw/mwsound/openaloutput.cpp', '        mInitialized = true;\n        return true;',
+'''        if (mAstraLoopback)
+        {
+            SDL_AudioSpec spec{};
+            spec.freq=48000; spec.format=AUDIO_F32SYS; spec.channels=2; spec.samples=1024;
+            if (SDL_InitSubSystem(SDL_INIT_AUDIO)==0)
+                mAstraMonitor=SDL_OpenAudioDevice(nullptr,0,&spec,nullptr,0);
+            if (mAstraMonitor) SDL_PauseAudioDevice(mAstraMonitor,0);
+            else Log(Debug::Warning) << "Astra audio monitoring unavailable: " << SDL_GetError();
+            AstraMedia::stream().monitor(mAstraMonitor!=0);
+            AstraMedia::stream().mixer([this](float* pcm,unsigned count) { astraMix(pcm,count); });
+        }
+        mInitialized = true;
+        return true;''')
+replace('apps/openmw/mwsound/openaloutput.cpp', '    void OpenALOutput::deinit()\n    {',
+'''    void OpenALOutput::astraMix(float* samples, unsigned count)
+    {
+        LPALCRENDERSAMPLESSOFT render = nullptr;
+        getALCFunc(render,mDevice,"alcRenderSamplesSOFT");
+        // Refill streams before every mix, including the first frame of a voice.
+        // The background refill thread may sleep for 50 ms; it must not control
+        // progress on the sample clock or cause loopback underruns.
+        std::lock_guard<std::mutex> lock(mStreamThread->mMutex);
+        for (auto* stream : mStreamThread->mStreams) stream->process();
+        render(mDevice,samples,count);
+        if (mAstraMonitor)
+        {
+            bool overflow=SDL_GetQueuedAudioSize(mAstraMonitor)>48000*8/4;
+            if (overflow) SDL_ClearQueuedAudio(mAstraMonitor);
+            AstraMedia::stream().monitor(true,overflow);
+            SDL_QueueAudio(mAstraMonitor,samples,count*8);
+        }
+    }
+
+    void OpenALOutput::deinit()
+    {
+        if (mAstraLoopback) AstraMedia::stream().mixer({});
+        if (mAstraMonitor) SDL_CloseAudioDevice(mAstraMonitor);
+        mAstraMonitor=0;
+        mAstraLoopback=false;''')
+for method in ('pauseActiveDevice','resumeActiveDevice'):
+    replace('apps/openmw/mwsound/openaloutput.cpp', f'    void OpenALOutput::{method}()\n    {{',
+            f'    void OpenALOutput::{method}()\n    {{\n        if (mAstraLoopback) return;')

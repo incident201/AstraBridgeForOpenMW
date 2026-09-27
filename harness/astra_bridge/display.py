@@ -11,13 +11,15 @@ from .protocol import BridgeError, number
 
 
 class Display:
-    def __init__(self, root: Path, runtime: Path, name: str | None, headless: bool, width=1280, height=720):
+    def __init__(self, root: Path, runtime: Path, name: str | None, headless: bool, width=1920, height=1080):
         self.root, self.runtime = root, runtime
         self.width, self.height = width, height
         self.name = name or os.environ.get("DISPLAY")
         self.headless, self.process, self.window = headless, None, None
         self.server_pid = None
         self.frame_stream = None
+        self.media_stream = None
+        self.sound = True
         self.env = os.environ.copy()
         self.env["LD_LIBRARY_PATH"] = str(root / "tools/usr/lib")
         self.xdotool = shutil.which("xdotool") or str(root / "tools/usr/bin/xdotool")
@@ -88,27 +90,47 @@ class Display:
     def capture(self, path: Path):
         if self.frame_stream and self.frame_stream.supported:
             size = self.frame_stream.capture(path)
-            self.width, self.height = size['width'], size['height']
+            self.width, self.height = size['render_width'], size['render_height']
             return size
         from .window_capture import WindowCapture
-        import mss.tools
+        from .screenshots import save_bgra
         previous = os.environ.get("XAUTHORITY")
         if self.env.get("XAUTHORITY"):
             os.environ["XAUTHORITY"] = self.env["XAUTHORITY"]
         try:
             with WindowCapture(self.name,self.window) as screen:
                 frame = screen.grab()
-                mss.tools.to_png(frame.rgb, frame.size, output=str(path))
+                size = save_bgra(path, frame.bgra, frame.width, frame.height)
         finally:
             if previous is None:
                 os.environ.pop("XAUTHORITY", None)
             else:
                 os.environ["XAUTHORITY"] = previous
         self.width,self.height=frame.width,frame.height
-        return {"width":frame.width,"height":frame.height}
+        return size
+
+    def observation_size(self):
+        from .screenshots import observation_size
+        return observation_size(self.width,self.height)
+
+    def native_point(self, x, y):
+        w,h = self.observation_size()
+        return x*self.width/w, y*self.height/h
+
+    def public_coordinates(self, value):
+        w,h = self.observation_size()
+        sx,sy = w/self.width,h/self.height
+        if isinstance(value, dict):
+            return {k: [round(n*(sx if i%2==0 else sy),2) for i,n in enumerate(v)]
+                    if k in {'rect','aim_point'} and isinstance(v,list) else self.public_coordinates(v)
+                    for k,v in value.items()}
+        if isinstance(value, list): return [self.public_coordinates(v) for v in value]
+        return value
 
     def click(self, x, y, button=1):
-        number(x, 0, self.width-1); number(y, 0, self.height-1)
+        w,h = self.observation_size()
+        number(x, 0, w-1); number(y, 0, h-1)
+        x,y = self.native_point(x,y)
         if type(button) is not int or button not in {1, 2, 3}:
             raise BridgeError("invalid_arguments")
         self.run("mousemove", "--window", self.window, int(x), int(y))
@@ -148,6 +170,9 @@ class Display:
         self.run('key','--clearmodifiers','--delay','80','t')
 
     def stop(self):
+        if self.media_stream:
+            self.media_stream.close()
+            self.media_stream = None
         if self.frame_stream:
             self.frame_stream.close()
             self.frame_stream = None

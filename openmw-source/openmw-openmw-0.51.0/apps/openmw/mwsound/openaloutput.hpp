@@ -26,6 +26,9 @@ namespace MWSound
     {
         ALCdevice* mDevice;
         ALCcontext* mContext;
+        bool mAstraLoopback = false;
+        unsigned mAstraMonitor = 0;
+        void astraMix(float* samples, unsigned count);
 
         struct
         {
