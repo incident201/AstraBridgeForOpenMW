@@ -2,10 +2,11 @@
 """Read-only preflight for an extracted AstraBridge installation."""
 import ctypes,importlib.util,json,os,platform,shutil,subprocess,sys
 from pathlib import Path
+from astra_bridge.diagnostics import inspect_auto_fixes
 root=Path(__file__).resolve().parent;errors=[];checks={}
 checks['python']=platform.python_version()
 if sys.version_info<(3,11):errors.append('Python >= 3.11 required')
-for name in ('mss','imageio_ffmpeg'):
+for name in ('mss','imageio_ffmpeg','PIL'):
  checks[name]=importlib.util.find_spec(name) is not None
  if not checks[name]:errors.append(f'Missing {name}; run bootstrap.py --offline')
 for name in ('libxcb.so.1','libxcb-composite.so.0','libX11.so.6'):
@@ -29,5 +30,6 @@ checks['config']=(root.parent/'config/openmw.cfg').is_file()
 if not checks['config']:errors.append('Run configure.py with the Morrowind and recording paths')
 checks['xdotool']=shutil.which('xdotool') or str(root/'tools/usr/bin/xdotool')
 if not Path(checks['xdotool']).is_file():errors.append('xdotool is unavailable')
+checks['auto_fixes']=inspect_auto_fixes(root)
 print(json.dumps({'ok':not errors,'checks':checks,'errors':errors},ensure_ascii=False,indent=2))
 sys.exit(bool(errors))
