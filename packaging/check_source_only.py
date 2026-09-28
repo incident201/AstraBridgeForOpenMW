@@ -7,7 +7,7 @@ import sys
 
 root = Path(__file__).resolve().parents[1]
 objects = subprocess.check_output(['git', '-C', str(root), 'rev-list', '--objects', '--all'], text=True)
-forbidden = re.compile(r'(^build/|(^|/)wheelhouse/|\.(whl|so(\.[^/]*)?|dll|dylib|exe|tar\.(xz|zst))$|(^|/)(ffmpeg|openmw\.x86_64)$|^harness/(tools|runtime)/)')
+forbidden = re.compile(r'(^build/|(^|/)wheelhouse/|\.(whl|so(\.[^/]*)?|dll|dylib|exe|tar\.(gz|xz|zst))$|(^|/)(ffmpeg|openmw\.x86_64)$|^harness/(tools|runtime)/)')
 paths = [line.split(' ', 1)[1] for line in objects.splitlines() if ' ' in line]
 failures = sorted({path for path in paths if forbidden.search(path)})
 tracked = subprocess.check_output(['git', '-C', str(root), 'ls-files', '-z']).decode().split('\0')

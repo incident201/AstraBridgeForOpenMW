@@ -29,11 +29,13 @@ if options.offline:
     if not bundle['available']:
         parser.error('Offline runtime wheels unavailable for '+bundle['implementation']+' '+bundle['python']
                      +' '+bundle['abi']+' '+bundle['architecture']+': '+', '.join(bundle['missing'])
-                     +'. Use a supported CPython 3.11–3.14 Linux x86_64 interpreter, or run bootstrap.py without --offline.')
+                     +'. Use the bundled ../python/bin/python3 interpreter, or run bootstrap.py without --offline in a development checkout.')
     if options.tests:
         parser.error('The bundled wheels cover runtime dependencies; install test dependencies with bootstrap.py --tests (online).')
+bundled_python = root.parent / 'python/bin/python3'
+use_uv = shutil.which('uv') and not bundled_python.exists()
 if not python.exists():
-    if shutil.which('uv'):
+    if use_uv:
         subprocess.run(['uv', 'venv', '--python', sys.executable, str(root / '.venv')], check=True)
     else:
         subprocess.run([sys.executable, '-m', 'venv', str(root / '.venv')], check=True)
@@ -42,7 +44,7 @@ if options.offline:
     packages=['--no-index','--find-links',str(root/'wheelhouse'),*packages]
 if options.tests:
     packages += ['pytest==9.1.1']
-if shutil.which('uv'):
+if use_uv:
     subprocess.run(['uv', 'pip', 'install', '--python', str(python), *packages], check=True)
 else:
     subprocess.run([str(python), '-m', 'pip', 'install', *packages], check=True)

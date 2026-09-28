@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install a verified AstraBridge Release without compiling OpenMW (Python 3.11+)."""
+"""Install a verified AstraBridge Release without compiling OpenMW (installer: Python 3.10+)."""
 from __future__ import annotations
 import argparse
 import hashlib
@@ -21,7 +21,9 @@ ROOT = Path(__file__).resolve().parent
 
 def sha256(path):
     with Path(path).open('rb') as stream:
-        return hashlib.file_digest(stream, 'sha256').hexdigest()
+        digest = hashlib.sha256()
+        for block in iter(lambda: stream.read(1024 * 1024), b''): digest.update(block)
+        return digest.hexdigest()
 
 
 def read_json(url):
@@ -66,7 +68,7 @@ def validate_manifest(data, requested=None):
         if not re.fullmatch(r'[0-9a-f]{64}', data[key] or ''):
             raise ValueError('Missing or invalid ' + key)
     name = data['asset_filename']
-    if Path(name).name != name or not name.endswith('.tar.zst'):
+    if Path(name).name != name or not name.endswith(('.tar.gz', '.tar.zst')):
         raise ValueError('Invalid release asset filename')
     validate_cpu(data['minimum_cpu_isa'])
     libc, version = platform.libc_ver()
@@ -94,19 +96,29 @@ def validate_cpu(isa):
 
 
 def extract_bundle(archive, destination):
-    # Decompress first, then use Python's safe extraction filter. No shell, no
-    # archive-provided commands and no absolute/out-of-root/special members.
-    with tempfile.TemporaryFile() as stream:
-        subprocess.run(['zstd', '-q', '-d', '-c', str(archive)], stdout=stream, check=True)
-        stream.seek(0)
-        with tarfile.open(fileobj=stream, mode='r:') as tar:
-            for member in tar.getmembers():
-                path = PurePosixPath(member.name)
-                if path.is_absolute() or '..' in path.parts or not path.parts or path.parts[0] != 'AstraOpenMW':
-                    raise ValueError('Unsafe archive member: ' + member.name)
-                if not (member.isfile() or member.isdir()):
-                    raise ValueError('Release archives must contain regular files/directories only')
-            tar.extractall(destination, filter='data')
+    # Validate all members before writing any file. Release bundles contain no
+    # symlinks, hardlinks or device nodes, and stay inside AstraOpenMW/.
+    def extract(tar):
+        for member in tar.getmembers():
+            path = PurePosixPath(member.name)
+            if path.is_absolute() or '..' in path.parts or not path.parts or path.parts[0] != 'AstraOpenMW':
+                raise ValueError('Unsafe archive member: ' + member.name)
+            if not (member.isfile() or member.isdir()):
+                raise ValueError('Release archives must contain regular files/directories only')
+        tar.extractall(destination, filter='data')
+    if archive.name.endswith('.tar.gz'):
+        with tarfile.open(archive, 'r:gz') as tar:
+            extract(tar)
+    else:
+        # Backward compatibility with the original v0.1.0 asset only. New
+        # releases use gzip and never require an external decompressor.
+        if not shutil.which('zstd'):
+            raise ValueError('This legacy .tar.zst asset needs zstd; use a current .tar.gz release')
+        with tempfile.TemporaryFile() as stream:
+            subprocess.run(['zstd', '-q', '-d', '-c', str(archive)], stdout=stream, check=True)
+            stream.seek(0)
+            with tarfile.open(fileobj=stream, mode='r:') as tar:
+                extract(tar)
 
 
 def verify_runtime(runtime, manifest):
@@ -126,12 +138,10 @@ def verify_runtime(runtime, manifest):
 
 
 def install(args):
-    if sys.version_info < (3, 11):
-        raise ValueError('Python >= 3.11 is required')
+    if sys.version_info < (3, 10):
+        raise ValueError('Python >= 3.10 is required for the installer (runtime Python is bundled)')
     if sys.platform != 'linux' or platform.machine() != 'x86_64':
         raise ValueError('Published runtimes currently target Linux x86_64')
-    if not shutil.which('zstd'):
-        raise ValueError('Install the zstd command before running the installer')
     game = args.game.expanduser().resolve()
     data = game / 'Data Files' if (game / 'Data Files').is_dir() else game
     if not data.is_dir() or not any(p.name.lower() == 'morrowind.esm' for p in data.iterdir()):
@@ -176,9 +186,11 @@ def install(args):
         runtime.rename(target)
     # Configure after relocation so every generated absolute path is final.
     harness = target / 'AstraBridge'
-    subprocess.run([sys.executable, str(harness / 'configure.py'), '--data', str(game),
+    python = target / 'python/bin/python3'
+    if not python.is_file(): python = Path(sys.executable)  # legacy releases
+    subprocess.run([str(python), str(harness / 'configure.py'), '--data', str(game),
                     '--recordings', str(target / 'recordings'), '--encoding', args.encoding], check=True)
-    subprocess.run([sys.executable, str(harness / 'bootstrap.py'), '--offline'], check=True)
+    subprocess.run([str(python), str(harness / 'bootstrap.py'), '--offline'], check=True)
     skill = target / 'skill/openmw-play'
     (skill / 'installation.json').write_text(json.dumps({'ASTRA_HOME': str(harness),
         'manifest': str(target / 'manifest.json')}, indent=2) + '\n')

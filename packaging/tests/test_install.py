@@ -14,12 +14,10 @@ spec.loader.exec_module(installer)
 
 
 def archive(tmp_path, member):
-    plain = tmp_path / 'test.tar'
-    with tarfile.open(plain, 'w') as tar:
+    plain = tmp_path / 'test.tar.gz'
+    with tarfile.open(plain, 'w:gz') as tar:
         tar.addfile(member, io.BytesIO(b'x') if member.isfile() else None)
-    output = tmp_path / 'test.tar.zst'
-    subprocess.run(['zstd', '-q', '-f', str(plain), '-o', str(output)], check=True)
-    return output
+    return plain
 
 
 @pytest.mark.parametrize('name', ['/tmp/escape', '../escape', 'AstraOpenMW/../../escape', 'unexpected/file'])
@@ -60,7 +58,7 @@ def test_inventory_and_embedded_manifest(tmp_path):
 def manifest():
     data = json.loads((ROOT / 'packaging/manifest.template.json').read_text())
     data.update(json.loads((ROOT / 'VERSION.json').read_text()), git_tag='v0.1.0', git_commit='a' * 40,
-                minimum_glibc='2.17', asset_filename='runtime.tar.zst', asset_sha256='b' * 64, engine_sha256='c' * 64)
+                minimum_glibc='2.17', asset_filename='runtime.tar.gz', asset_sha256='b' * 64, engine_sha256='c' * 64)
     return data
 
 
@@ -131,3 +129,12 @@ def test_environment_records_actual_development_engine(tmp_path):
     result = identity(harness)
     assert result['actual_engine_sha256'] == installer.sha256(alternate)
     assert not result['frozen_release']
+
+
+def test_gzip_extraction_needs_no_external_program(tmp_path, monkeypatch):
+    member = tarfile.TarInfo('AstraOpenMW/engine/openmw'); member.size = 1
+    path = archive(tmp_path, member)
+    monkeypatch.setattr(installer.shutil, 'which', lambda *a: None)
+    monkeypatch.setattr(installer.subprocess, 'run', lambda *a, **k: pytest.fail('external decompressor invoked'))
+    installer.extract_bundle(path, tmp_path / 'out')
+    assert (tmp_path / 'out/AstraOpenMW/engine/openmw').read_bytes() == b'x'

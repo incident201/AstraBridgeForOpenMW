@@ -22,10 +22,13 @@ On a release-tag checkout it selects that tag; on main it selects latest stable.
 The default destination is `~/AstraOpenMW/<tag>/`; existing installations and saves
 are never overwritten. Use `--directory` for another new destination.
 
-Requirements: Linux x86_64, Python 3.11–3.14 (standard CPython), `zstd`, an
+Requirements: Linux x86_64, Python 3.10+ to run the installer, an
 X11/XWayland graphical session and working graphics drivers. The release manifest
 states its minimum glibc and CPU ISA versions; the installer rejects incompatible
-systems. Releases target ordinary **x86_64**, without an AVX2 requirement.
+systems. Releases target ordinary **x86_64**, without an AVX2 requirement, and
+**glibc 2.35 or newer** (Ubuntu 22.04/24.04 and compatible systems). No Arch
+packages or package manager are needed. A pinned Python 3.12 interpreter and its
+offline wheels are included, so the runtime does not use the system Python.
 For English game data add `--encoding win1252` (default: `win1251`). Bootstrap is
 offline, using wheels shipped in the release; downloading the release needs Internet.
 
@@ -52,13 +55,13 @@ project version and protocol revision need not increase together.
 environment. Never move a published tag or replace its assets; corrections get a
 new version. The release contains:
 
-- `astrabridge-openmw-vX.Y.Z-linux-x86_64.tar.zst`
+- `astrabridge-openmw-vX.Y.Z-linux-x86_64.tar.gz`
 - `manifest.json` and `SHA256SUMS`
 - `astrabridge-vX.Y.Z-source.tar.gz`
 
 The archive contains `AstraOpenMW/engine/{openmw,lib,resources}`,
 `AstraBridge/` (including offline wheels), `skill/openmw-play/`, `LICENSES/`, and
-`manifest.json`. No Morrowind files or user profiles are included.
+`manifest.json`, plus a private `python/` interpreter. No Morrowind files or user profiles are included.
 
 The manifest records project/protocol/upstream versions, Git commit/tag, platform,
 architecture, glibc/CPU ISA floors, engine hash, capabilities and hashes of every runtime
@@ -84,35 +87,40 @@ same tag and verified release assets when comparing models.
 Git contains source, skill, installer and build tools. Binaries, wheels, runtime
 libraries, generated manifests and build outputs belong outside tracked files.
 
-Install CMake, Ninja, a C++ compiler, OpenMW build dependencies, `xdotool`, Python
-with pip and `zstd` on a Linux x86_64 build host. On Arch, the helper can download
-build dependencies into a local prefix with `--arch-deps`.
+The release builder uses **Podman or Docker on the developer's machine** and an
+Ubuntu 22.04 build container. GCC, headers and build packages stay in the container;
+nothing is installed into the host system. End users need neither containers nor
+a compiler, package manager, `zstd`, FUSE, or a separate Python runtime installation.
 
 ```sh
-# Engine-only development build:
-python3 harness/native/build_engine.py --work "$PWD/openmw-source" --jobs 2 --arch-deps
-
-# Complete local bundle from a clean committed checkout (no release tag needed):
-python3 packaging/build_release.py --development --arch-deps --output dist/dev
+# Complete local bundle from a clean committed checkout:
+python3 packaging/build_release.py --development --work .release-work/dev --output dist/dev
 python3 install.py --game '/path/to/Morrowind' --from-bundle dist/dev
 ```
+
+An engine-only native development build remains available with
+`harness/native/build_engine.py`; its optional `--arch-deps` is an Arch-specific
+**developer convenience**, not a release or installation requirement. Explicit
+`--host-build --development` also permits native local bundle builds.
 
 For a release, update `VERSION.json`, commit all changes, tag that clean commit,
 and run the same packaging entry point. Use a fresh work/output directory:
 
 ```sh
 git tag -a v0.1.1 -m 'AstraBridge 0.1.1'
-python3 packaging/build_release.py --arch-deps --work .release-work/v0.1.1 --output dist/v0.1.1
+python3 packaging/build_release.py --work .release-work/v0.1.1 --output dist/v0.1.1
 (cd dist/v0.1.1 && sha256sum -c SHA256SUMS)
 git push origin main v0.1.1
 gh release create v0.1.1 dist/v0.1.1/* --verify-tag --title 'AstraBridge v0.1.1' --notes 'Frozen environment; see manifest.json.'
 ```
 
 The packaging script builds modified OpenMW, copies resources and shared-library
-closure/OSG plugins, includes xdotool and compatible pinned wheels for Python
-3.11–3.14, gathers license notices and emits manifests/checksums. glibc and graphics
+closure/OSG plugins, includes xdotool, a pinned standalone Python and matching offline wheels,
+gathers license notices and emits manifests/checksums. glibc and graphics
 driver libraries remain host-provided. Build on the oldest supported target for a
-lower glibc requirement; packaging computes the actual ELF symbol floor.
+lower glibc requirement; packaging computes the actual ELF symbol floor and
+refuses stable releases that require newer than glibc 2.35. The archive uses gzip,
+which the installer reads with the Python standard library.
 
 To reuse a previously built engine, explicitly supply `--engine-prefix` and
 `--engine-receipt`. The generated receipt must contain `source_tree`, `native_tree`

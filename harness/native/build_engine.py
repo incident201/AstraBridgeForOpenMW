@@ -9,6 +9,7 @@ parser=argparse.ArgumentParser()
 parser.add_argument('--work',type=Path,default=Path.cwd()/'openmw-source')
 parser.add_argument('--jobs',type=int,default=2)
 parser.add_argument('--arch-deps',action='store_true',help='Download and unpack Arch packages locally; no sudo or installation')
+parser.add_argument('--portable-deps',action='store_true',help='Build pinned MyGUI and Recast from source for portable releases')
 a=parser.parse_args()
 if not 1<=a.jobs<=4:parser.error('--jobs must be between 1 and 4')
 work=a.work.resolve();work.mkdir(parents=True,exist_ok=True)
@@ -45,7 +46,9 @@ args=['cmake','-S',str(source),'-B',str(work/'engine'),'-G','Ninja','-DCMAKE_BUI
       '-DCMAKE_CXX_FLAGS='+portable_paths,
       '-DCMAKE_C_FLAGS='+portable_paths,
       '-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON','-DCMAKE_INSTALL_RPATH=$ORIGIN/lib',
-      '-DOPENMW_USE_SYSTEM_RECASTNAVIGATION=ON']
+      '-DOPENMW_USE_SYSTEM_RECASTNAVIGATION='+('OFF' if a.portable_deps else 'ON')]
+if a.portable_deps:
+    args += ['-DOPENMW_USE_SYSTEM_MYGUI=OFF', '-DOPENMW_USE_SYSTEM_SQLITE3=OFF']
 if prefix.exists():
     args += ['-DCMAKE_PREFIX_PATH='+str(prefix),
              '-DCMAKE_EXE_LINKER_FLAGS=-L'+str(prefix/'lib')+' -Wl,-rpath-link,'+str(prefix/'lib'),

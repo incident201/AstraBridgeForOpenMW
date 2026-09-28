@@ -30,7 +30,9 @@ def git(*args):
 
 def sha256(path):
     with Path(path).open('rb') as stream:
-        return hashlib.file_digest(stream, 'sha256').hexdigest()
+        digest = hashlib.sha256()
+        for block in iter(lambda: stream.read(1024 * 1024), b''): digest.update(block)
+        return digest.hexdigest()
 
 
 def write_json(path, value):
@@ -92,9 +94,10 @@ def wheels(destination, existing):
     destination.mkdir(parents=True)
     if existing:
         for wheel in existing.glob('*.whl'):
+            if '-cp3' in wheel.name and '-cp312-' not in wheel.name: continue
             shutil.copy2(wheel, destination / wheel.name)
     else:
-        for version in ('311', '312', '313', '314'):
+        for version in ('312',):
             run(sys.executable, '-m', 'pip', 'download', '--only-binary=:all:', '--no-deps',
                 '--platform', 'manylinux2014_x86_64', '--platform', 'manylinux_2_28_x86_64',
                 '--platform', 'manylinux_2_27_x86_64', '--implementation', 'cp',
@@ -102,7 +105,7 @@ def wheels(destination, existing):
                 '-r', ROOT / 'harness/requirements.txt', '-d', destination)
     sys.path.insert(0, str(ROOT / 'harness'))
     from astra_bridge.dependencies import offline_runtime
-    for minor in range(11, 15):
+    for minor in (12,):
         report = offline_runtime(destination.parent, version=(3, minor), implementation='cpython',
                                  architecture='x86_64', threaded=False)
         if not report['available']:
@@ -122,12 +125,58 @@ def wheel_notices(wheelhouse, destination):
                     target.write_bytes(archive.read(name))
 
 
+def python_runtime(runtime, work):
+    descriptor = json.loads((ROOT / 'packaging/python-runtime.json').read_text())
+    archive = work / 'python-runtime.tar.gz'
+    if not archive.exists(): urllib.request.urlretrieve(descriptor['url'], archive)
+    if sha256(archive) != descriptor['sha256']: raise ValueError('Python runtime checksum mismatch')
+    with tarfile.open(archive, 'r:gz') as tar:
+        tar.extractall(runtime, filter='data')
+    shutil.copy2(ROOT / 'packaging/python-runtime.json', runtime / 'LICENSES/python-runtime.json')
+    # Keep notices shipped by python-build-standalone alongside its interpreter.
+    license_file = runtime / 'python/LICENSE'
+    if license_file.exists(): shutil.copy2(license_file, runtime / 'LICENSES/Python.txt')
+    return descriptor['version']
+
+
+def run_container(args):
+    tool = shutil.which('podman') or shutil.which('docker')
+    if not tool: raise ValueError('Install Podman or Docker on the build host; end users do not need either')
+    image = 'localhost/astrabridge-builder:glibc235'
+    runner = [tool]
+    if args.container_storage:
+        if Path(tool).name != 'podman': raise ValueError('--container-storage currently requires Podman')
+        runner += ['--root', str(args.container_storage.expanduser().resolve()),
+                   '--runroot', f'/run/user/{os.getuid()}/astrabridge-containers']
+    build = [*runner, 'build']
+    if Path(tool).name == 'podman': build.append('--http-proxy=false')
+    run(*build, '-t', image, '-f', ROOT / 'packaging/Containerfile', ROOT / 'packaging')
+    command = [*runner, 'run', '--rm']
+    if Path(tool).name == 'podman': command += ['--userns=keep-id', '--http-proxy=false']
+    else: command += ['--user', f'{os.getuid()}:{os.getgid()}']
+    command += ['-v', f'{ROOT}:{ROOT}', '-w', str(ROOT), '-e', 'PIP_CACHE_DIR=/tmp/pip-cache']
+    forwarded = list(sys.argv[1:])
+    for key in ('work', 'output', 'engine_prefix', 'engine_receipt', 'wheelhouse', 'tools_prefix'):
+        path = getattr(args, key)
+        if path is None: continue
+        path = path.expanduser().resolve()
+        if key in ('work', 'output'): path.mkdir(parents=True, exist_ok=True)
+        mount = path.parent if path.is_file() else path
+        if not mount.is_relative_to(ROOT): command += ['-v', f'{mount}:{mount}']
+        forwarded += ['--' + key.replace('_', '-'), str(path)]
+    run(*command, image, 'python3', ROOT / 'packaging/build_release.py',
+        '--host-build', '--portable-deps', *forwarded)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, default=ROOT / 'dist')
     parser.add_argument('--work', type=Path, default=ROOT / '.release-work')
     parser.add_argument('--jobs', type=int, default=2)
     parser.add_argument('--arch-deps', action='store_true')
+    parser.add_argument('--container-storage', type=Path, help='Optional separate Podman storage (for builds on another disk)')
+    parser.add_argument('--host-build', action='store_true', help='Explicit native development/build-container mode')
+    parser.add_argument('--portable-deps', action='store_true', help='Use pinned source dependencies on the portable builder')
     parser.add_argument('--development', action='store_true', help='Allow an untagged clean commit; never a frozen release')
     parser.add_argument('--engine-prefix', type=Path, help='Reuse an engine/resources/lib directory with a build receipt')
     parser.add_argument('--engine-receipt', type=Path, help='Generated receipt proving engine hash and matching source/native Git trees')
@@ -138,6 +187,9 @@ def main():
         parser.error('Build on Linux x86_64')
     if git('status', '--porcelain', '--untracked-files=normal'):
         parser.error('Build from a clean committed checkout')
+    if not args.host_build and os.environ.get('ASTRA_BUILD_CONTAINER') != '1':
+        if args.arch_deps: parser.error('--arch-deps is only for explicit --host-build development')
+        return run_container(args)
     version = json.loads((ROOT / 'VERSION.json').read_text())
     tag = 'v' + version['project_version']
     if not args.development and tag not in git('tag', '--points-at', 'HEAD').splitlines():
@@ -167,6 +219,7 @@ def main():
             parser.error('Use a fresh --work directory to avoid stale source builds')
         command = [sys.executable, ROOT / 'harness/native/build_engine.py', '--work', build, '--jobs', args.jobs]
         if args.arch_deps: command.append('--arch-deps')
+        if args.portable_deps: command.append('--portable-deps')
         run(*command)
         prefix = build / 'engine'
         executable = prefix / 'openmw'
@@ -187,7 +240,7 @@ def main():
         # Arch's SDL2 compatibility library dlopens SDL3, so ldd cannot see it.
         sdl2 = engine / 'lib/libSDL2-2.0.so.0'
         if sdl2.is_file() and b'libSDL3.so' in sdl2.read_bytes():
-            sdl3 = next((base / 'libSDL3.so.0' for base in [*search, Path('/usr/lib')]
+            sdl3 = next((base / 'libSDL3.so.0' for base in [*search, Path('/usr/lib/x86_64-linux-gnu'), Path('/usr/lib')]
                          if (base / 'libSDL3.so.0').is_file()), None)
             if sdl3 is None: raise ValueError('SDL2 compatibility runtime requires libSDL3.so.0')
             shutil.copy2(sdl3, engine / 'lib/libSDL3.so.0')
@@ -199,7 +252,7 @@ def main():
         required_plugins = set(plugin_block.group(1).split())
         existing = list((engine / 'lib').glob('osgPlugins-*'))
         if not existing:
-            for base in (args.work / 'build/deps/usr/lib', Path('/usr/lib')):
+            for base in (args.work / 'build/deps/usr/lib', Path('/usr/lib/x86_64-linux-gnu'), Path('/usr/lib')):
                 for plugins in base.glob('osgPlugins-*'):
                     destination = engine / 'lib' / plugins.name
                     destination.mkdir(exist_ok=True)
@@ -234,6 +287,17 @@ def main():
                 shutil.copytree(notices, runtime / f'LICENSES/libraries-{index}', symlinks=False,
                                 ignore=lambda directory, names: [name for name in names
                                     if (Path(directory) / name).is_symlink() and not (Path(directory) / name).exists()])
+        if shutil.which('dpkg-query'):
+            packages = subprocess.check_output(['dpkg-query', '-W', '-f=${Package} ${Version}\n'], text=True)
+            (runtime / 'LICENSES/debian-packages.txt').write_text(packages)
+            for copyright_file in Path('/usr/share/doc').glob('*/copyright'):
+                target = runtime / 'LICENSES/debian' / copyright_file.parent.name / 'copyright'
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(copyright_file, target)
+        for path in (args.work / 'build/engine/extern/fetched').rglob('*'):
+            if path.is_file() and path.name.lower().startswith(('license', 'copying', 'copyright')):
+                target = runtime / 'LICENSES/fetched' / path.relative_to(args.work / 'build/engine/extern/fetched')
+                target.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(path, target)
         dependencies = args.work / 'build/dependencies.json'
         if dependencies.is_file(): shutil.copy2(dependencies, runtime / 'LICENSES/dependency-packages.json')
         for name in ('dependency-packages.json',):
@@ -245,15 +309,18 @@ def main():
             tool = shutil.which('xdotool')
             if not tool: raise ValueError('Install xdotool on the builder or supply --tools-prefix')
             (tools / 'bin').mkdir(parents=True); shutil.copy2(tool, tools / 'bin/xdotool')
-        collect_libraries(tools / 'bin/xdotool', tools / 'lib', [tools / 'lib', Path('/usr/lib')])
+        collect_libraries(tools / 'bin/xdotool', tools / 'lib', [tools / 'lib', Path('/usr/lib/x86_64-linux-gnu'), Path('/usr/lib')])
+        python_version = python_runtime(runtime, args.work)
         wheels(runtime / 'AstraBridge/wheelhouse', args.wheelhouse)
         wheel_notices(runtime / 'AstraBridge/wheelhouse', runtime / 'LICENSES/wheels')
         write_json(runtime / 'LICENSES/engine-build.json', receipt)
         label = ('dev-' + commit[:12]) if args.development else tag
-        asset = f'astrabridge-openmw-{label}-linux-x86_64.tar.zst'
+        asset = f'astrabridge-openmw-{label}-linux-x86_64.tar.gz'
         manifest = json.loads((ROOT / 'packaging/manifest.template.json').read_text())
-        manifest.update(version, git_commit=commit, git_tag=None if args.development else tag,
+        manifest.update(version, python_version=python_version, git_commit=commit, git_tag=None if args.development else tag,
                         minimum_glibc=glibc_floor(runtime), minimum_cpu_isa=cpu_floor(runtime), asset_filename=asset, engine_sha256=sha256(engine / 'openmw'))
+        if not args.development and tuple(map(int, manifest['minimum_glibc'].split('.'))) > (2, 35):
+            raise ValueError('Portable release must require glibc <= 2.35; use the container builder')
         if manifest['minimum_cpu_isa'] != 'x86-64-baseline':
             raise ValueError('Release engine/dependencies must target baseline x86_64; rebuild without -march=native/v3')
         manifest['files'] = {p.relative_to(runtime).as_posix(): sha256(p) for p in sorted(runtime.rglob('*')) if p.is_file()}
@@ -261,7 +328,7 @@ def main():
         # Dereference libraries; archives contain no links or special files.
         timestamp = git('show', '-s', '--format=%ct', 'HEAD')
         run('tar', '--sort=name', '--mtime=@' + timestamp, '--owner=0', '--group=0', '--numeric-owner',
-            '--dereference', '-I', 'zstd -T2 -10', '-cf', args.output / asset, '-C', runtime.parent, 'AstraOpenMW')
+            '--dereference', '-czf', args.output / asset, '-C', runtime.parent, 'AstraOpenMW')
         manifest['asset_sha256'] = sha256(args.output / asset)
         write_json(args.output / 'manifest.json', manifest)
         source_asset = args.output / f'astrabridge-{label}-source.tar.gz'

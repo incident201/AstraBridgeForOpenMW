@@ -22,7 +22,7 @@ __pycache__/
 # Release output and binary dependencies (never commit these)
 /build/
 /dist/
-/.release-work/
+/.release-work
 wheelhouse/
 *.whl
 *.tar.xz

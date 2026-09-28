@@ -23,3 +23,9 @@ the applicable terms. Preserve package provenance and source/build information
 with the release; notices alone do not replace corresponding source. OpenMW's
 modified source is the release Git tag, with a source archive also emitted by
 the release script.
+
+The portable runtime also contains CPython from python-build-standalone. Its
+pinned version, download URL and SHA256 are in `packaging/python-runtime.json`;
+its license and bundled-library notices remain inside the release `python/` tree.
+Ubuntu build-library copyright/source notices and exact installed package versions
+are collected under release `LICENSES/debian/` and `debian-packages.txt`.
