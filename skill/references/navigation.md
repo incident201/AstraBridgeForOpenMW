@@ -31,7 +31,7 @@ For places already visited, start with `atlas --query "NAME"` / `revisit`, or `r
 | `interact OBJECT_REF --approach --run --seconds S` | Approach, aim and activate in one continuous motor action (default 30 s); no intermediate thinking pauses. With interaction, up to two small physically checked viewpoint adjustments may be attempted; `--no-adjust-viewpoint` disables these. Without `--approach`, it does not perform a full approach. This is the normal talk/open/pickup command. |
 | `fly --forward-m F --sideways-m R --vertical-m U --seconds S --under-fire` | Local flight, requiring active levitation. Defaults F/R/U=0, S=10; finite offsets with combined length >0.1 m; S≥0.2, no fixed upper cap. |
 | `scan --pitch P` | Default pitch 0. Observe then turn through three 90° increments. Returns `views`, `final`, `completed`, `reason`, `elapsed`; does not restore the original heading. Requires no active live lock. |
-| `fov DEGREES` | Set horizontal FOV within 70…115°. Default harness view is 100°. |
+| `fov DEGREES` | Set horizontal FOV within 70…115°. Default AstraBridge view is 100°. |
 
 `walk` also accepts `--under-fire`. This flag disables the early damage stop for the movement commands that support it; it does not confer protection. Ordinary navigation can stop on damage, a changed location/UI, obstruction, lost target, time limit or partial path. Check the returned reason and actual distance, not just `ok:true`.
 

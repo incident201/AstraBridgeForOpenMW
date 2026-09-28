@@ -1,6 +1,7 @@
 # AstraBridge for OpenMW
 
-Let an agent play Morrowind through the AstraBridge CLI and the `openmw-play`
+AstraBridge is an Agent-Computer Interface (ACI) for interacting with OpenMW.
+It lets an agent play Morrowind through the `astra` CLI and the `openmw-play`
 skill. Originally developed for GPT-6 Astra; other models can use the same public
 interface. Supply your own Morrowind installation; game files are never included.
 
@@ -45,7 +46,7 @@ The installed runtime is retained for diagnostics. Start with
 
 ## Frozen environments and benchmarks
 
-`VERSION.json` defines one project version for harness, skill, modified OpenMW,
+`VERSION.json` defines one project version for the AstraBridge ACI, skill, modified OpenMW,
 public protocol and binary bundle. OpenMW's upstream version remains 0.51.0.
 The initial public protocol revision is **1**, matching the existing wire protocol;
 project version and protocol revision need not increase together.
@@ -152,7 +153,7 @@ installer so that manifest validation and installed skill setup are also perform
 
 ## License
 
-Original AstraBridge, harness, skill, installer and build-tool code is distributed
+Original AstraBridge ACI, skill, installer and build-tool code is distributed
 under **GPL-3.0-only**, with the full GPLv3 text in [LICENSE](LICENSE). OpenMW keeps
 its upstream GPLv3 license and copyright notices. Third-party components keep
 their own terms; YAIAF's permission is in [LICENSES/YAIAF.txt](LICENSES/YAIAF.txt).

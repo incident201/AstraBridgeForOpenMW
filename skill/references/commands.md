@@ -6,7 +6,7 @@ Movement and maps: [navigation.md](navigation.md). Combat and tools: [combat.md]
 
 ## Calling convention
 
-Every command below is prefixed with `./astra` and runs from the configured harness directory. Use `./astra COMMAND --help` for parser help; it does not run an action. Do not start the internal `serve` process manually.
+Every command below is prefixed with `./astra` and runs from the configured AstraBridge installation directory. Use `./astra COMMAND --help` for parser help; it does not run an action. Do not start the internal `serve` process manually.
 
 Notation:
 

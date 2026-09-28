@@ -113,7 +113,7 @@ These are ground maneuvers, not flight/swimming autopilots. They check local sur
 
 Physical ranged weapons use aim assistance based on visible target motion and the selected weapon/ammunition. Read `aim_assistance`, trajectory/reach reasons and ammunition changes. A blocked trajectory, absent ammunition or submerged head can prevent firing. Magic projectiles do not have the same ballistic solver.
 
-For multiple actors, choose the intended current visible ref, especially when names are identical. After `target_down`, inspect the scene and explicitly `lock` the next live actor before the next series. Do not keep attacking a corpse or infer all other nearby actors are enemies. The harness does not provide an omniscient hostility list.
+For multiple actors, choose the intended current visible ref, especially when names are identical. After `target_down`, inspect the scene and explicitly `lock` the next live actor before the next series. Do not keep attacking a corpse or infer all other nearby actors are enemies. The AstraBridge ACI does not provide an omniscient hostility list.
 
 If a guard or other script opens a dialogue mid-fight, `ui_open` stops the queue. Handle the actual choices and close the dialogue before resuming. The reply itself may leave the dialogue open.
 

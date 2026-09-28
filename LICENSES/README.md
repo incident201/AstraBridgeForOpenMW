@@ -1,13 +1,13 @@
 # Third-party notices
 
-Original AstraBridge code, harness, Lua/native adapters, installer, build tools and
-skill are licensed under GPL-3.0-only; see the root LICENSE. Copyright notices in
-individual source files remain authoritative.
+Original AstraBridge Agent-Computer Interface (ACI) code, Lua/native adapters,
+installer, build tools and skill are licensed under GPL-3.0-only; see the root
+LICENSE. Copyright notices in individual source files remain authoritative.
 
 OpenMW 0.51.0 retains its upstream GPLv3 license and all notices in
 `openmw-source/openmw-openmw-0.51.0/`, including separately licensed `extern/`
 components. The project's version identifies the modified engine together with
-the harness and skill; it does not change OpenMW's upstream version.
+the AstraBridge ACI and skill; it does not change OpenMW's upstream version.
 
 YAIAF 1.1 animation assets by Qlonever retain their original redistribution
 permission in YAIAF.txt (also kept next to the mod). They are not relicensed.
