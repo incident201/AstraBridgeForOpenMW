@@ -12,15 +12,27 @@ from astra_bridge.control import Control
 from astra_bridge.feedback import feedback
 
 
+@pytest.fixture
+def wheel_fixture(tmp_path):
+    # Source checkouts contain no wheels. Release packaging checks real wheels.
+    (tmp_path/'requirements.txt').write_text((Path(__file__).parents[1]/'requirements.txt').read_text())
+    directory=tmp_path/'wheelhouse';directory.mkdir()
+    for name in ['mss-10.2.0-py3-none-any.whl', 'imageio_ffmpeg-0.6.0-py3-none-manylinux2014_x86_64.whl']:
+        (directory/name).touch()
+    for minor in (11,12,13,14):
+        (directory/f'pillow-12.3.0-cp3{minor}-cp3{minor}-manylinux_2_28_x86_64.whl').touch()
+    return tmp_path
+
+
 @pytest.mark.parametrize('minor',[11,12,13,14])
-def test_offline_bundle_includes_all_pinned_dependencies(minor):
-    r=offline_runtime(Path(__file__).parents[1],version=(3,minor),implementation='cpython',architecture='x86_64',threaded=False)
+def test_offline_wheel_selection_for_supported_python(minor,wheel_fixture):
+    r=offline_runtime(wheel_fixture,version=(3,minor),implementation='cpython',architecture='x86_64',threaded=False)
     assert r['available'],r
     assert len(r['wheels'])==3 and 'Pillow' in r['wheels']
 
 
-def test_unsupported_offline_abi_is_explicit():
-    r=offline_runtime(Path(__file__).parents[1],version=(3,14),implementation='cpython',architecture='x86_64',threaded=True)
+def test_unsupported_offline_abi_is_explicit(wheel_fixture):
+    r=offline_runtime(wheel_fixture,version=(3,14),implementation='cpython',architecture='x86_64',threaded=True)
     assert not r['available'] and r['missing']==['Pillow==12.3.0']
 
 

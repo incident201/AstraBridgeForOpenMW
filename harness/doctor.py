@@ -5,6 +5,7 @@ import importlib.metadata
 from pathlib import Path
 from astra_bridge.diagnostics import inspect_auto_fixes
 from astra_bridge.dependencies import offline_runtime
+from astra_bridge.environment import engine_path, identity
 root=Path(__file__).resolve().parent;errors=[];checks={}
 checks['python']=platform.python_version()
 checks['offline_runtime']=offline_runtime(root)
@@ -21,10 +22,14 @@ for name in ('libxcb.so.1','libxcb-composite.so.0','libX11.so.6'):
  except OSError:checks[name]=False;errors.append(f'Missing system library {name}')
 checks['display']=os.environ.get('DISPLAY');checks['wayland_session']=bool(os.environ.get('WAYLAND_DISPLAY'))
 if not checks['display']:errors.append('DISPLAY is missing: run from the graphical KDE/XWayland session')
-engines=list(root.parent.glob('openmw-*/openmw.x86_64'))
-if len(engines)!=1:errors.append('Matching OpenMW binary archive is not extracted beside this harness')
-else:
- engine=engines[0];info=json.loads((engine.parent/'BUILD-INFO.json').read_text())
+try:engine=engine_path(root.parent)
+except ValueError as exc:errors.append(str(exc));engine=None
+if engine:
+ manifest=root.parent/'manifest.json'
+ info=json.loads((manifest if manifest.exists() else engine.parent/'BUILD-INFO.json').read_text())
+ checks['environment']=identity(root)
+ if checks['environment'].get('engine_matches_manifest') is False:errors.append('Engine hash differs from manifest')
+ if checks['environment'].get('modified_files'):errors.append('Runtime files differ from manifest')
  required=tuple(map(int,info['minimum_glibc'].split('.')))
  actual=platform.libc_ver()[1]
  checks['glibc']=actual;checks['minimum_glibc']=info['minimum_glibc']

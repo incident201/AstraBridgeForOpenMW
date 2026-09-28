@@ -1,0 +1,248 @@
+#!/usr/bin/env python3
+"""Build immutable Linux release assets from a clean tag; no game data is included."""
+from __future__ import annotations
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+import urllib.request
+import zipfile
+
+ROOT = Path(__file__).resolve().parents[1]
+SOURCE = 'openmw-source/openmw-openmw-0.51.0'
+HOST_LIBRARIES = re.compile(r'^(ld-linux|lib(c|m|mvec|pthread|dl|rt|resolv|util|GL|GLX|GLdispatch|EGL|drm)\.so)')
+
+
+def run(*args, **kwargs):
+    return subprocess.run([str(x) for x in args], check=True, **kwargs)
+
+
+def git(*args):
+    return subprocess.check_output(['git', '-C', str(ROOT), *args], text=True).strip()
+
+
+def sha256(path):
+    with Path(path).open('rb') as stream:
+        return hashlib.file_digest(stream, 'sha256').hexdigest()
+
+
+def write_json(path, value):
+    path.write_text(json.dumps(value, indent=2, sort_keys=True) + '\n')
+
+
+def copy_tracked(directory, destination):
+    files = git('ls-files', directory).splitlines()
+    for name in files:
+        relative = Path(name).relative_to(directory)
+        if relative.parts[0] in {'tests', 'native'}:
+            continue
+        target = destination / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / name, target)
+
+
+def collect_libraries(binary, destination, search):
+    destination.mkdir(parents=True, exist_ok=True)
+    env = {**os.environ, 'LD_LIBRARY_PATH': ':'.join(map(str, search))}
+    output = subprocess.check_output(['ldd', str(binary)], env=env, text=True)
+    if 'not found' in output:
+        raise ValueError('Unresolved runtime libraries:\n' + output)
+    for line in output.splitlines():
+        match = re.search(r'^\s*(\S+) => (/\S+)', line)
+        if match and not HOST_LIBRARIES.match(match[1]):
+            target = destination / match[1]
+            if not target.exists():
+                shutil.copy2(match[2], target)
+
+
+def cpu_floor(runtime):
+    level = 1
+    for path in runtime.rglob("*"):
+        if not path.is_file(): continue
+        with path.open("rb") as stream:
+            if stream.read(4) != b"\x7fELF": continue
+        notes = subprocess.check_output(["readelf", "--notes", str(path)], text=True)
+        for line in notes.splitlines():
+            if "ISA needed:" in line:
+                level = max([level] + [int(x) for x in re.findall(r"x86-64-v([234])", line)])
+    return "x86-64-baseline" if level == 1 else f"x86-64-v{level}"
+
+
+def glibc_floor(runtime):
+    versions = {(2, 17)}
+    for path in runtime.rglob('*'):
+        if not path.is_file():
+            continue
+        with path.open('rb') as stream:
+            if stream.read(4) != b'\x7fELF':
+                continue
+        output = subprocess.check_output(['readelf', '--version-info', str(path)], text=True)
+        versions.update(tuple(map(int, x.split('.'))) for x in re.findall(r'GLIBC_(\d+\.\d+)', output))
+    return '.'.join(map(str, max(versions)))
+
+
+def wheels(destination, existing):
+    destination.mkdir(parents=True)
+    if existing:
+        for wheel in existing.glob('*.whl'):
+            shutil.copy2(wheel, destination / wheel.name)
+    else:
+        for version in ('311', '312', '313', '314'):
+            run(sys.executable, '-m', 'pip', 'download', '--only-binary=:all:', '--no-deps',
+                '--platform', 'manylinux2014_x86_64', '--platform', 'manylinux_2_28_x86_64',
+                '--platform', 'manylinux_2_27_x86_64', '--implementation', 'cp',
+                '--python-version', version, '--abi', 'cp' + version,
+                '-r', ROOT / 'harness/requirements.txt', '-d', destination)
+    sys.path.insert(0, str(ROOT / 'harness'))
+    from astra_bridge.dependencies import offline_runtime
+    for minor in range(11, 15):
+        report = offline_runtime(destination.parent, version=(3, minor), implementation='cpython',
+                                 architecture='x86_64', threaded=False)
+        if not report['available']:
+            raise ValueError('Incomplete wheelhouse: ' + str(report))
+
+
+def wheel_notices(wheelhouse, destination):
+    for wheel in wheelhouse.glob('*.whl'):
+        with zipfile.ZipFile(wheel) as archive:
+            for name in archive.namelist():
+                path = Path(name)
+                if '..' in path.parts or path.is_absolute():
+                    raise ValueError('Unsafe wheel member')
+                if not name.endswith('/') and (any(word in path.name.lower() for word in ('license', 'copying', 'notice')) or path.name == 'METADATA'):
+                    target = destination / wheel.stem / path
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(archive.read(name))
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--output', type=Path, default=ROOT / 'dist')
+    parser.add_argument('--work', type=Path, default=ROOT / '.release-work')
+    parser.add_argument('--jobs', type=int, default=2)
+    parser.add_argument('--arch-deps', action='store_true')
+    parser.add_argument('--development', action='store_true', help='Allow an untagged clean commit; never a frozen release')
+    parser.add_argument('--engine-prefix', type=Path, help='Reuse an engine/resources/lib directory with a build receipt')
+    parser.add_argument('--engine-receipt', type=Path, help='Generated receipt proving engine hash and matching source/native Git trees')
+    parser.add_argument('--wheelhouse', type=Path, help='Existing downloaded wheels; otherwise download pinned requirements')
+    parser.add_argument('--tools-prefix', type=Path, help='Prefix containing usr/bin/xdotool and its shared libraries')
+    args = parser.parse_args()
+    if sys.platform != 'linux' or os.uname().machine != 'x86_64':
+        parser.error('Build on Linux x86_64')
+    if git('status', '--porcelain', '--untracked-files=normal'):
+        parser.error('Build from a clean committed checkout')
+    version = json.loads((ROOT / 'VERSION.json').read_text())
+    tag = 'v' + version['project_version']
+    if not args.development and tag not in git('tag', '--points-at', 'HEAD').splitlines():
+        parser.error('HEAD must have tag ' + tag)
+    commit = git('rev-parse', 'HEAD')
+    source_tree = git('rev-parse', 'HEAD:' + SOURCE)
+    native_tree = git('rev-parse', 'HEAD:harness/native')
+    args.work = args.work.resolve(); args.work.mkdir(parents=True, exist_ok=True)
+    args.output = args.output.resolve()
+    if args.output.exists() and any(args.output.iterdir()):
+        parser.error('Output directory must be empty; released assets must never be overwritten')
+    args.output.mkdir(parents=True, exist_ok=True)
+    if args.engine_prefix:
+        if not args.engine_receipt:
+            parser.error('--engine-prefix requires --engine-receipt')
+        prefix = args.engine_prefix.resolve()
+        receipt = json.loads(args.engine_receipt.read_text())
+        executable = prefix / ('openmw.x86_64' if (prefix / 'openmw.x86_64').exists() else 'openmw')
+        if any(receipt.get(k) != v for k, v in {'source_tree': source_tree, 'native_tree': native_tree,
+                                               'engine_sha256': sha256(executable)}.items()):
+            parser.error('Prebuilt engine receipt does not match this source/native tree and executable')
+    else:
+        build = args.work / 'build'
+        if not (build / 'openmw-openmw-0.51.0').exists():
+            shutil.copytree(ROOT / SOURCE, build / 'openmw-openmw-0.51.0')
+        else:
+            parser.error('Use a fresh --work directory to avoid stale source builds')
+        command = [sys.executable, ROOT / 'harness/native/build_engine.py', '--work', build, '--jobs', args.jobs]
+        if args.arch_deps: command.append('--arch-deps')
+        run(*command)
+        prefix = build / 'engine'
+        executable = prefix / 'openmw'
+        receipt = {'source_tree': source_tree, 'native_tree': native_tree, 'engine_sha256': sha256(executable),
+                   'build_commit': commit}
+        write_json(args.work / 'engine-receipt.json', receipt)
+    with tempfile.TemporaryDirectory(prefix='bundle-', dir=args.work) as temporary:
+        runtime = Path(temporary) / 'AstraOpenMW'; runtime.mkdir()
+        engine = runtime / 'engine'; engine.mkdir()
+        shutil.copy2(executable, engine / 'openmw')
+        for name in ('resources', 'lib'):
+            if (prefix / name).exists(): shutil.copytree(prefix / name, engine / name, symlinks=False)
+        if not (engine / 'resources').is_dir(): raise ValueError('Engine resources are missing')
+        for name in ('defaults.bin', 'gamecontrollerdb.txt'):
+            shutil.copy2(prefix / name, engine / name)
+        search = [engine / 'lib', prefix / 'lib', args.work / 'build/deps/usr/lib']
+        collect_libraries(engine / 'openmw', engine / 'lib', search)
+        # OSG loads these plugins dynamically, so ldd alone cannot find them.
+        if not list((engine / 'lib').glob('osgPlugins-*')):
+            for base in (args.work / 'build/deps/usr/lib', Path('/usr/lib')):
+                for plugins in base.glob('osgPlugins-*'):
+                    shutil.copytree(plugins, engine / 'lib' / plugins.name, dirs_exist_ok=True)
+        for plugin in list((engine / 'lib').glob('osgPlugins-*/*.so')):
+            collect_libraries(plugin, engine / 'lib', search)
+        copy_tracked('harness', runtime / 'AstraBridge')
+        copy_tracked('skill', runtime / 'skill/openmw-play')
+        copy_tracked('LICENSES', runtime / 'LICENSES')
+        shutil.copy2(ROOT / 'LICENSE', runtime / 'LICENSES/GPL-3.0.txt')
+        shutil.copy2(ROOT / SOURCE / 'LICENSE', runtime / 'LICENSES/OpenMW.txt')
+        shutil.copy2(ROOT / 'VERSION.json', runtime / 'VERSION.json')
+        # Preserve upstream embedded-component license files as well.
+        for path in (ROOT / SOURCE / 'extern').rglob('*'):
+            if path.is_file() and any(x in path.name.lower() for x in ('license', 'copying', 'copyright')):
+                target = runtime / 'LICENSES/OpenMW-extern' / path.relative_to(ROOT / SOURCE / 'extern')
+                target.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(path, target)
+        for index, notices in enumerate((prefix / 'licenses', args.work / 'build/deps/usr/share/licenses', Path('/usr/share/licenses'))):
+            if notices.is_dir():
+                shutil.copytree(notices, runtime / f'LICENSES/libraries-{index}', symlinks=False,
+                                ignore=lambda directory, names: [name for name in names
+                                    if (Path(directory) / name).is_symlink() and not (Path(directory) / name).exists()])
+        dependencies = args.work / 'build/dependencies.json'
+        if dependencies.is_file(): shutil.copy2(dependencies, runtime / 'LICENSES/dependency-packages.json')
+        for name in ('dependency-packages.json',):
+            if (prefix / name).exists(): shutil.copy2(prefix / name, runtime / 'LICENSES' / name)
+        tools = runtime / 'AstraBridge/tools/usr'
+        if args.tools_prefix:
+            shutil.copytree(args.tools_prefix / 'usr', tools, symlinks=False)
+        else:
+            tool = shutil.which('xdotool')
+            if not tool: raise ValueError('Install xdotool on the builder or supply --tools-prefix')
+            (tools / 'bin').mkdir(parents=True); shutil.copy2(tool, tools / 'bin/xdotool')
+        collect_libraries(tools / 'bin/xdotool', tools / 'lib', [tools / 'lib', Path('/usr/lib')])
+        wheels(runtime / 'AstraBridge/wheelhouse', args.wheelhouse)
+        wheel_notices(runtime / 'AstraBridge/wheelhouse', runtime / 'LICENSES/wheels')
+        write_json(runtime / 'LICENSES/engine-build.json', receipt)
+        label = ('dev-' + commit[:12]) if args.development else tag
+        asset = f'astrabridge-openmw-{label}-linux-x86_64.tar.zst'
+        manifest = json.loads((ROOT / 'packaging/manifest.template.json').read_text())
+        manifest.update(version, git_commit=commit, git_tag=None if args.development else tag,
+                        minimum_glibc=glibc_floor(runtime), minimum_cpu_isa=cpu_floor(runtime), asset_filename=asset, engine_sha256=sha256(engine / 'openmw'))
+        if manifest['minimum_cpu_isa'] != 'x86-64-baseline':
+            raise ValueError('Release engine/dependencies must target baseline x86_64; rebuild without -march=native/v3')
+        manifest['files'] = {p.relative_to(runtime).as_posix(): sha256(p) for p in sorted(runtime.rglob('*')) if p.is_file()}
+        write_json(runtime / 'manifest.json', manifest)
+        # Dereference libraries; archives contain no links or special files.
+        timestamp = git('show', '-s', '--format=%ct', 'HEAD')
+        run('tar', '--sort=name', '--mtime=@' + timestamp, '--owner=0', '--group=0', '--numeric-owner',
+            '--dereference', '-I', 'zstd -T2 -10', '-cf', args.output / asset, '-C', runtime.parent, 'AstraOpenMW')
+        manifest['asset_sha256'] = sha256(args.output / asset)
+        write_json(args.output / 'manifest.json', manifest)
+        source_asset = args.output / f'astrabridge-{label}-source.tar.gz'
+        run('git', '-C', ROOT, 'archive', '--format=tar.gz', '--prefix=AstraBridgeForOpenMW/', '-o', source_asset, 'HEAD')
+        paths = [args.output / asset, args.output / 'manifest.json', source_asset]
+        (args.output / 'SHA256SUMS').write_text(''.join(f'{sha256(p)}  {p.name}\n' for p in paths))
+        print(json.dumps({'assets': str(args.output), 'version': label, 'minimum_glibc': manifest['minimum_glibc']}, indent=2))
+
+
+if __name__ == '__main__':
+    main()

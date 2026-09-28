@@ -36,3 +36,12 @@ def test_import_refuses_to_replace_user_save(tmp_path):
     target=root/'runtime/userdata/saves/Astra_Test';target.mkdir(parents=True);(target/'safe.omwsave').write_bytes(b'user')
     with pytest.raises(ValueError,match='overwrite'):configure(root,game,tmp_path/'Videos',checkpoint='main')
     assert (target/'safe.omwsave').read_bytes()==b'user'
+
+
+def test_release_engine_layout(tmp_path):
+    root,game=fixture(tmp_path)
+    (root.parent/'openmw-test/openmw.x86_64').unlink()
+    engine=root.parent/'engine';engine.mkdir();(engine/'openmw').touch()
+    configure(root,game,tmp_path/'Videos')
+    assert (root/'runtime').stat().st_mode & 0o777 == 0o700
+    assert (root.parent/'config/openmw.cfg').is_file()

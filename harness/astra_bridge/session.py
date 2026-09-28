@@ -14,6 +14,7 @@ import uuid
 from .display import Display
 from .protocol import BridgeError, ERRORS, atomic_json, check_result, validate, number, LogDecoder, action_timeout
 from .recording import Recorder
+from .environment import engine_path, identity
 from .frame_stream import FrameStream
 from .media_stream import MediaStream
 from .memory import SpatialMemory
@@ -144,10 +145,13 @@ class Session:
         atomic_json(self.inbox, {"version": 1, "session": self.session_id, "id": 0, "op": "ping", "args": {}})
         atomic_json(self.inbox.with_name('input.json'), {})
         atomic_json(self.inbox.with_name('cancel.json'), {})
-        candidates = sorted(self.installation.glob("openmw-*/openmw.x86_64"))
-        if not candidates:
-            raise BridgeError("openmw_binary_missing")
-        packaged = candidates[-1]
+        try:
+            packaged = engine_path(self.installation)
+        except ValueError as exc:
+            raise BridgeError("openmw_binary_missing") from exc
+        environment = identity(self.root)
+        atomic_json(self.runtime / "environment.json", environment)
+        atomic_json(self.runtime / ("environment-" + self.session_id + ".json"), environment)
         binary = Path(self.engine_binary) if self.engine_binary else packaged
         if self.display.frame_stream: self.display.frame_stream.close()
         self.display.frame_stream = FrameStream(self.runtime / 'engine-frames.bin')
@@ -520,6 +524,7 @@ class Session:
                         raise BridgeError('already_recording')
                     self.command('observe')  # start on a confirmed pause
                     path = self.recordings_dir / (time.strftime('%Y%m%d-%H%M%S')+'-'+uuid.uuid4().hex[:6]+'.mp4')
+                    atomic_json(path.with_suffix(".environment.json"), identity(self.root))
                     self.recorder = Recorder(self.display,path)
                     return self.recorder.status()
                 if op == 'record_stop':

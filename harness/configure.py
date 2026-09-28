@@ -5,6 +5,7 @@ import argparse
 import json
 import shutil
 from pathlib import Path
+from astra_bridge.environment import engine_path
 
 
 def configure(root: Path,data: Path,recordings: Path,encoding='win1251',checkpoint=None):
@@ -15,8 +16,7 @@ def configure(root: Path,data: Path,recordings: Path,encoding='win1251',checkpoi
     if any(c in str(data)+str(recordings) for c in ('\n','\r','"')):raise ValueError('Unsupported character in path')
     files={p.name.lower():p.name for p in data.iterdir()} if data.is_dir() else {}
     if 'morrowind.esm' not in files:raise ValueError('Morrowind.esm is missing in the supplied Data Files directory')
-    engines=list(installation.glob('openmw-*/openmw.x86_64'))
-    if len(engines)!=1:raise ValueError('Extract the matching OpenMW-Astra binary archive beside this harness first')
+    engine_path(installation)
     template=root/'templates/openmw.cfg'
     lines=[line for line in template.read_text().splitlines() if not line.startswith(('data=','content=','fallback-archive=','encoding='))]
     for name in ('morrowind.esm','tribunal.esm','bloodmoon.esm'):
@@ -24,7 +24,8 @@ def configure(root: Path,data: Path,recordings: Path,encoding='win1251',checkpoi
     for name in ('morrowind.bsa','tribunal.bsa','bloodmoon.bsa'):
         if name in files:lines.append('fallback-archive='+files[name])
     lines.extend([f'data="{data}"',f'encoding={encoding}'])
-    config=installation/'config';config.mkdir(exist_ok=True)
+    config=installation/'config';config.mkdir(mode=0o700,exist_ok=True)
+    (root/'runtime').mkdir(mode=0o700,exist_ok=True)
     (config/'openmw.cfg').write_text('\n'.join(lines)+'\n')
     settings='[General]\npreferred locales = ru,en\n[Game]\ndifficulty = -100\nbest attack = true\n[Physics]\nasync num threads = 0\n'
     (config/'settings.cfg').write_text(settings)

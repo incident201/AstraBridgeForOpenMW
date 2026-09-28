@@ -14,6 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from .protocol import BridgeError, action_timeout
 from .session import Session
+from .environment import identity
 from .information import SECTIONS
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -117,6 +118,7 @@ def main():
     global PRETTY
     parser = Parser(description="OpenMW player-visible harness")
     commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("version", help="Print frozen environment identity for benchmarks")
     for name in ("start", "serve"):
         p = commands.add_parser(name)
         p.add_argument("--installation", default=str(ROOT.parent))
@@ -229,6 +231,9 @@ def main():
     options = parser.parse_args()
     PRETTY=vars(options).pop('pretty',False)
     try:
+        if options.command == "version":
+            emit(identity(ROOT))
+            return
         if options.command == "serve":
             serve(options)
             return

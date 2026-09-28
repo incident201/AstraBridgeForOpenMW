@@ -38,7 +38,7 @@ if a.arch_deps:
     (work/'dependencies.json').write_text(json.dumps([x for _,x in downloads],indent=2)+'\n')
 subprocess.run(['python3',str(Path(__file__).with_name('patch_engine.py')),str(source)],check=True)
 prefix=work/'deps/usr'
-portable_paths=shlex.quote('-ffile-prefix-map='+str(work)+'=astra-build')
+portable_paths='-march=x86-64 -mtune=generic '+shlex.quote('-ffile-prefix-map='+str(work)+'=astra-build')
 args=['cmake','-S',str(source),'-B',str(work/'engine'),'-G','Ninja','-DCMAKE_BUILD_TYPE=Release',
       '-DCMAKE_CXX_FLAGS_RELEASE=-O1 -DNDEBUG','-DCMAKE_POLICY_VERSION_MINIMUM=3.5',
       # __FILE__ and debug diagnostics must not publish the builder's home/workspace.
