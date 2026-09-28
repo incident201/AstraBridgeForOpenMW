@@ -184,12 +184,27 @@ def main():
             shutil.copy2(prefix / name, engine / name)
         search = [engine / 'lib', prefix / 'lib', args.work / 'build/deps/usr/lib']
         collect_libraries(engine / 'openmw', engine / 'lib', search)
-        # OSG loads these plugins dynamically, so ldd alone cannot find them.
-        if not list((engine / 'lib').glob('osgPlugins-*')):
+        # Only ship the plugins requested by OpenMW, not unrelated optional
+        # image/database backends with their own large dependency stacks.
+        cmake = (ROOT / SOURCE / 'CMakeLists.txt').read_text()
+        plugin_block = re.search(r'set\(USED_OSG_PLUGINS(.*?)\)', cmake, re.S)
+        required_plugins = set(plugin_block.group(1).split())
+        existing = list((engine / 'lib').glob('osgPlugins-*'))
+        if not existing:
             for base in (args.work / 'build/deps/usr/lib', Path('/usr/lib')):
                 for plugins in base.glob('osgPlugins-*'):
-                    shutil.copytree(plugins, engine / 'lib' / plugins.name, dirs_exist_ok=True)
-        for plugin in list((engine / 'lib').glob('osgPlugins-*/*.so')):
+                    destination = engine / 'lib' / plugins.name
+                    destination.mkdir(exist_ok=True)
+                    for name in required_plugins:
+                        path = plugins / (name + '.so')
+                        if path.is_file(): shutil.copy2(path, destination / path.name)
+        installed = list((engine / 'lib').glob('osgPlugins-*/*.so'))
+        if required_plugins - {p.stem for p in installed}:
+            raise ValueError('Required OpenMW OSG plugins are missing')
+        for plugin in installed:
+            if plugin.stem not in required_plugins:
+                plugin.unlink()
+                continue
             collect_libraries(plugin, engine / 'lib', search)
         copy_tracked('harness', runtime / 'AstraBridge')
         copy_tracked('skill', runtime / 'skill/openmw-play')
