@@ -184,6 +184,14 @@ def main():
             shutil.copy2(prefix / name, engine / name)
         search = [engine / 'lib', prefix / 'lib', args.work / 'build/deps/usr/lib']
         collect_libraries(engine / 'openmw', engine / 'lib', search)
+        # Arch's SDL2 compatibility library dlopens SDL3, so ldd cannot see it.
+        sdl2 = engine / 'lib/libSDL2-2.0.so.0'
+        if sdl2.is_file() and b'libSDL3.so' in sdl2.read_bytes():
+            sdl3 = next((base / 'libSDL3.so.0' for base in [*search, Path('/usr/lib')]
+                         if (base / 'libSDL3.so.0').is_file()), None)
+            if sdl3 is None: raise ValueError('SDL2 compatibility runtime requires libSDL3.so.0')
+            shutil.copy2(sdl3, engine / 'lib/libSDL3.so.0')
+            collect_libraries(engine / 'lib/libSDL3.so.0', engine / 'lib', search)
         # Only ship the plugins requested by OpenMW, not unrelated optional
         # image/database backends with their own large dependency stacks.
         cmake = (ROOT / SOURCE / 'CMakeLists.txt').read_text()
@@ -206,6 +214,10 @@ def main():
                 plugin.unlink()
                 continue
             collect_libraries(plugin, engine / 'lib', search)
+        # Exercise the packaged loader without a window system. This catches
+        # dlopen dependencies (notably SDL3) that a link-time check misses.
+        run(engine / 'openmw', '--version', cwd=engine,
+            env={**os.environ, 'LD_LIBRARY_PATH': str(engine / 'lib'), 'SDL_VIDEODRIVER': 'dummy'})
         copy_tracked('harness', runtime / 'AstraBridge')
         copy_tracked('skill', runtime / 'skill/openmw-play')
         copy_tracked('LICENSES', runtime / 'LICENSES')
