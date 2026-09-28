@@ -142,7 +142,7 @@ def python_runtime(runtime, work):
 def run_container(args):
     tool = shutil.which('podman') or shutil.which('docker')
     if not tool: raise ValueError('Install Podman or Docker on the build host; end users do not need either')
-    image = 'localhost/astrabridge-builder:glibc235'
+    image = 'localhost/astrabridge-builder:' + sha256(ROOT / 'packaging/Containerfile')[:12]
     runner = [tool]
     if args.container_storage:
         if Path(tool).name != 'podman': raise ValueError('--container-storage currently requires Podman')
@@ -150,7 +150,9 @@ def run_container(args):
                    '--runroot', f'/run/user/{os.getuid()}/astrabridge-containers']
     build = [*runner, 'build']
     if Path(tool).name == 'podman': build.append('--http-proxy=false')
-    run(*build, '-t', image, '-f', ROOT / 'packaging/Containerfile', ROOT / 'packaging')
+    cached = subprocess.run([*runner, 'image', 'inspect', image], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if cached.returncode:
+        run(*build, '-t', image, '-f', ROOT / 'packaging/Containerfile', ROOT / 'packaging')
     command = [*runner, 'run', '--rm']
     if Path(tool).name == 'podman': command += ['--userns=keep-id', '--http-proxy=false']
     else: command += ['--user', f'{os.getuid()}:{os.getgid()}']
