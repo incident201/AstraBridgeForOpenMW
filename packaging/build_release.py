@@ -3,6 +3,7 @@
 from __future__ import annotations
 import argparse
 import hashlib
+import gzip
 import json
 import os
 from pathlib import Path
@@ -14,6 +15,7 @@ import tarfile
 import tempfile
 import urllib.request
 import zipfile
+from source_cache import fingerprint, prepare, tracked
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = 'openmw-source/openmw-openmw-0.51.0'
@@ -40,7 +42,7 @@ def write_json(path, value):
 
 
 def copy_tracked(directory, destination):
-    files = git('ls-files', directory).splitlines()
+    files = tracked(ROOT, directory)
     for name in files:
         relative = Path(name).relative_to(directory)
         if relative.parts[0] in {'tests', 'native'}:
@@ -130,12 +132,37 @@ def python_runtime(runtime, work):
     archive = work / 'python-runtime.tar.gz'
     if not archive.exists(): urllib.request.urlretrieve(descriptor['url'], archive)
     if sha256(archive) != descriptor['sha256']: raise ValueError('Python runtime checksum mismatch')
-    with tarfile.open(archive, 'r:gz') as tar:
-        tar.extractall(runtime, filter='data')
+    # Flatten internal file aliases without creating filesystem links. This
+    # also avoids differing tarfile symlink semantics across Python versions.
+    with tempfile.TemporaryFile(dir=work) as flat:
+        with gzip.open(archive, 'rb') as compressed: shutil.copyfileobj(compressed, flat)
+        flat.seek(0)
+        with tarfile.open(fileobj=flat, mode='r:') as tar:
+            members = {m.name: m for m in tar.getmembers()}
+            def resolve(member, seen):
+                if member.isfile(): return member
+                if member.name in seen: raise ValueError('Cyclic Python archive link')
+                base = os.path.dirname(member.name) if member.issym() else ''
+                name = os.path.normpath(os.path.join(base, member.linkname))
+                if not name.startswith('python/') or name not in members:
+                    raise ValueError('Python archive link leaves its runtime')
+                return resolve(members[name], seen | {member.name})
+            for member in members.values():
+                name = Path(member.name)
+                if name.is_absolute() or '..' in name.parts or name.parts[0] != 'python':
+                    raise ValueError('Unsafe Python archive member')
+                if '__pycache__' in name.parts or name.suffix == '.pyc': continue
+                target = runtime / name
+                if member.isdir(): target.mkdir(parents=True, exist_ok=True); continue
+                if not (member.isfile() or member.issym() or member.islnk()):
+                    raise ValueError('Unsupported Python archive member')
+                source = resolve(member, set())
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with tar.extractfile(source) as content, target.open('wb') as output:
+                    shutil.copyfileobj(content, output)
+                target.chmod(source.mode & 0o777)
     shutil.copy2(ROOT / 'packaging/python-runtime.json', runtime / 'LICENSES/python-runtime.json')
-    # Keep notices shipped by python-build-standalone alongside its interpreter.
-    license_file = runtime / 'python/LICENSE'
-    if license_file.exists(): shutil.copy2(license_file, runtime / 'LICENSES/Python.txt')
+    shutil.copy2(runtime / 'python/lib/python3.12/LICENSE.txt', runtime / 'LICENSES/Python.txt')
     return descriptor['version']
 
 
@@ -156,7 +183,9 @@ def run_container(args):
     command = [*runner, 'run', '--rm']
     if Path(tool).name == 'podman': command += ['--userns=keep-id', '--http-proxy=false']
     else: command += ['--user', f'{os.getuid()}:{os.getgid()}']
-    command += ['-v', f'{ROOT}:{ROOT}', '-w', str(ROOT), '-e', 'PIP_CACHE_DIR=/tmp/pip-cache']
+    image_id = subprocess.check_output([*runner, 'image', 'inspect', '--format', '{{.Id}}', image], text=True).strip()
+    command += ['-v', f'{ROOT}:{ROOT}', '-w', str(ROOT), '-e', 'PIP_CACHE_DIR=/tmp/pip-cache',
+                '-e', 'ASTRA_BUILD_IMAGE_ID=' + image_id]
     forwarded = list(sys.argv[1:])
     for key in ('work', 'output', 'engine_prefix', 'engine_receipt', 'wheelhouse', 'tools_prefix'):
         path = getattr(args, key)
@@ -179,6 +208,8 @@ def main():
     parser.add_argument('--container-storage', type=Path, help='Optional separate Podman storage (for builds on another disk)')
     parser.add_argument('--host-build', action='store_true', help='Explicit native development/build-container mode')
     parser.add_argument('--portable-deps', action='store_true', help='Use pinned source dependencies on the portable builder')
+    parser.add_argument('--resume', action='store_true', help='Incrementally update/rebuild the existing work directory')
+    parser.add_argument('--replace-output', action='store_true', help='Replace existing development assets only')
     parser.add_argument('--development', action='store_true', help='Allow an untagged clean commit; never a frozen release')
     parser.add_argument('--engine-prefix', type=Path, help='Reuse an engine/resources/lib directory with a build receipt')
     parser.add_argument('--engine-receipt', type=Path, help='Generated receipt proving engine hash and matching source/native Git trees')
@@ -187,8 +218,10 @@ def main():
     args = parser.parse_args()
     if sys.platform != 'linux' or os.uname().machine != 'x86_64':
         parser.error('Build on Linux x86_64')
-    if git('status', '--porcelain', '--untracked-files=normal'):
-        parser.error('Build from a clean committed checkout')
+    dirty = bool(git('status', '--porcelain', '--untracked-files=normal'))
+    if dirty and not args.development: parser.error('Stable releases require a clean committed checkout')
+    if args.jobs < 1: parser.error('--jobs must be positive')
+    if args.replace_output and not args.development: parser.error('--replace-output is for development only')
     if not args.host_build and os.environ.get('ASTRA_BUILD_CONTAINER') != '1':
         if args.arch_deps: parser.error('--arch-deps is only for explicit --host-build development')
         return run_container(args)
@@ -202,7 +235,12 @@ def main():
     args.work = args.work.resolve(); args.work.mkdir(parents=True, exist_ok=True)
     args.output = args.output.resolve()
     if args.output.exists() and any(args.output.iterdir()):
-        parser.error('Output directory must be empty; released assets must never be overwritten')
+        if not args.replace_output:
+            parser.error('Output directory must be empty; use --replace-output for development assets')
+        for path in args.output.iterdir():
+            allowed = path.name in {'manifest.json', 'SHA256SUMS'} or re.fullmatch(r'astrabridge-(openmw-)?dev-[0-9a-f]+(-linux-x86_64|-source)\.tar\.gz', path.name)
+            if not path.is_file() or not allowed: parser.error('Output contains files outside development assets')
+        for path in args.output.iterdir(): path.unlink()
     args.output.mkdir(parents=True, exist_ok=True)
     if args.engine_prefix:
         if not args.engine_receipt:
@@ -210,15 +248,15 @@ def main():
         prefix = args.engine_prefix.resolve()
         receipt = json.loads(args.engine_receipt.read_text())
         executable = prefix / ('openmw.x86_64' if (prefix / 'openmw.x86_64').exists() else 'openmw')
-        if any(receipt.get(k) != v for k, v in {'source_tree': source_tree, 'native_tree': native_tree,
+        if any(receipt.get(k) != v for k, v in {'source_tree': source_tree, 'native_tree': native_tree, 'source_digest': fingerprint(ROOT, SOURCE),
+                                               'native_digest': fingerprint(ROOT, 'harness/native'),
                                                'engine_sha256': sha256(executable)}.items()):
             parser.error('Prebuilt engine receipt does not match this source/native tree and executable')
     else:
-        build = args.work / 'build'
-        if not (build / 'openmw-openmw-0.51.0').exists():
-            shutil.copytree(ROOT / SOURCE, build / 'openmw-openmw-0.51.0')
-        else:
-            parser.error('Use a fresh --work directory to avoid stale source builds')
+        profile = {'container_recipe': sha256(ROOT / 'packaging/Containerfile'),
+                   'image_id': os.environ.get('ASTRA_BUILD_IMAGE_ID'),
+                   'portable_deps': args.portable_deps, 'arch_deps': args.arch_deps}
+        build = prepare(ROOT, SOURCE, args.work, profile, args.resume)
         command = [sys.executable, ROOT / 'harness/native/build_engine.py', '--work', build, '--jobs', args.jobs]
         if args.arch_deps: command.append('--arch-deps')
         if args.portable_deps: command.append('--portable-deps')
@@ -226,8 +264,11 @@ def main():
         prefix = build / 'engine'
         executable = prefix / 'openmw'
         receipt = {'source_tree': source_tree, 'native_tree': native_tree, 'engine_sha256': sha256(executable),
-                   'build_commit': commit}
+                   'build_commit': commit, 'source_digest': fingerprint(ROOT, SOURCE),
+                   'native_digest': fingerprint(ROOT, 'harness/native')}
         write_json(args.work / 'engine-receipt.json', receipt)
+    if not args.development and (git('rev-parse', 'HEAD') != commit or git('status', '--porcelain')):
+        raise ValueError('Checkout changed while building; commit changes and rerun with --resume')
     with tempfile.TemporaryDirectory(prefix='bundle-', dir=args.work) as temporary:
         runtime = Path(temporary) / 'AstraOpenMW'; runtime.mkdir()
         engine = runtime / 'engine'; engine.mkdir()
@@ -319,7 +360,7 @@ def main():
         label = ('dev-' + commit[:12]) if args.development else tag
         asset = f'astrabridge-openmw-{label}-linux-x86_64.tar.gz'
         manifest = json.loads((ROOT / 'packaging/manifest.template.json').read_text())
-        manifest.update(version, python_version=python_version, git_commit=commit, git_tag=None if args.development else tag,
+        manifest.update(version, git_dirty=dirty, python_version=python_version, git_commit=commit, git_tag=None if args.development else tag,
                         minimum_glibc=glibc_floor(runtime), minimum_cpu_isa=cpu_floor(runtime), asset_filename=asset, engine_sha256=sha256(engine / 'openmw'))
         if not args.development and tuple(map(int, manifest['minimum_glibc'].split('.'))) > (2, 35):
             raise ValueError('Portable release must require glibc <= 2.35; use the container builder')
@@ -330,11 +371,15 @@ def main():
         # Dereference libraries; archives contain no links or special files.
         timestamp = git('show', '-s', '--format=%ct', 'HEAD')
         run('tar', '--sort=name', '--mtime=@' + timestamp, '--owner=0', '--group=0', '--numeric-owner',
-            '--dereference', '-czf', args.output / asset, '-C', runtime.parent, 'AstraOpenMW')
+            '--dereference', '--hard-dereference', '-czf', args.output / asset, '-C', runtime.parent, 'AstraOpenMW')
         manifest['asset_sha256'] = sha256(args.output / asset)
         write_json(args.output / 'manifest.json', manifest)
         source_asset = args.output / f'astrabridge-{label}-source.tar.gz'
-        run('git', '-C', ROOT, 'archive', '--format=tar.gz', '--prefix=AstraBridgeForOpenMW/', '-o', source_asset, 'HEAD')
+        if args.development:
+            with tarfile.open(source_asset, 'w:gz') as tar:
+                for name in tracked(ROOT): tar.add(ROOT / name, arcname='AstraBridgeForOpenMW/' + name.as_posix(), recursive=False)
+        else:
+            run('git', '-C', ROOT, 'archive', '--format=tar.gz', '--prefix=AstraBridgeForOpenMW/', '-o', source_asset, 'HEAD')
         paths = [args.output / asset, args.output / 'manifest.json', source_asset]
         (args.output / 'SHA256SUMS').write_text(''.join(f'{sha256(p)}  {p.name}\n' for p in paths))
         print(json.dumps({'assets': str(args.output), 'version': label, 'minimum_glibc': manifest['minimum_glibc']}, indent=2))

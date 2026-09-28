@@ -68,7 +68,7 @@ def validate_manifest(data, requested=None):
         if not re.fullmatch(r'[0-9a-f]{64}', data[key] or ''):
             raise ValueError('Missing or invalid ' + key)
     name = data['asset_filename']
-    if Path(name).name != name or not name.endswith(('.tar.gz', '.tar.zst')):
+    if Path(name).name != name or not name.endswith('.tar.gz'):
         raise ValueError('Invalid release asset filename')
     validate_cpu(data['minimum_cpu_isa'])
     libc, version = platform.libc_ver()
@@ -106,19 +106,8 @@ def extract_bundle(archive, destination):
             if not (member.isfile() or member.isdir()):
                 raise ValueError('Release archives must contain regular files/directories only')
         tar.extractall(destination, filter='data')
-    if archive.name.endswith('.tar.gz'):
-        with tarfile.open(archive, 'r:gz') as tar:
-            extract(tar)
-    else:
-        # Backward compatibility with the original v0.1.0 asset only. New
-        # releases use gzip and never require an external decompressor.
-        if not shutil.which('zstd'):
-            raise ValueError('This legacy .tar.zst asset needs zstd; use a current .tar.gz release')
-        with tempfile.TemporaryFile() as stream:
-            subprocess.run(['zstd', '-q', '-d', '-c', str(archive)], stdout=stream, check=True)
-            stream.seek(0)
-            with tarfile.open(fileobj=stream, mode='r:') as tar:
-                extract(tar)
+    with tarfile.open(archive, 'r:gz') as tar:
+        extract(tar)
 
 
 def verify_runtime(runtime, manifest):

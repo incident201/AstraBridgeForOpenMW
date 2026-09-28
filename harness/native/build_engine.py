@@ -11,7 +11,7 @@ parser.add_argument('--jobs',type=int,default=2)
 parser.add_argument('--arch-deps',action='store_true',help='Download and unpack Arch packages locally; no sudo or installation')
 parser.add_argument('--portable-deps',action='store_true',help='Build pinned MyGUI and Recast from source for portable releases')
 a=parser.parse_args()
-if not 1<=a.jobs<=4:parser.error('--jobs must be between 1 and 4')
+if a.jobs<1:parser.error('--jobs must be positive')
 work=a.work.resolve();work.mkdir(parents=True,exist_ok=True)
 source=work/'openmw-openmw-0.51.0';archive=work/'openmw-0.51.0.tar.gz'
 url='https://codeload.github.com/OpenMW/openmw/tar.gz/refs/tags/openmw-0.51.0'

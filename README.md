@@ -93,10 +93,22 @@ nothing is installed into the host system. End users need neither containers nor
 a compiler, package manager, `zstd`, FUSE, or a separate Python runtime installation.
 
 ```sh
-# Complete local bundle from a clean committed checkout:
+# First development build:
 python3 packaging/build_release.py --development --work .release-work/dev --output dist/dev
 python3 install.py --game '/path/to/Morrowind' --from-bundle dist/dev
+
+# After editing sources: update the cached source tree and rebuild changed files
+python3 packaging/build_release.py --development --resume --replace-output --work .release-work/dev --output dist/dev
 ```
+
+Development builds may contain uncommitted edits and are marked as development
+in the manifest. Add new source files with `git add` so they enter the source
+snapshot; committing is only required for stable releases. `--jobs N` controls
+parallelism. A changed container recipe/image requires a new work directory.
+
+Work and output directories may be anywhere, including an external disk. With
+Podman, `--container-storage /path/to/container-cache` also relocates the large
+container images. No developer-specific paths are stored in the build recipe.
 
 An engine-only native development build remains available with
 `harness/native/build_engine.py`; its optional `--arch-deps` is an Arch-specific
@@ -123,8 +135,8 @@ refuses stable releases that require newer than glibc 2.35. The archive uses gzi
 which the installer reads with the Python standard library.
 
 To reuse a previously built engine, explicitly supply `--engine-prefix` and
-`--engine-receipt`. The generated receipt must contain `source_tree`, `native_tree`
-and `engine_sha256` matching this checkout and executable. This is a build-cache
+`--engine-receipt`. The generated receipt records Git trees, actual source/native content digests
+and `engine_sha256`; all must match this checkout and executable. This is a build-cache
 path, never the ordinary install path. `--wheelhouse` and `--tools-prefix` accept
 previously downloaded build inputs. Preserve dependency source/provenance and
 notices when distributing third-party libraries; see `LICENSES/README.md`.
