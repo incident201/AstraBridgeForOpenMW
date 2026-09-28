@@ -180,7 +180,7 @@ def main():
         for name in ('resources', 'lib'):
             if (prefix / name).exists(): shutil.copytree(prefix / name, engine / name, symlinks=False)
         if not (engine / 'resources').is_dir(): raise ValueError('Engine resources are missing')
-        for name in ('defaults.bin', 'gamecontrollerdb.txt'):
+        for name in ('defaults.bin', 'gamecontrollerdb.txt', 'openmw.cfg'):
             shutil.copy2(prefix / name, engine / name)
         search = [engine / 'lib', prefix / 'lib', args.work / 'build/deps/usr/lib']
         collect_libraries(engine / 'openmw', engine / 'lib', search)
