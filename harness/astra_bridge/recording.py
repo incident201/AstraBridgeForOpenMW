@@ -88,6 +88,11 @@ class FramePacer:
         self.previous = None
 
 
+VIDEO_FILTER = ('vflip,scale=1920:1080:force_original_aspect_ratio=decrease:force_divisible_by=2:'
+                'in_range=full:out_range=tv:out_color_matrix=bt709,'
+                'pad=1920:1080:(ow-iw)/2:(oh-ih)/2,setsar=1')
+
+
 class Recorder:
     def __init__(self, display, path: Path, fps=60):
         self.display, self.path, self.fps = display, path, fps
@@ -130,7 +135,7 @@ class Recorder:
                      '-analyzeduration', '0', '-thread_queue_size', '128', '-i', f'pipe:{audio_read}',
                      '-c:a', 'aac', '-b:a', '384k']
         else: args += ['-an']
-        args += ['-vf', 'vflip,scale=in_range=full:out_range=tv:out_color_matrix=bt709,setsar=1', '-c:v', 'libx264',
+        args += ['-vf', VIDEO_FILTER, '-c:v', 'libx264',
                 '-preset', 'veryfast', '-crf', '18', '-threads', '4', '-pix_fmt', 'yuv420p',
                 '-profile:v', 'high', '-level:v', '4.2', '-bf', '2', '-flags', '+cgop',
                 '-g', str(fps//2), '-x264-params', 'open-gop=0',
@@ -280,7 +285,8 @@ class Recorder:
             return {'path': str(self.path), 'fps': self.fps, 'frames': self.frames,
                     'duration': round(self.frames/self.fps, 3), 'recording': not self.closing,
                     'capturing': self.media.active, 'audio': self.has_audio, 'error': self.error,
-                    'width':self.box['width'], 'height':self.box['height'],
+                    'width':1920, 'height':1080,
+                    'capture_width':self.box['width'], 'capture_height':self.box['height'],
                     'audio_sample_rate':48000 if self.has_audio else None,
                     'audio_samples':self.audio_samples,
                     'audio_duration':round(self.audio_samples/48000,6),

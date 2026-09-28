@@ -90,3 +90,22 @@ def test_ring_rejects_in_progress_and_overwritten_frames(tmp_path):
             assert struct.unpack_from('<I',stream.mapping,16)[0]==1
         assert struct.unpack_from('<I',stream.mapping,16)[0]==0
     finally: stream.close()
+
+
+def test_odd_window_dimensions_encode_as_1080p(tmp_path):
+    import subprocess
+    import imageio_ffmpeg
+    from astra_bridge.recording import VIDEO_FILTER
+    path=tmp_path/'odd-window.mp4'
+    frame=bytes((30,70,200,255))*(1908*1047)
+    subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(),'-v','error','-f','rawvideo',
+                    '-pixel_format','bgra','-video_size','1908x1047','-i','pipe:0',
+                    '-frames:v','1','-vf',VIDEO_FILTER,'-c:v','libx264','-pix_fmt','yuv420p',str(path)],
+                   input=frame,check=True)
+    frames=imageio_ffmpeg.read_frames(str(path))
+    try:
+        assert next(frames)['size']==(1920,1080)
+        pixels=next(frames)
+        assert sum(pixels[:3])<16
+        assert pixels[(540*1920+960)*3]>100
+    finally:frames.close()
