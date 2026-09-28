@@ -8,6 +8,7 @@ from __future__ import annotations
 import ctypes as C
 
 from .protocol import BridgeError
+from .environment import native_library
 
 
 class Cookie(C.Structure):
@@ -34,7 +35,7 @@ class WindowCapture:
 
     def __init__(self,display,window):
         self.window=int(window);self.conn=None
-        self.x=C.CDLL('libxcb.so.1');self.composite=C.CDLL('libxcb-composite.so.0')
+        self.x=C.CDLL(native_library('libxcb.so.1'));self.composite=C.CDLL(native_library('libxcb-composite.so.0'))
         self.free=bind(C.CDLL(None),'free',None,[C.c_void_p])
         bind(self.x,'xcb_connect',C.c_void_p,[C.c_char_p,C.POINTER(C.c_int)])
         bind(self.x,'xcb_disconnect',None,[C.c_void_p])

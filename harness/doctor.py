@@ -5,7 +5,7 @@ import importlib.metadata
 from pathlib import Path
 from astra_bridge.diagnostics import inspect_auto_fixes
 from astra_bridge.dependencies import offline_runtime
-from astra_bridge.environment import engine_path, identity
+from astra_bridge.environment import engine_path, identity, native_library
 root=Path(__file__).resolve().parent;errors=[];checks={}
 checks['python']=platform.python_version()
 checks['offline_runtime']=offline_runtime(root)
@@ -18,8 +18,8 @@ for name in ('mss','imageio-ffmpeg','Pillow'):
  try:checks['runtime_versions'][name]=importlib.metadata.version(name)
  except importlib.metadata.PackageNotFoundError:checks['runtime_versions'][name]=None
 for name in ('libxcb.so.1','libxcb-composite.so.0','libX11.so.6'):
- try:ctypes.CDLL(name);checks[name]=True
- except OSError:checks[name]=False;errors.append(f'Missing system library {name}')
+ try:ctypes.CDLL(native_library(name,root.parent));checks[name]=True
+ except OSError:checks[name]=False;errors.append(f'Missing runtime library {name}')
 checks['display']=os.environ.get('DISPLAY');checks['wayland_session']=bool(os.environ.get('WAYLAND_DISPLAY'))
 if not checks['display']:errors.append('DISPLAY is missing: run from the graphical KDE/XWayland session')
 try:engine=engine_path(root.parent)

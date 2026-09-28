@@ -2,7 +2,6 @@
 import hashlib
 import json
 import platform
-import importlib.metadata
 import subprocess
 from pathlib import Path
 
@@ -10,6 +9,13 @@ from pathlib import Path
 def sha256(path):
     with Path(path).open('rb') as stream:
         return hashlib.file_digest(stream, 'sha256').hexdigest()
+
+
+def native_library(name, installation=None):
+    """Prefer bundled X11 client bindings; graphics drivers still come from the host."""
+    installation = Path(installation) if installation else Path(__file__).resolve().parents[2]
+    path = installation / 'engine/lib' / name
+    return str(path) if path.is_file() else name
 
 
 def engine_path(installation):

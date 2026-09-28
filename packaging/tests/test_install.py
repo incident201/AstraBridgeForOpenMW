@@ -138,3 +138,13 @@ def test_gzip_extraction_needs_no_external_program(tmp_path, monkeypatch):
     monkeypatch.setattr(installer.subprocess, 'run', lambda *a, **k: pytest.fail('external decompressor invoked'))
     installer.extract_bundle(path, tmp_path / 'out')
     assert (tmp_path / 'out/AstraOpenMW/engine/openmw').read_bytes() == b'x'
+
+
+def test_capture_library_prefers_bundle_over_system(tmp_path):
+    import sys
+    sys.path.insert(0, str(ROOT / 'harness'))
+    from astra_bridge.environment import native_library
+    name='libxcb-composite.so.0'
+    assert native_library(name,tmp_path)==name
+    library=tmp_path/'engine/lib'/name;library.parent.mkdir(parents=True);library.touch()
+    assert native_library(name,tmp_path)==str(library)

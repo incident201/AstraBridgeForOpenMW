@@ -280,6 +280,13 @@ def main():
             shutil.copy2(prefix / name, engine / name)
         search = [engine / 'lib', prefix / 'lib', args.work / 'build/deps/usr/lib']
         collect_libraries(engine / 'openmw', engine / 'lib', search)
+        # Python's window-capture bindings dlopen this X11 client library.
+        composite = next((base / 'libxcb-composite.so.0' for base in
+                          [*search, Path('/usr/lib/x86_64-linux-gnu'), Path('/usr/lib')]
+                          if (base / 'libxcb-composite.so.0').is_file()), None)
+        if composite is None: raise ValueError('Builder must provide libxcb-composite.so.0')
+        shutil.copy2(composite, engine / 'lib/libxcb-composite.so.0')
+        collect_libraries(engine / 'lib/libxcb-composite.so.0', engine / 'lib', search)
         # Arch's SDL2 compatibility library dlopens SDL3, so ldd cannot see it.
         sdl2 = engine / 'lib/libSDL2-2.0.so.0'
         if sdl2.is_file() and b'libSDL3.so' in sdl2.read_bytes():
