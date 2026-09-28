@@ -12,12 +12,14 @@ cd AstraBridgeForOpenMW
 python3 install.py --game '/path/to/Morrowind'
 ```
 
-Give your agent the **installed** `skill/openmw-play/SKILL.md` printed by the
-installer, then play. The skill contains the installation's harness path.
+Ask your agent to install or update the `openmw-play` skill from this
+repository's [`skill/`](skill/SKILL.md) directory and use it with the runtime
+created by `install.py`. Then play. The skill is already included in the
+repository; you do not need to download or manually copy it separately.
 
 The installer downloads a GitHub Release, verifies its SHA256 and file inventory,
 creates a separate private runtime/config, configures Data Files, installs the
-bundled Python wheels, installs the skill and runs doctor. It never builds OpenMW.
+bundled Python wheels, prepares a runtime copy of the skill and runs doctor. It never builds OpenMW.
 On a release-tag checkout it selects that tag; on main it selects latest stable.
 The default destination is `~/AstraOpenMW/<tag>/`; existing installations and saves
 are never overwritten. Use `--directory` for another new destination.
@@ -26,8 +28,7 @@ Requirements: Linux x86_64, Python 3.10+ to run the installer, an
 X11/XWayland graphical session and working graphics drivers. The release manifest
 states its minimum glibc and CPU ISA versions; the installer rejects incompatible
 systems. Releases target ordinary **x86_64**, without an AVX2 requirement, and
-**glibc 2.35 or newer** (Ubuntu 22.04/24.04 and compatible systems). No Arch
-packages or package manager are needed. A pinned Python 3.12 interpreter and its
+**glibc 2.35 or newer**. A pinned Python 3.12 interpreter and its
 offline wheels are included, so the runtime does not use the system Python.
 For English game data add `--encoding win1252` (default: `win1251`). Bootstrap is
 offline, using wheels shipped in the release; downloading the release needs Internet.
@@ -35,8 +36,6 @@ offline, using wheels shipped in the release; downloading the release needs Inte
 ```sh
 python3 install.py --game '/path/to/Morrowind' --version latest
 python3 install.py --game '/path/to/Morrowind' --version v0.1.0
-# Optional agent discovery directory (must not already exist):
-python3 install.py --game '/path/to/Morrowind' --skill-dir ~/.codex/skills/openmw-play
 ```
 
 If doctor reports a missing display or host library, correct that prerequisite and
