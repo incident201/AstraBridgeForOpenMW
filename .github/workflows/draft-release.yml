@@ -1,0 +1,135 @@
+name: Draft Linux x86_64 release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version (vX.Y.Z)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: linux-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prepare release commit and tag
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(uname -m)" = x86_64
+          if gh release view "$RELEASE_VERSION" >/dev/null 2>&1; then
+            echo "Release $RELEASE_VERSION already exists" >&2
+            exit 1
+          fi
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import re
+
+          tag = os.environ['RELEASE_VERSION']
+          if not re.fullmatch(r'v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)', tag):
+              raise SystemExit('Version must be vX.Y.Z')
+          path = Path('VERSION.json')
+          version = json.loads(path.read_text())
+          current = version['project_version']
+          if tuple(map(int, tag[1:].split('.'))) < tuple(map(int, current.split('.'))):
+              raise SystemExit('Release version must not be older than VERSION.json')
+          version['project_version'] = tag[1:]
+          path.write_text(json.dumps(version, indent=2) + '\n')
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if ! git diff --quiet -- VERSION.json; then
+            git add VERSION.json
+            git commit -m "Release $RELEASE_VERSION"
+          fi
+          if git show-ref --verify --quiet "refs/tags/$RELEASE_VERSION"; then
+            test "$(git rev-list -n 1 "$RELEASE_VERSION")" = "$(git rev-parse HEAD)" || {
+              echo "Tag $RELEASE_VERSION points to another commit" >&2
+              exit 1
+            }
+          else
+            git tag -a "$RELEASE_VERSION" -m "AstraBridge ${RELEASE_VERSION#v}"
+          fi
+          test -z "$(git status --porcelain)"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Check sources
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lua5.4
+          python -m pip install pytest mss imageio-ffmpeg Pillow
+          (cd harness && python -m pytest -q tests ../packaging/tests)
+          python packaging/check_source_only.py
+
+      - name: Build portable Linux bundle
+        run: python3 packaging/build_release.py --container-tool docker --jobs 3 --work .release-work --output dist
+
+      - name: Verify release assets
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          (cd dist && sha256sum -c SHA256SUMS)
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import tarfile
+
+          tag = os.environ['RELEASE_VERSION']
+          output = Path('dist')
+          asset = f'astrabridge-openmw-{tag}-linux-x86_64.tar.gz'
+          expected = {asset, f'astrabridge-{tag}-source.tar.gz', 'manifest.json', 'SHA256SUMS'}
+          assert {p.name for p in output.iterdir()} == expected
+          manifest = json.loads((output / 'manifest.json').read_text())
+          assert manifest['project_version'] == tag[1:]
+          assert manifest['git_tag'] == tag
+          assert manifest['git_commit'] == subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          assert manifest['platform'] == 'linux' and manifest['architecture'] == 'x86_64'
+          assert manifest['asset_filename'] == asset
+          with tarfile.open(output / asset, 'r:gz') as archive:
+              names = set(archive.getnames())
+              for name in ('AstraOpenMW/engine/openmw', 'AstraOpenMW/AstraBridge/astra',
+                           'AstraOpenMW/skill/openmw-play/SKILL.md', 'AstraOpenMW/python/bin/python3',
+                           'AstraOpenMW/LICENSES/GPL-3.0.txt', 'AstraOpenMW/manifest.json'):
+                  assert name in names, name
+              embedded = json.load(archive.extractfile('AstraOpenMW/manifest.json'))
+          assert embedded == dict(manifest, asset_sha256=None)
+          PY
+
+      - name: Push release commit and tag
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: git push --atomic origin HEAD:refs/heads/main "refs/tags/$RELEASE_VERSION"
+
+      - name: Create draft release
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$RELEASE_VERSION" \
+            "dist/astrabridge-openmw-$RELEASE_VERSION-linux-x86_64.tar.gz" \
+            "dist/astrabridge-$RELEASE_VERSION-source.tar.gz" \
+            dist/manifest.json dist/SHA256SUMS \
+            --verify-tag --draft --title "AstraBridge $RELEASE_VERSION" \
+            --notes 'Frozen portable Linux x86_64 environment; see manifest.json.'

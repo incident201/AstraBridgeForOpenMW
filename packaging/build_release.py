@@ -167,7 +167,7 @@ def python_runtime(runtime, work):
 
 
 def run_container(args):
-    tool = shutil.which('podman') or shutil.which('docker')
+    tool = shutil.which(args.container_tool) if args.container_tool else (shutil.which('podman') or shutil.which('docker'))
     if not tool: raise ValueError('Install Podman or Docker on the build host; end users do not need either')
     image = 'localhost/astrabridge-builder:' + sha256(ROOT / 'packaging/Containerfile')[:12]
     runner = [tool]
@@ -206,6 +206,7 @@ def main():
     parser.add_argument('--jobs', type=int, default=2)
     parser.add_argument('--arch-deps', action='store_true')
     parser.add_argument('--container-storage', type=Path, help='Optional separate Podman storage (for builds on another disk)')
+    parser.add_argument('--container-tool', choices=('podman', 'docker'), help='Select the container runtime')
     parser.add_argument('--host-build', action='store_true', help='Explicit native development/build-container mode')
     parser.add_argument('--portable-deps', action='store_true', help='Use pinned source dependencies on the portable builder')
     parser.add_argument('--resume', action='store_true', help='Incrementally update/rebuild the existing work directory')

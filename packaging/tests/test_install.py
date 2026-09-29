@@ -57,7 +57,8 @@ def test_inventory_and_embedded_manifest(tmp_path):
 
 def manifest():
     data = json.loads((ROOT / 'packaging/manifest.template.json').read_text())
-    data.update(json.loads((ROOT / 'VERSION.json').read_text()), git_tag='v0.1.0', git_commit='a' * 40,
+    version = json.loads((ROOT / 'VERSION.json').read_text())
+    data.update(version, git_tag='v' + version['project_version'], git_commit='a' * 40,
                 minimum_glibc='2.17', asset_filename='runtime.tar.gz', asset_sha256='b' * 64, engine_sha256='c' * 64)
     return data
 
@@ -65,9 +66,9 @@ def manifest():
 def test_wrong_version_and_host_rejected(monkeypatch):
     data = manifest()
     monkeypatch.setattr(installer.platform, 'libc_ver', lambda: ('glibc', '2.44'))
-    installer.validate_manifest(data, 'v0.1.0')
+    installer.validate_manifest(data, data['git_tag'])
     with pytest.raises(ValueError, match='requested'):
-        installer.validate_manifest(data, 'v0.2.0')
+        installer.validate_manifest(data, 'v999.999.999')
     monkeypatch.setattr(installer.platform, 'libc_ver', lambda: ('glibc', '2.16'))
     with pytest.raises(ValueError, match='glibc'):
         installer.validate_manifest(data)

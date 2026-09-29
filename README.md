@@ -108,15 +108,26 @@ parallelism. A changed container recipe/image requires a new work directory.
 
 Work and output directories may be anywhere, including an external disk. With
 Podman, `--container-storage /path/to/container-cache` also relocates the large
-container images. No developer-specific paths are stored in the build recipe.
+container images. `--container-tool docker` explicitly selects Docker when both
+container runtimes are installed. No developer-specific paths are stored in the
+build recipe.
 
 An engine-only native development build remains available with
 `harness/native/build_engine.py`; its optional `--arch-deps` is an Arch-specific
 **developer convenience**, not a release or installation requirement. Explicit
 `--host-build --development` also permits native local bundle builds.
 
-For a release, update `VERSION.json`, commit all changes, tag that clean commit,
-and run the same packaging entry point. Use a fresh work/output directory:
+For a release in GitHub Actions, select **Actions → Draft Linux x86_64 release →
+Run workflow** on `main` and enter a new `vX.Y.Z` version. This is the only
+trigger for that workflow. It updates `VERSION.json` in a release commit, tags
+the clean commit, runs source checks, builds in the Ubuntu 22.04 container,
+verifies the four release assets, then pushes the commit and tag and creates a
+draft GitHub Release. The commit and tag are pushed only after the build passes.
+Review the draft and publish it when ready. An existing release is never replaced.
+
+The equivalent manual procedure is to update `VERSION.json`, commit all changes,
+tag that clean commit, and run the same packaging entry point. Use a fresh
+work/output directory:
 
 ```sh
 git tag -a v0.1.1 -m 'AstraBridge 0.1.1'
