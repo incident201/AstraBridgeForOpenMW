@@ -130,11 +130,12 @@ tag that clean commit, and run the same packaging entry point. Use a fresh
 work/output directory:
 
 ```sh
-git tag -a v0.1.1 -m 'AstraBridge 0.1.1'
-python3 packaging/build_release.py --work .release-work/v0.1.1 --output dist/v0.1.1
-(cd dist/v0.1.1 && sha256sum -c SHA256SUMS)
-git push origin main v0.1.1
-gh release create v0.1.1 dist/v0.1.1/* --verify-tag --title 'AstraBridge v0.1.1' --notes 'Frozen environment; see manifest.json.'
+TAG=vX.Y.Z # replace with a new version
+git tag -a "$TAG" -m "AstraBridge ${TAG#v}"
+python3 packaging/build_release.py --work ".release-work/$TAG" --output "dist/$TAG"
+(cd "dist/$TAG" && sha256sum -c SHA256SUMS)
+git push origin main "$TAG"
+gh release create "$TAG" "dist/$TAG/"* --verify-tag --draft --title "AstraBridge $TAG" --notes 'Frozen environment; see manifest.json.'
 ```
 
 The packaging script builds modified OpenMW, copies resources and shared-library
