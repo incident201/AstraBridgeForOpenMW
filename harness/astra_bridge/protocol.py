@@ -119,6 +119,7 @@ LEAF_KEYS.update({'control','destination'})
 LEAF_KEYS.add('game_time_seconds')
 LEAF_KEYS.update({'movement_mode','center_bearing_deg'})
 LEAF_KEYS.update({'controls_enabled','looking_enabled','jumping_enabled'})
+LEAF_KEYS.update({'actor_kind','details_visible','name_source','memory_ref'})
 DICT_KEYS.add('dialogue')
 DICT_KEYS.add('document')
 ERRORS = {"save_unavailable", "stale_save_ref", "operation_failed", "invalid_arguments", "no_player",

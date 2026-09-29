@@ -1,5 +1,5 @@
--- V2 permission boundary: world coordinates stay here; only visible names,
--- screen-space targets and relative measurements leave the adapter.
+-- World coordinates stay here. Inspection gates names; private instance keys
+-- are stripped by the controller before the public response/receipt boundary.
 local camera = require('openmw.camera')
 local nearby = require('openmw.nearby')
 local types = require('openmw.types')
@@ -9,6 +9,7 @@ local util = require('openmw.util')
 local ui = require('openmw.ui')
 local P = require('scripts.astrabridge.protocol')
 local Space=require('scripts.astrabridge.space')
+local Recognition=require('scripts.astrabridge.recognition')
 local hasAnimation,animation=pcall(require,'openmw.animation')
 local M = {unitsPerMeter=70}
 local handles, ids, seen, preferred, serial, epoch = {}, {}, {}, {}, 0, 0
@@ -16,7 +17,12 @@ local groundTargets,groundSerial={},0
 local preferredPoints={}
 local function round(x) return math.floor(x*100+.5)/100 end
 function M.angle(x) return (x+math.pi)%(2*math.pi)-math.pi end
-function M.reset(e) handles,ids,seen,preferred,serial,epoch={},{},{},{},0,e;groundTargets={};groundSerial=0;preferredPoints={} end
+function M.reset(e)
+    handles,ids,seen,preferred,serial,epoch={},{},{},{},0,e
+    groundTargets={};groundSerial=0;preferredPoints={};Recognition.reset(e)
+end
+M.saveRecognition=Recognition.save
+M.loadRecognition=Recognition.load
 function M.orientation()
     local s=ui.screenSize()
     local vf=camera.getFieldOfView()
@@ -179,11 +185,12 @@ function M.interactionInfo(ref)
     local reach=M.reach(g)
     local aimed=M.crosshair(g)
     local ready=M.lootReady(g)
-    local result={ref=ref,name=g.obj.type.record(g.obj).name,distance_m=round(g.distance/M.unitsPerMeter),
+    local result={ref=ref,distance_m=round(g.distance/M.unitsPerMeter),
         in_reach=reach,aimed=aimed,ready=reach and aimed and ready~=false,
         bearing_deg=round(math.deg(M.angle(yaw-camera.getYaw()))),pitch_deg=round(math.deg(pitch-camera.getPitch())),
         activation_distance_m=round(core.getGMST('iMaxActivateDist')/M.unitsPerMeter),
         aim_point=P.array(g.screen),reason=not reach and 'out_of_reach' or not aimed and 'target_not_aimed' or ready==false and 'animation_busy' or 'ready'}
+    for key,value in pairs(Recognition.fields(g)) do result[key]=value end
     local origin=camera.getPosition()
     local ray=nearby.castRenderingRay(origin,origin+camera.viewportToWorldVector(util.vector2(.5,.5)):normalize()*core.getGMST('iMaxActivateDist'),{ignore=self.object})
     if ray.hitObject and ray.hitObject~=g.obj then
@@ -191,28 +198,34 @@ function M.interactionInfo(ref)
     end
     return result
 end
+function M.identity(ref)
+    -- Never identify through the offscreen grace period used by the motor.
+    local g=M.resolve(ref)
+    return g and Recognition.fields(g) or {details_visible=false}
+end
 local function publicObject(g,v)
             local rec=g.obj.type.record(g.obj)
             if rec and rec.name and rec.name~='' then
-                local key=g.obj.id -- private lookup; never serialize or hash this into a public ref
+                local key=g.obj.id -- private lookup; public refs stay transient
                 local ref=ids[key]
                 if not ref then serial=serial+1;ref='visible_'..epoch..'_'..serial;ids[key]=ref end
                 handles[ref]=g.obj
                 seen[ref]=core.getSimulationTime()
                 local yaw=M.lookAngles(g)
-                local row={ref=ref,name=rec.name,kind=g.kind,rect=P.array(),aim_point=P.array(v.screen),
+                local row={ref=ref,kind=g.kind,rect=P.array(),aim_point=P.array(v.screen),
                     distance_m=round(v.distance/M.unitsPerMeter),bearing_deg=round(math.deg(M.angle(yaw-camera.getYaw()))),
                     horizontal_distance_m=round(math.sqrt((g.center.x-self.position.x)^2+(g.center.y-self.position.y)^2)/M.unitsPerMeter),
                     center_bearing_deg=round(math.deg(M.angle(math.atan2(g.center.x-self.position.x,g.center.y-self.position.y)-camera.getYaw()))),
                     height_change_m=round((g.center.z-self.position.z)/M.unitsPerMeter),
                     in_reach=M.reach(g),actions=P.array({'focus','approach','interact'})}
+                for key,value in pairs(Recognition.fields(v)) do row[key]=value end
                 if g.kind=='actor' then
                     row.status=types.Actor.isDead(g.obj) and 'down' or 'active'
                     if row.status=='down' then row.loot_ready=M.lootReady(g) end
                     if ui._astraTargetReach then
                         for k,value in pairs(ui._astraTargetReach(g.obj)) do row[k]=value end
                     end
-                elseif (g.kind=='door' or g.kind=='container') and ui._astraDoorDescription then
+                elseif row.details_visible and (g.kind=='door' or g.kind=='container') and ui._astraDoorDescription then
                     row.description=ui._astraDoorDescription(g.obj)
                 end
                 for _,n in ipairs(g.rect) do row.rect[#row.rect+1]=round(n) end

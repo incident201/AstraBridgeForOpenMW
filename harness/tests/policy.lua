@@ -19,6 +19,7 @@ local uiApi={}
 package.preload['openmw.ui']=function()return uiApi end
 package.preload['openmw.util']=function()return {} end
 package.preload['scripts.astrabridge.scene']=function() return {
+    identity=function()return {details_visible=false}end,
     reset=function()end,fov=function()end,pose=function()return {yaw=0,pitch=0,cell='private'}end,
     report=function()return {moved_m=0}end,angle=function(x)return x end,
     orientation=function()return {}end,observe=function()return {objects={}}end,

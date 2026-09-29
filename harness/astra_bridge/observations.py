@@ -90,7 +90,7 @@ def present_response(result, full=False, before=None, target_ref=None):
             views.append({'view':index,'observation':observation.get('observation'),
                           **{k:v for k,v in observation.get('orientation',{}).items() if k in {'heading_deg','pitch_deg'}},
                           'screenshot':observation.get('screenshot'),
-                          'landmarks':[{k:o[k] for k in ('ref','name','kind','bearing_deg','distance_m') if k in o} for o in landmarks[:3]],
+                          'landmarks':[{k:o[k] for k in ('ref','memory_ref','name','kind','actor_kind','details_visible','name_source','bearing_deg','distance_m') if k in o} for o in landmarks[:3]],
                           'objects_total':len(landmarks)})
             seen={(m.get('text'),m.get('frame')) for m in previous.get('messages',[])}
             messages=[m for m in observation.get('messages',[]) if (m.get('text'),m.get('frame')) not in seen]

@@ -60,7 +60,7 @@ class SpatialMemory:
             place['local_passages']=observation['terrain']['passages']
             place['local_map']=observation.get('local_map')
         place['views'] = place['views'][-6:]
-        place['visible_names'] = [x['name'] for x in observation.get('scene', {}).get('objects', [])]
+        place['visible_names'] = [x['name'] for x in observation.get('scene', {}).get('objects', []) if x.get('name')]
         self.data['anchor'] = {'place': place['ref'], 'status': 'recognized', 'source': 'agent_label'}
         self.persist()
         return place

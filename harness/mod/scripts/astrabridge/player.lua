@@ -42,7 +42,9 @@ local uiMessages,seenMessages = P.array(),{}
 local seenNotifications={}
 local function lockState()
     if not targetLock then return {status='unlocked'} end
-    return {status=targetLock.status,ref=targetLock.ref,name=targetLock.name}
+    local out=Scene.identity(targetLock.ref)
+    out.status=targetLock.status;out.ref=targetLock.ref
+    return out
 end
 local function lockedTarget()
     if not targetLock or targetLock.status=='down' then return nil end
@@ -824,7 +826,7 @@ local function dispatch(cmd)
             if targetLock and targetLock.ref~=target then pause(cmd,nil,'target_locked_unlock_first');return end
             local g=Scene.resolve(target,true)
             if not g or not A.objectIsInstance(g.obj) then pause(cmd,nil,'target_not_visible');return end
-            targetLock={ref=target,name=g.obj.type.record(g.obj).name,status=A.isDead(g.obj) and 'down' or 'locked',cell=Space.key(self.cell)}
+            targetLock={ref=target,status=A.isDead(g.obj) and 'down' or 'locked',cell=Space.key(self.cell)}
         end
         local p={cmd=cmd,phase='resuming',start=Scene.pose(),elapsed=0,deadline=core.getRealTime()+P.actionTimeout(op,args,45),
             chain={plan=plan,ref=target,air=args.air,limit=P.number(args.max_seconds,.5,math.huge,12),elapsed=0,
@@ -867,7 +869,7 @@ local function dispatch(cmd)
             local g=Scene.resolve(target,true)
             if not g then pause(cmd,nil,'target_not_visible');return end
             if not A.objectIsInstance(g.obj) or A.isDead(g.obj) then pause(cmd,nil,'invalid_lock_target');return end
-            targetLock={ref=target,name=g.obj.type.record(g.obj).name,status='locked',cell=Space.key(self.cell)}
+            targetLock={ref=target,status='locked',cell=Space.key(self.cell)}
         end
         local charge=P.number(args.charge,.1,1.5,.8)
         active={move=0,strafe=0,attack=false,sneak=pausedSneak}
@@ -893,7 +895,7 @@ local function dispatch(cmd)
         assert(args.direction=='back' or args.direction=='left' or args.direction=='right')
         local meters=P.number(args.meters,.25,math.huge,2)
         local seconds=P.number(args.seconds,.2,math.huge,4)
-        targetLock={ref=target,name=g.obj.type.record(g.obj).name,status='locked',cell=Space.key(self.cell)}
+        targetLock={ref=target,status='locked',cell=Space.key(self.cell)}
         routes={};walkingRoute=nil
         active={move=0,strafe=0,run=args.run or false,sneak=pausedSneak}
         pending={cmd=cmd,phase='resuming',start=Scene.pose(),elapsed=0,deadline=core.getRealTime()+P.actionTimeout(op,args,30),
@@ -984,7 +986,7 @@ local function dispatch(cmd)
         end
         if op=='lock' then
             if not types.Actor.objectIsInstance(g.obj) or A.isDead(g.obj) then pause(cmd,nil,'invalid_lock_target');return end
-            targetLock={ref=args.ref,name=g.obj.type.record(g.obj).name,status='locked',cell=Space.key(self.cell)}
+            targetLock={ref=args.ref,status='locked',cell=Space.key(self.cell)}
         elseif targetLock and targetLock.status=='locked' and args.ref and args.ref~=targetLock.ref then
             pause(cmd,nil,'target_locked_unlock_first');return
         end
@@ -1756,7 +1758,10 @@ local function reset()
     pause(nil)
 end
 return {
-    engineHandlers={onFrame=function(dt)
+    engineHandlers={
+    onSave=function() return {recognition_instances=Scene.saveRecognition()} end,
+    onLoad=function(data) Scene.loadRecognition(data and data.recognition_instances) end,
+    onFrame=function(dt)
         local ok, err = pcall(function()
             onFrame(dt)
             if directMovement then

@@ -33,6 +33,7 @@ package.preload['openmw.core']=function()return {isWorldPaused=function()return 
     getGameTime=function()return 0 end, getSimulationTime=function()return simulation end,
     sendGlobalEvent=function(n,d)events[#events+1]={n,d}end}end
 package.preload['scripts.astrabridge.scene']=function()return {
+    identity=function()return {details_visible=false}end,
     unitsPerMeter=70,angle=angle,reset=function()end,fov=function()end,
     pose=function()return {yaw=yaw,pitch=pitch,position=self.position,cell=self.cell.id}end,
     report=function(s)return {moved_m=(self.position-s.position):length()/70,turned_deg=math.deg(angle(yaw-s.yaw))}end,

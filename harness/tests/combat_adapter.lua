@@ -63,6 +63,7 @@ package.preload['openmw.core']=function()return {
     magic={enchantments={records={private_enchantment={effects={{effect={name='Heal'},range=0,duration=1,magnitudeMin=3,magnitudeMax=3,area=0}}}}}},
 }end
 package.preload['scripts.astrabridge.scene']=function()return {
+    identity=function()return {details_visible=false}end,
     unitsPerMeter=70,fov=function()end,reset=function()end,pose=function()return {position=object.position,yaw=0,pitch=0,cell='private'}end,
     angle=function(v)return (v+math.pi)%(2*math.pi)-math.pi end,
     report=function()return {}end,orientation=function()return {}end,observe=function()return {objects={}}end,

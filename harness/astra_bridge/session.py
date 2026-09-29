@@ -290,14 +290,16 @@ class Session:
         frame = raw.pop('_atlas_frame', None) if op == 'observe' else None
         if frame is not None:
             self._validate_frame(frame)
+        # Use the same durable profile as the atlas, including on lifecycle changes.
+        if op == 'load': self.atlas.restore(self.save_refs.get(args.get('ref')))
+        if op == 'new_game': self.atlas.new_game()
+        self.knowledge.recognize(raw, self.atlas.profile)
         result = self.display.public_coordinates(check_result(raw))
         if inventory is not None:result['inventory_summary']=inventory
         if op in {'load','new_game'}:
             self.autosave.clock=None
         self.knowledge.ingest(op,result)
         if 'saves' in result: self.save_refs = {s['ref']: s for s in result['saves']}
-        if op == 'load': self.atlas.restore(self.save_refs.get(args.get('ref')))
-        if op == 'new_game': self.atlas.new_game()
         if op == 'observe': self.atlas.ingest(result, frame)
         if op == 'mark' and result.get('ref'): self.atlas.note_marker(result['ref'])
         return result
@@ -438,7 +440,7 @@ class Session:
         with self.lock:
             started = time.monotonic()
             if op=='details':return information.details(self,args)
-            if op=='knowledge':return self.knowledge.call(args)
+            if op=='knowledge':return self.knowledge.call(args, self.atlas.profile)
             if op=='autosave':return self.autosave.configure(args)
             if op=='ui':return information.query_ui(self,args)
             if op=='inspect' and args.get('view') in {'journal','conversations'} and ('query' in args or 'limit' in args):return information.inspect_text(self,args)

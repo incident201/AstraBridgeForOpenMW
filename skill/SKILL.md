@@ -1,6 +1,6 @@
 ---
 name: openmw-play
-description: "Play Morrowind through the configured AstraBridge Agent-Computer Interface (ACI) for OpenMW: navigate, interact, fight, read documents, repair gear and record play. Use its public CLI for compact observations, targeted full information, control availability, stable menu actions, persistent travel/task memory, recoverable results and saves. Includes language-independent service controls and emergency recovery of displaced NPCs. Use for gameplay, not AstraBridge or engine development."
+description: "Play Morrowind through the configured AstraBridge Agent-Computer Interface (ACI) for OpenMW: navigate, inspect and recognize nearby objects, interact, fight, read documents, repair gear and record play. Use its public CLI for compact observations, distance-limited object details, persistent recognized names and travel/task memory, control availability, stable menu actions, recoverable results and saves. Includes language-independent service controls and emergency recovery of displaced NPCs. Use for gameplay, not AstraBridge or engine development."
 ---
 
 # Play OpenMW through AstraBridge
@@ -68,6 +68,29 @@ is public version metadata, not game-state data.
 | Return to an already visited location | `atlas --query "NAME"` → `revisit`, or `recall` → `return-to` |
 
 Use returned `control` identifiers for service buttons and sliders; they are the same in every game language. Item, topic and destination names remain the actual localized labels. Never translate an observed label to guess an input.
+
+**Meeting an unfamiliar NPC or object:** it is normal for a distant target to have
+no `name` or `description`. Read its `kind`, `actor_kind` (`npc`/`creature`), direction
+and distance, and look at the screenshot. Use the current `ref` with
+`approach REF --reach activate`; this moves closer without talking, opening or
+taking anything. Check the returned observation: `details_visible: true` means
+you are close enough to inspect it, and `name_source: "observed"` marks its name.
+The range is the game's tooltip range; all visible objects that close can be
+inspected without aiming at each one. A blocked approach may need another route.
+
+Later, that same visible instance can show `name_source: "remembered"` from a
+distance. Its name is remembered across loads/restarts within the atlas profile;
+its current lock/trap details still require a close inspection. After loading or
+losing a target, observe again for a fresh `ref` even if you remember its name.
+`--full`, `pick`, `focus` and target locks cannot identify an unfamiliar distant
+object by themselves. See the [first-encounter example](references/information.md#first-encounter).
+
+For a note about that particular NPC, door or item, use its persistent `memory_ref`:
+`knowledge add --kind note --object-ref OBJECT_REF --text "..."`. Read its notes
+with `knowledge list --object-ref OBJECT_REF`; use `knowledge objects --query "..."`
+to find a remembered object after leaving the area. Notes can also describe an
+unidentified object and do not reveal its name. `memory_ref` is for memory;
+game actions always use a current visible `ref`. See [object notes](references/information.md#notes-about-one-object).
 
 Read the reference relevant to the next action:
 

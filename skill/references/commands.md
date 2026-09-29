@@ -48,7 +48,10 @@ In a real observation, use:
 | `screenshot` | Current game-window PNG. Open it explicitly to see it. |
 | `observation` | Screenshot/observation number for coordinate-based UI operations. |
 | `ui_mode`, `ui.modal`, `ui.elements` | Which menu is open, whether a modal blocks it, and actual controls. Tutorial popups can still report `Gameplay`. |
-| `scene.objects` | Visible actors, doors, items, containers; refs, names, relative geometry, screen bounds and reach. |
+| `scene.objects` | Visible actors, doors, items, containers and activators; refs, categories, relative geometry and reach. `name` is optional: current close inspection or previously recognized instance. `description` requires current close inspection. |
+| `details_visible`, `name_source` | Current tooltip-range inspection versus a remembered name. `name_source` is `observed` or `remembered` when `name` exists. |
+| `actor_kind` | `npc` or `creature`; both keep `kind: "actor"`. |
+| `memory_ref` | Persistent `object_…` handle for notes about this instance. Game actions still use the current `ref`. |
 | `body` | Stance, selected gear/magic, animation, support/swimming state, death and mobility effects. |
 | `stats`, `effects`, `combat` | Own resources, active effects, selected attack/cast capabilities. |
 | `orientation` | Heading, pitch, FOV and camera mode. |
@@ -64,6 +67,7 @@ In a real observation, use:
 | Value | Obtain from | Use with | Refresh rule |
 |---|---|---|---|
 | `visible_…` | `observe` → `scene.objects[].ref` | `focus`, `approach`, `interact`; actor refs also `lock`, `strike`, `cast`, `chain` | Targets must remain valid/visible. Reobserve after movement or target loss. A remembered actor is not permission to track it through walls. |
+| `object_…` | `scene.objects[].memory_ref` or `knowledge objects` → `objects[].ref` | `knowledge add/list --object-ref`; never movement or interaction | Persistent within the atlas profile. A catalog entry is historical and does not prove that the object is currently visible. |
 | `item_…` | `inspect inventory` → `items[].ref` | `use-item`, `select-enchanted` | Stable while that instance remains owned in the same game epoch. Refresh after load/restart, removal or a changed stack. |
 | `spell_…` | `inspect spells` → `spells[].ref` | `select-spell` | Spell queries/actions can invalidate spell refs. Selection remains after its handle expires; refresh before a new selection. |
 | `ui_…` | `ui` → `elements[].ref`, or observation's `ui.elements` | `choose`, `edit`, `adjust`, `hover` | Bound to the active menu and its meaning. Refresh after choosing/editing, changing selection, price, contents or modal. Fading notifications, tooltips and scrolling alone do not invalidate unchanged actions. |
@@ -179,7 +183,7 @@ If saving is unavailable during the tutorial or a modal UI, do not bypass it. Pr
 
 Steps use API names with underscores: `act`, `look`, `go`, `walk`, `revisit`, `return_to`, `approach`, `interact`, `move_local`, `use_item`, `select_spell`, `select_enchanted`, `cast`, `strike`, `chain`, `wait_until`, `trigger`, `choose`, `edit`, `adjust`, `focus`, `target_info`, `fly`, `swim`, `rest`, `buy`, `travel`, `lock`, `unlock`. Each step contains `op` plus that operation's normal fields. Item/spell selection also accepts an exact unique `name`. Every step is validated before execution. Do not preselect replies from dialogue that has not been opened/read.
 
-A `select` object resolves a fresh handle immediately before its step. Filters: exact `name`, substring `contains`, `kind`, `panel`, `role`, `control`, `instance`, and scene-only `nearest:true`. Source is inferred from the operation (`scene`, `ui`, `inventory`, `spells`). Disabled, unavailable or ambiguous choices stop the sequence. `bind:"npc"` stores the selected handle; `ref:"$npc"` reuses it later, with normal visibility/freshness checks. For UI that changes, use a fresh selector at each step.
+A `select` object resolves a fresh handle immediately before its step. Filters: exact `name`, substring `contains`, `kind`, `panel`, `role`, `control`, `instance`, and scene-only `actor_kind` (`npc`/`creature`) and `nearest:true`. Source is inferred from the operation (`scene`, `ui`, `inventory`, `spells`). Scene name filters only match names currently exposed or previously recognized; they cannot discover an unknown distant name. Disabled, unavailable or ambiguous choices stop the sequence. `bind:"npc"` stores the selected handle; `ref:"$npc"` reuses it later, with normal visibility/freshness checks. For UI that changes, use a fresh selector at each step.
 
 `expect` can check `ui_mode`, `location`, `location_changed`, action `outcome`, `gold_delta`, or `inventory_delta:{"name":"EXACT_NAME","delta":N}`. A failed check returns `expectation_failed` and skips all remaining actions. It cannot undo the completed step.
 

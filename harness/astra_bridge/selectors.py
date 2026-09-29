@@ -13,10 +13,11 @@ def validate_step(step, bindings):
     selector=step.get('select')
     if selector is not None:
         if op not in REF_OPS or 'ref' in params or not isinstance(selector,dict):raise BridgeError('invalid_selector')
-        if selector.keys()-{'source','name','contains','kind','panel','role','control','instance','nearest'}:raise BridgeError('invalid_selector')
+        if selector.keys()-{'source','name','contains','kind','actor_kind','panel','role','control','instance','nearest'}:raise BridgeError('invalid_selector')
         default='ui' if op in {'choose','edit','adjust'} else 'spells' if op=='select_spell' else 'inventory' if op in {'use_item','select_enchanted'} else 'scene'
         if selector.get('source',default)!=default:raise BridgeError('invalid_selector_source')
-        if not any(k in selector for k in ('name','contains','control','instance','kind')):raise BridgeError('invalid_selector')
+        if not any(k in selector for k in ('name','contains','control','instance','kind','actor_kind')):raise BridgeError('invalid_selector')
+        if 'actor_kind' in selector and (default!='scene' or selector['actor_kind'] not in {'npc','creature'}):raise BridgeError('invalid_selector')
         for key,value in selector.items():
             if key=='nearest':
                 if type(value) is not bool or default!='scene':raise BridgeError('invalid_selector')
@@ -59,7 +60,7 @@ def resolve_step(session, step, bindings):
         label=row.get('name',row.get('text',''))
         if 'name' in selector and label!=selector['name']:continue
         if 'contains' in selector and selector['contains'].casefold() not in label.casefold():continue
-        if any(row.get(k)!=selector[k] for k in ('kind','panel','role','control','instance') if k in selector):continue
+        if any(row.get(k)!=selector[k] for k in ('kind','actor_kind','panel','role','control','instance') if k in selector):continue
         matches.append(row)
     if selector.get('nearest'):
         matches.sort(key=lambda r:r.get('distance_m',float('inf')))
@@ -68,7 +69,7 @@ def resolve_step(session, step, bindings):
     if len(matches)!=1:raise BridgeError('selection_ambiguous' if matches else 'selection_unavailable')
     row=matches[0];params['ref']=row['ref']
     if step.get('bind'):bindings[step['bind']]=row['ref']
-    return params,{k:row[k] for k in ('ref','name','text') if k in row}
+    return params,{k:row[k] for k in ('ref','memory_ref','name','name_source','details_visible','actor_kind','text') if k in row}
 
 
 def inventory_count(session,name):

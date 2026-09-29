@@ -303,8 +303,8 @@ class ExplorationAtlas(AtlasRoutes):
         s['current_node'] = node['ref']
         node['location'] = observation.get('location',s['location'])
         if observation.get('screenshot'): node['views'] = (node['views']+[observation['screenshot']])[-3:]
-        landmarks = [o.get('description') or o['name'] for o in observation.get('scene', {}).get('objects', [])
-                     if o['kind'] == 'door' and o['distance_m'] < 10]
+        landmarks = [o.get('description') or o.get('name') for o in observation.get('scene', {}).get('objects', [])
+                     if o['kind'] == 'door' and o['distance_m'] < 10 and (o.get('description') or o.get('name'))]
         node['landmarks'] = sorted(set(node.get('landmarks', []) + landmarks))
         terrain = observation.get('terrain', {})
         if terrain.get('supported'):

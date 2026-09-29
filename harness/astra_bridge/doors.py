@@ -15,8 +15,9 @@ def observed_anchor(row, pose, heading):
 
 def match_door(rows, door, pose, heading):
     anchor = door.get('anchor')
-    matches = [r for r in rows if r.get('kind') == 'door' and (anchor or (r.get('name') == door.get('name')
-               and r.get('description') == door.get('description')))]
+    matches = [r for r in rows if r.get('kind') == 'door' and (anchor or (door.get('name')
+               and r.get('name') == door['name'] and (not door.get('description')
+               or r.get('description') == door['description'])))]
     if anchor:
         scored = []
         for row in matches:
