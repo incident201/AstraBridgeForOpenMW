@@ -5,6 +5,9 @@ It lets an agent play Morrowind through the `astra` CLI and the `openmw-play`
 skill. Originally developed for GPT-6 Astra; other models can use the same public
 interface. Supply your own Morrowind installation; game files are never included.
 
+For project goals, the OpenMW change inventory and bundled fixes, see the
+[documentation for people and developers](docs/README.md).
+
 ## Install and play
 
 ```sh
