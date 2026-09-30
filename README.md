@@ -46,6 +46,35 @@ rerun `<installation>/AstraBridge/.venv/bin/python <installation>/AstraBridge/do
 The installed runtime is retained for diagnostics. Start with
 `<installation>/AstraBridge/astra start` from your graphical session.
 
+### Optional GPU video encoding
+
+Recording automatically tries a system FFmpeg from `PATH` with NVIDIA NVENC or
+Intel/AMD VAAPI. It performs a short encode before recording starts, then falls
+back to the bundled CPU encoder if hardware encoding is unavailable. Install a
+suitable system FFmpeg and GPU driver to enable this; no extra GPU binaries or
+drivers are downloaded by AstraBridge. Recording remains H.264 High, 1080p/60,
+with AAC audio. Hardware uses CQP 18; the CPU fallback uses CRF 18. These quality
+settings are not numerically equivalent across encoders.
+
+Optional overrides in `<installation>/AstraBridge/local-settings.json`:
+
+```json
+{
+  "recording_encoder": "auto",
+  "ffmpeg_binary": "/usr/bin/ffmpeg"
+}
+```
+
+`recording_encoder` accepts `auto`, `cpu`, `vaapi` or `nvenc`. Explicit GPU modes
+report an error if no working encoder is available. `ffmpeg_binary` pins an
+external executable; `IMAGEIO_FFMPEG_EXE` is also supported when that setting is
+absent. Without an explicit binary, automatic CPU fallback prefers the bundled
+FFmpeg. `vaapi_device` can select a render node such as `/dev/dri/renderD128`.
+Recording status and sidecars identify the actual encoder, FFmpeg version and
+device; `.encoder.json` contains the startup probe results. Selection happens
+before the recording starts; a later encoder failure is reported without
+silently restarting the recording.
+
 ## Frozen environments and benchmarks
 
 `VERSION.json` defines one project version for the AstraBridge ACI, skill, modified OpenMW,
@@ -88,6 +117,14 @@ same tag and verified release assets when comparing models.
 
 Git contains source, skill, installer and build tools. Binaries, wheels, runtime
 libraries, generated manifests and build outputs belong outside tracked files.
+
+The manual GitHub release workflow caches the builder image, native build tree
+and compiler results. When native sources and the build environment are
+unchanged, it verifies the cached engine and its runtime files and reuses them;
+Python/skill changes and version bumps still produce fresh release assets and
+manifests. Native changes use Ninja and ccache to rebuild affected code. Changes
+to the build recipe invalidate the compatible cache. A cold cache still needs
+one full build; CI then verifies a second packaging pass reuses the engine.
 
 The release builder uses **Podman or Docker on the developer's machine** and an
 Ubuntu 22.04 build container. GCC, headers and build packages stay in the container;

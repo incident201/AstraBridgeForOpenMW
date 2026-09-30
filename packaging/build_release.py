@@ -15,7 +15,7 @@ import tarfile
 import tempfile
 import urllib.request
 import zipfile
-from source_cache import fingerprint, prepare, tracked
+from source_cache import engine_files, fingerprint, prepare, reusable_engine, tracked
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = 'openmw-source/openmw-openmw-0.51.0'
@@ -178,14 +178,23 @@ def run_container(args):
     build = [*runner, 'build']
     if Path(tool).name == 'podman': build.append('--http-proxy=false')
     cached = subprocess.run([*runner, 'image', 'inspect', image], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    image_archive = args.work.expanduser().resolve() / 'builder-image.tar'
+    if cached.returncode and args.cache_builder and image_archive.is_file():
+        run(*runner, 'load', '-i', image_archive)
+        cached = subprocess.run([*runner, 'image', 'inspect', image], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if cached.returncode:
         run(*build, '-t', image, '-f', ROOT / 'packaging/Containerfile', ROOT / 'packaging')
+    if args.cache_builder and not image_archive.exists():
+        image_archive.parent.mkdir(parents=True, exist_ok=True)
+        run(*runner, 'save', '-o', image_archive, image)
     command = [*runner, 'run', '--rm']
     if Path(tool).name == 'podman': command += ['--userns=keep-id', '--http-proxy=false']
     else: command += ['--user', f'{os.getuid()}:{os.getgid()}']
     image_id = subprocess.check_output([*runner, 'image', 'inspect', '--format', '{{.Id}}', image], text=True).strip()
     command += ['-v', f'{ROOT}:{ROOT}', '-w', str(ROOT), '-e', 'PIP_CACHE_DIR=/tmp/pip-cache',
-                '-e', 'ASTRA_BUILD_IMAGE_ID=' + image_id]
+                '-e', 'ASTRA_BUILD_IMAGE_ID=' + image_id,
+                '-e', 'CCACHE_DIR=' + str(args.work.expanduser().resolve() / 'ccache'),
+                '-e', 'CCACHE_MAXSIZE=1G', '-e', 'CCACHE_COMPILERCHECK=content']
     forwarded = list(sys.argv[1:])
     for key in ('work', 'output', 'engine_prefix', 'engine_receipt', 'wheelhouse', 'tools_prefix'):
         path = getattr(args, key)
@@ -210,6 +219,8 @@ def main():
     parser.add_argument('--host-build', action='store_true', help='Explicit native development/build-container mode')
     parser.add_argument('--portable-deps', action='store_true', help='Use pinned source dependencies on the portable builder')
     parser.add_argument('--resume', action='store_true', help='Incrementally update/rebuild the existing work directory')
+    parser.add_argument('--reuse-engine', action='store_true', help='Reuse a verified cached engine when native inputs and build environment match')
+    parser.add_argument('--cache-builder', action='store_true', help='Save/restore the builder image in the work directory for CI caching')
     parser.add_argument('--replace-output', action='store_true', help='Replace existing development assets only')
     parser.add_argument('--development', action='store_true', help='Allow an untagged clean commit; never a frozen release')
     parser.add_argument('--engine-prefix', type=Path, help='Reuse an engine/resources/lib directory with a build receipt')
@@ -257,17 +268,31 @@ def main():
         profile = {'container_recipe': sha256(ROOT / 'packaging/Containerfile'),
                    'image_id': os.environ.get('ASTRA_BUILD_IMAGE_ID'),
                    'portable_deps': args.portable_deps, 'arch_deps': args.arch_deps}
-        build = prepare(ROOT, SOURCE, args.work, profile, args.resume)
-        command = [sys.executable, ROOT / 'harness/native/build_engine.py', '--work', build, '--jobs', args.jobs]
-        if args.arch_deps: command.append('--arch-deps')
-        if args.portable_deps: command.append('--portable-deps')
-        run(*command)
-        prefix = build / 'engine'
+        inputs = {'source_tree': source_tree, 'native_tree': native_tree,
+                  'source_digest': fingerprint(ROOT, SOURCE), 'native_digest': fingerprint(ROOT, 'harness/native')}
+        receipt = reusable_engine(args.work, inputs, profile) if args.reuse_engine else None
+        prefix = args.work / 'build/engine'
         executable = prefix / 'openmw'
-        receipt = {'source_tree': source_tree, 'native_tree': native_tree, 'engine_sha256': sha256(executable),
-                   'build_commit': commit, 'source_digest': fingerprint(ROOT, SOURCE),
-                   'native_digest': fingerprint(ROOT, 'harness/native')}
-        write_json(args.work / 'engine-receipt.json', receipt)
+        if receipt:
+            print('Reusing verified engine: native sources and build environment unchanged', flush=True)
+        else:
+            # A cache whose inputs match but files are damaged must be rebuilt,
+            # not trusted merely because Ninja sees unchanged timestamps.
+            if args.reuse_engine and prefix.exists() and (args.work / 'engine-receipt.json').exists():
+                try:
+                    old = json.loads((args.work / 'engine-receipt.json').read_text())
+                except (OSError, ValueError):
+                    old = None
+                if not isinstance(old, dict) or all(old.get(k) == v for k, v in inputs.items()):
+                    shutil.rmtree(prefix)
+            build = prepare(ROOT, SOURCE, args.work, profile, args.resume)
+            command = [sys.executable, ROOT / 'harness/native/build_engine.py', '--work', build, '--jobs', args.jobs]
+            if args.arch_deps: command.append('--arch-deps')
+            if args.portable_deps: command.append('--portable-deps')
+            run(*command)
+            receipt = {**inputs, 'engine_sha256': sha256(executable), 'build_commit': commit,
+                       'build_profile': profile, 'runtime_files': engine_files(prefix)}
+            write_json(args.work / 'engine-receipt.json', receipt)
     if not args.development and (git('rev-parse', 'HEAD') != commit or git('status', '--porcelain')):
         raise ValueError('Checkout changed while building; commit changes and rerun with --resume')
     with tempfile.TemporaryDirectory(prefix='bundle-', dir=args.work) as temporary:

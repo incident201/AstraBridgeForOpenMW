@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import hashlib
 from pathlib import Path
 import subprocess
 
@@ -32,3 +33,30 @@ def test_incremental_sync_preserves_unchanged_files_and_removes_deleted_files(tm
     assert cache.fingerprint(root, 'source') != old_digest
     with pytest.raises(ValueError, match='environment'):
         cache.prepare(root, 'source', work, {'image_id': 'new'}, True)
+
+
+def test_cached_engine_requires_matching_native_inputs_environment_and_every_runtime_file(tmp_path):
+    prefix = tmp_path / 'build/engine'; (prefix / 'resources').mkdir(parents=True)
+    for name in ('openmw', 'defaults.bin', 'gamecontrollerdb.txt', 'openmw.cfg', 'resources/shader'):
+        (prefix / name).write_bytes(name.encode())
+    inputs = {'source_tree':'source', 'native_tree':'native', 'source_digest':'src-hash', 'native_digest':'native-hash'}
+    profile = {'image_id':'builder-1', 'container_recipe':'recipe', 'portable_deps':True}
+    receipt = {**inputs, 'build_profile':profile, 'runtime_files':cache.engine_files(prefix),
+               'engine_sha256':hashlib.sha256(b'openmw').hexdigest(), 'build_commit':'old-python-release'}
+    path = tmp_path / 'engine-receipt.json'; path.write_text(json.dumps(receipt))
+    assert cache.reusable_engine(tmp_path, inputs, profile) == receipt
+    for key in inputs:
+        assert cache.reusable_engine(tmp_path, {**inputs,key:'changed'}, profile) is None
+    assert cache.reusable_engine(tmp_path, inputs, {**profile,'image_id':'new-builder'}) is None
+    for name in ('openmw','resources/shader','defaults.bin'):
+        file = prefix / name; original = file.read_bytes(); file.write_bytes(b'corrupt')
+        assert cache.reusable_engine(tmp_path, inputs, profile) is None
+        file.write_bytes(original)
+    extra = prefix / 'resources/extra'; extra.touch()
+    assert cache.reusable_engine(tmp_path, inputs, profile) is None
+    extra.unlink(); (prefix / 'resources/shader').unlink()
+    assert cache.reusable_engine(tmp_path, inputs, profile) is None
+    path.write_text('[]')
+    assert cache.reusable_engine(tmp_path, inputs, profile) is None
+    path.write_text('broken json')
+    assert cache.reusable_engine(tmp_path, inputs, profile) is None

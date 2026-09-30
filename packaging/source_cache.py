@@ -49,3 +49,32 @@ def prepare(root, directory, work, profile, resume):
     receipt.write_text(json.dumps(profile, indent=2, sort_keys=True) + '\n')
     sync_source(root, directory, source)
     return source.parent
+
+
+def engine_files(prefix):
+    """Hash the reusable engine runtime, not disposable compiler intermediates."""
+    names = [prefix / name for name in ('openmw', 'defaults.bin', 'gamecontrollerdb.txt', 'openmw.cfg')]
+    if not (prefix / 'resources').is_dir():
+        raise ValueError('Cached engine has no resources')
+    for directory in ('resources', 'lib'):
+        names.extend(p for p in (prefix / directory).rglob('*') if p.is_file())
+    return {p.relative_to(prefix).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(names)}
+
+
+def reusable_engine(work, inputs, profile):
+    receipt_path = work / 'engine-receipt.json'
+    if not receipt_path.is_file():
+        return None
+    try:
+        receipt = json.loads(receipt_path.read_text())
+        if not isinstance(receipt, dict):
+            return None
+        if receipt.get('build_profile') != profile or any(receipt.get(k) != v for k, v in inputs.items()):
+            return None
+        if receipt.get('runtime_files') != engine_files(work / 'build/engine'):
+            return None
+        if receipt['engine_sha256'] != receipt['runtime_files']['openmw']:
+            return None
+        return receipt
+    except (OSError, ValueError, KeyError, TypeError):
+        return None

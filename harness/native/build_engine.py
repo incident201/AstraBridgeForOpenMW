@@ -3,7 +3,7 @@
 from pathlib import Path
 from urllib.request import urlopen, urlretrieve
 from concurrent.futures import ThreadPoolExecutor
-import argparse, hashlib, json, shlex, subprocess, tarfile
+import argparse, hashlib, json, shlex, shutil, subprocess, tarfile
 
 parser=argparse.ArgumentParser()
 parser.add_argument('--work',type=Path,default=Path.cwd()/'openmw-source')
@@ -49,6 +49,8 @@ args=['cmake','-S',str(source),'-B',str(work/'engine'),'-G','Ninja','-DCMAKE_BUI
       '-DOPENMW_USE_SYSTEM_RECASTNAVIGATION='+('OFF' if a.portable_deps else 'ON')]
 if a.portable_deps:
     args += ['-DOPENMW_USE_SYSTEM_MYGUI=OFF', '-DOPENMW_USE_SYSTEM_SQLITE3=OFF']
+if shutil.which('ccache'):
+    args += ['-DCMAKE_C_COMPILER_LAUNCHER=ccache', '-DCMAKE_CXX_COMPILER_LAUNCHER=ccache']
 if prefix.exists():
     args += ['-DCMAKE_PREFIX_PATH='+str(prefix),
              '-DCMAKE_EXE_LINKER_FLAGS=-L'+str(prefix/'lib')+' -Wl,-rpath-link,'+str(prefix/'lib'),
@@ -58,5 +60,7 @@ for target in ['LAUNCHER','WIZARD','MWINIIMPORTER','OPENCS','ESSIMPORTER','BSATO
     args.append('-DBUILD_'+target+'=OFF')
 subprocess.run(args,check=True)
 subprocess.run(['cmake','--build',str(work/'engine'),'--target','openmw','-j',str(a.jobs)],check=True)
+if shutil.which('ccache'):
+    subprocess.run(['ccache','--show-stats'],check=True)
 print('Engine:',work/'engine/openmw')
 print('Library directory:',prefix/'lib')

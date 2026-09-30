@@ -81,8 +81,30 @@ jobs:
           (cd harness && python -m pytest -q tests ../packaging/tests)
           python packaging/check_source_only.py
 
+      - name: Restore native build cache
+        id: native-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            .release-work/build
+            .release-work/build-environment.json
+            .release-work/engine-receipt.json
+            .release-work/builder-image.tar
+            .release-work/ccache
+          key: linux-x86_64-native-v1-${{ hashFiles('packaging/Containerfile', 'packaging/build_release.py', 'packaging/source_cache.py') }}-${{ hashFiles('openmw-source/**', 'harness/native/**') }}
+          restore-keys: |
+            linux-x86_64-native-v1-${{ hashFiles('packaging/Containerfile', 'packaging/build_release.py', 'packaging/source_cache.py') }}-
+
       - name: Build portable Linux bundle
-        run: python3 packaging/build_release.py --container-tool docker --jobs 3 --work .release-work --output dist
+        run: python3 packaging/build_release.py --container-tool docker --jobs 3 --work .release-work --output dist --resume --reuse-engine --cache-builder
+
+      - name: Verify warm engine reuse
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          python3 packaging/build_release.py --container-tool docker --jobs 3 --work .release-work --output .release-work/reuse-check --resume --reuse-engine --cache-builder | tee .release-work/reuse-check.log
+          grep -q 'Reusing verified engine: native sources and build environment unchanged' .release-work/reuse-check.log
+          cmp dist/manifest.json .release-work/reuse-check/manifest.json
 
       - name: Verify release assets
         env:
@@ -116,6 +138,18 @@ jobs:
               embedded = json.load(archive.extractfile('AstraOpenMW/manifest.json'))
           assert embedded == dict(manifest, asset_sha256=None)
           PY
+
+      - name: Save native build cache
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            .release-work/build
+            .release-work/build-environment.json
+            .release-work/engine-receipt.json
+            .release-work/builder-image.tar
+            .release-work/ccache
+          key: ${{ steps.native-cache.outputs.cache-primary-key }}
 
       - name: Push release commit and tag
         env:

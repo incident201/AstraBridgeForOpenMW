@@ -18,6 +18,7 @@ import threading
 import time
 
 from .protocol import BridgeError
+from .encoding import VIDEO_FILTER, select
 
 
 class ActiveClock:
@@ -88,13 +89,8 @@ class FramePacer:
         self.previous = None
 
 
-VIDEO_FILTER = ('vflip,scale=1920:1080:force_original_aspect_ratio=decrease:force_divisible_by=2:'
-                'in_range=full:out_range=tv:out_color_matrix=bt709,'
-                'pad=1920:1080:(ow-iw)/2:(oh-ih)/2,setsar=1')
-
-
 class Recorder:
-    def __init__(self, display, path: Path, fps=60):
+    def __init__(self, display, path: Path, fps=60, *, encoding_options=None):
         self.display, self.path, self.fps = display, path, fps
         self.stream = display.frame_stream
         if not self.stream or not self.stream.supported:
@@ -123,28 +119,24 @@ class Recorder:
         self.intervals_ms = []
         self.pacer = FramePacer(fps, self._enqueue)
         self.queue = queue.Queue(maxsize=120)
-        import imageio_ffmpeg
-        ffmpeg = self.ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
         path.parent.mkdir(parents=True, exist_ok=True)
+        encoder, attempts = select(first, fps, self.has_audio, path.parent, encoding_options)
+        self.encoding = encoder.info()
+        self.encoding['encoder_fallback'] = ('no_working_hardware_encoder'
+            if not encoder.hardware and (encoding_options or {}).get('mode', 'auto') == 'auto' else None)
+        path.with_suffix('.encoder.json').write_text(json.dumps({'selected': self.encoding, 'attempts': attempts}, indent=2)+'\n')
+        self.ffmpeg = encoder.binary
         audio_read, self.audio_write = os.pipe()
-        args = [ffmpeg, '-hide_banner', '-loglevel', 'error', '-n', '-f', 'rawvideo',
-                '-pixel_format', 'bgra', '-video_size', f'{self.box["width"]}x{self.box["height"]}',
-                '-framerate', str(fps), '-thread_queue_size', '128', '-i', 'pipe:0']
-        if self.has_audio:
-            args += ['-f', 'f32le', '-ar', '48000', '-ac', '2', '-probesize', '32',
-                     '-analyzeduration', '0', '-thread_queue_size', '128', '-i', f'pipe:{audio_read}',
-                     '-c:a', 'aac', '-b:a', '384k']
-        else: args += ['-an']
-        args += ['-vf', VIDEO_FILTER, '-c:v', 'libx264',
-                '-preset', 'veryfast', '-crf', '18', '-threads', '4', '-pix_fmt', 'yuv420p',
-                '-profile:v', 'high', '-level:v', '4.2', '-bf', '2', '-flags', '+cgop',
-                '-g', str(fps//2), '-x264-params', 'open-gop=0',
-                '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv',
-                '-movflags', '+frag_keyframe+delay_moov+default_base_moof',
-                '-use_editlist', '1', '-avoid_negative_ts', 'disabled', str(path)]
+        args = encoder.command(self.box['width'], self.box['height'], fps, path,
+                               f'pipe:{audio_read}' if self.has_audio else None)
         self.log = open(path.with_suffix('.ffmpeg.log'), 'wb')
-        self.process = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=self.log, pass_fds=(audio_read,))
-        os.close(audio_read)
+        try:
+            self.process = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=self.log, pass_fds=(audio_read,))
+        except OSError as exc:
+            os.close(self.audio_write); self.log.close()
+            raise BridgeError('video_encoder_failed') from exc
+        finally:
+            os.close(audio_read)
         self.writer = threading.Thread(target=self._encode, daemon=True)
         self.thread = threading.Thread(target=self._capture, daemon=True)
         self.stream_context = self.stream.active()
@@ -295,7 +287,8 @@ class Recorder:
                     'upload_ready':self.finalized, 'color_space':'bt709',
                     'audio_monitor':bool(self.media.get(104,'I')),
                     'monitor_overflows':self.media.get(80),
-                    'capture_backend':self.stream.backend, 'crf':18,
+                    'capture_backend':self.stream.backend, 'crf':None if self.encoding['hardware_accelerated'] else 18,
+                    **self.encoding,
                     'rendered_frames':self.input_frames, 'repeated_frames':self.pacer.repeated,
                     'ring_dropped_frames':self.ring_dropped, 'encoder_queue_peak':self.queue_high_water,
                     'frame_interval_ms': {'median':round(statistics.median(times),3),

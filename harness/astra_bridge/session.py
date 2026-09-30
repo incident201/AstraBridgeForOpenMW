@@ -49,6 +49,8 @@ class Session:
         self.runtime.mkdir(mode=0o700, exist_ok=True)
         local = root / 'local-settings.json'
         local_settings = json.loads(local.read_text()) if local.exists() else {}
+        from .encoding import settings as recording_settings
+        self.recording_settings = recording_settings(local_settings)
         self.recordings_dir = Path(recordings_dir or os.environ.get('ASTRA_RECORDINGS_DIR') or
                                    local_settings.get('recordings_dir') or self.runtime / 'recordings')
         self.engine_binary = local_settings.get('engine_binary')
@@ -525,9 +527,12 @@ class Session:
                     if self.recorder:
                         raise BridgeError('already_recording')
                     self.command('observe')  # start on a confirmed pause
+                    self.recordings_dir.mkdir(parents=True, exist_ok=True)
                     path = self.recordings_dir / (time.strftime('%Y%m%d-%H%M%S')+'-'+uuid.uuid4().hex[:6]+'.mp4')
-                    atomic_json(path.with_suffix(".environment.json"), identity(self.root))
-                    self.recorder = Recorder(self.display,path)
+                    environment = identity(self.root)
+                    atomic_json(path.with_suffix(".environment.json"), environment)
+                    self.recorder = Recorder(self.display,path, encoding_options=self.recording_settings)
+                    atomic_json(path.with_suffix('.environment.json'), {**environment, 'recording_encoder': self.recorder.encoding})
                     return self.recorder.status()
                 if op == 'record_stop':
                     return self.stop_recording()
