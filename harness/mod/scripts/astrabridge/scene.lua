@@ -286,6 +286,12 @@ function M.observe()
     return {objects=result,sampling_limited=budget.left<=0 or #result>=28,orientation=M.orientation()}
 end
 function M.pose() return {position=self.position,yaw=camera.getYaw(),pitch=camera.getPitch(),cell=Space.key(self.cell)} end
+local function walkableNormal(normal)
+    if not normal then return false end
+    -- Rendering normals retain model scaling; slope needs a unit normal.
+    local length=normal:length()
+    return length>1e-6 and normal.z/length>=.55
+end
 function M.groundPoint(x,y)
     local size=ui.screenSize()
     if x<0 or y<0 or x>=size.x or y>=size.y then return nil end
@@ -300,9 +306,20 @@ function M.groundPoint(x,y)
             return from+direction*distance
         end
     end
-    if not ray.hit or not ray.hitPos or not ray.hitNormal or ray.hitNormal.z<.55 then return nil end
+    if not ray.hit or not ray.hitPos or not ray.hitNormal then return nil end
     if ray.hitObject and (types.Actor.objectIsInstance(ray.hitObject) or types.Item.objectIsInstance(ray.hitObject)) then return nil end
-    return ray.hitPos
+    if walkableNormal(ray.hitNormal) then return ray.hitPos end
+    -- At a plank seam the visible ray can hit a board's side while the player
+    -- walks on continuous collision geometry. Accept only nearby support on
+    -- that same instance, along the same ray; walls/rails and remote floors
+    -- must not become walking targets through an unrelated collision hit.
+    if not nearby.castRay then return nil end
+    local support=nearby.castRay(from,from+direction*2100,{ignore=self.object})
+    if support.hit and support.hitPos and support.hitObject==ray.hitObject
+        and (support.hitPos-ray.hitPos):length()<=8 and walkableNormal(support.hitNormal) then
+        return support.hitPos
+    end
+    return nil
 end
 function M.report(start)
     local changed=Space.key(self.cell)~=start.cell

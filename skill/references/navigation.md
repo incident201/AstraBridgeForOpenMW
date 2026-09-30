@@ -37,6 +37,10 @@ For places already visited, start with `atlas --query "NAME"` / `revisit`, or `r
 
 Path-following `go`/`walk` looks along its movement. A live combat lock controls the camera: `unlock` before independent turns/scans/path navigation. Combat pursuit/retreat intentionally keeps the actor in view; see [combat.md](combat.md).
 
+On narrow stairs and bridges, choose a visible tread, landing or part of the deck with `ground` → `go`, or use `walk` on the screenshot. Check the point's height and navigation status. The route may first lead around a support post before climbing. `move-local` and `act` apply direct movement without planning that detour; after they stall, select a path-following command or a different visible intermediate point.
+
+`point_not_ground` means the selected pixel could not be resolved to a visible walking surface; no movement was started. It does not establish that the staircase or bridge is unreachable. Choose the centre of a visible tread/deck or a fresh `ground` ref. Small seams between boards can resolve to nearby physical support, while railings, walls and unsupported points remain rejected. `ground` and `terrain.passages` are sparse samples: an omitted stairway may become selectable after turning, looking down or approaching its foot.
+
 An object may be above the standing surface, such as a hatch. Approach checks reach from the final eye position. Short missing navmesh connections may use `source: local_collision` after checking floor support and body clearance. A useful partial path can stop short and reports actual progress; it does not certify arrival. NPCs may move or disable player controls through a tutorial script. `player_controls_disabled` means wait or handle the current UI, rather than retrying movement against the restriction.
 
 `scan` starts with a new observation. Each returned view includes its zero-based `view`, actual `heading_deg` and screenshot. Do not infer a view's angle from a previous observation or filename sequence. The final view is the current camera direction. Inspect omitted objects from one stored view with `action-result REQUEST_ID --view N --section scene`.

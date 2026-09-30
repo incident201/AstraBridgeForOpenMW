@@ -221,6 +221,7 @@ Recording is fragmented while active for crash recovery. Normal stop prepares th
 | `view_unavailable`, `action_unavailable`, `save_unavailable` | Check tutorial/menu/body restrictions. Do not bypass them. |
 | `ui_input_required` | An input-requiring popup interrupted the action, even if `ui_mode` is `Gameplay`. Movement/held input is stopped; the observation includes `ui.modal`, message and controls. Read it, `ui`/`choose` its enabled button, then decide on a new action using actual movement/side effects. No automatic resume. |
 | `ui_open`, `game_paused`, a modal | Read/handle the actual UI; determine whether the interrupted action already executed. Starting new movement while a modal is open is rejected with `ui_open`. |
+| `point_not_ground` | No movement started: the selected pixel did not resolve to a walking surface. Choose a clear tread/deck pixel or a fresh `ground` ref; see [stairs and bridges](navigation.md#pick-an-operation). This does not prove the route is blocked. |
 | `blocked`, `no_path`, `path_end_out_of_reach`, `step_limit` | Inspect actual movement, local geometry and the screenshot. Select another reachable point or shorter action. |
 | `target_lost`, `target_not_visible` | Reacquire visually. Do not query hidden target positions. |
 | `target_locked_unlock_first`, `locked_camera` | Inspect the lock; explicitly `lock` a different visible actor or `unlock` before independent turning/navigation. |

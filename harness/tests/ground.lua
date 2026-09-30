@@ -21,7 +21,7 @@ nearby.castRenderingRay=function()
     if mode=='nothing' then return {hit=false}end
     local row=math.floor((calls-1)/5);local col=(calls-1)%5
     return {hit=true,hitPos=self.position+V.new((col-2)*100,(5-row)*200,row<2 and -210 or 0),
-        hitNormal={z=mode=='wall' and .2 or 1},hitObject=mode=='actor' and {actor=true} or mode=='item' and {item=true} or nil}
+        hitNormal=mode=='wall' and V.new(1,0,.2) or V.new(0,0,1),hitObject=mode=='actor' and {actor=true} or mode=='item' and {item=true} or nil}
 end
 package.preload['openmw.self']=function()return self end
 package.preload['openmw.nearby']=function()return nearby end
@@ -87,9 +87,57 @@ print('Visible floor suggestions: bounded rendering rays, lower floors, no walls
 require('scripts.astrabridge.mobility').waterLevel=function()return 0 end
 self.position=V.new(0,0,100)
 require('openmw.camera').viewportToWorldVector=function()return V.new(0,0,-1)end
-nearby.castRenderingRay=function()return {hit=true,hitPos=V.new(0,0,-100),hitNormal={z=1}}end
+nearby.castRenderingRay=function()return {hit=true,hitPos=V.new(0,0,-100),hitNormal=V.new(0,0,1)}end
 assert(originalGroundPoint(100,500).z==0,'water walking chooses the visible water surface, not the bottom')
-nearby.castRenderingRay=function()return {hit=true,hitPos=V.new(0,0,50),hitNormal={z=.2}}end
+nearby.castRenderingRay=function()return {hit=true,hitPos=V.new(0,0,50),hitNormal=V.new(1,0,.2)}end
 assert(originalGroundPoint(100,500)==nil,'water must not be selected through a nearer wall')
-nearby.castRenderingRay=function()return {hit=true,hitPos=V.new(0,0,50),hitNormal={z=1}}end
+nearby.castRenderingRay=function()return {hit=true,hitPos=V.new(0,0,50),hitNormal=V.new(0,0,1)}end
 assert(originalGroundPoint(100,500).z==50,'a bridge above the water remains the selected surface')
+
+-- Replay the rope-bridge seam: rendering hits a vertical board edge while
+-- the same object's walkable collision surface is only 5.5 units away.
+require('scripts.astrabridge.mobility').waterLevel=function()return nil end
+self.position=V.new(0,0,0)
+local bridge={id='bridge_instance'}
+local visual={hit=true,hitObject=bridge,hitPos=V.new(100,100,0),hitNormal=V.new(-.938937,.342887,-.028742)}
+local support={hit=true,hitObject=bridge,hitPos=visual.hitPos+V.new(-4.336,1.344,3.112),hitNormal=V.new(-.018299,.005661,.999817)}
+local supportCalls=0
+nearby.castRenderingRay=function()return visual end
+nearby.castRay=function(_,_,options)
+    assert(options.ignore==self.object);supportCalls=supportCalls+1;return support
+end
+assert(originalGroundPoint(500,500)==support.hitPos,'a visible plank seam must resolve to nearby physical support')
+S.groundPoint=originalGroundPoint
+N.new=function(g)return g end;N.report=function()return {status='planned'}end
+targets=S.groundTargets()
+assert(#targets==1 and S.resolveGround(targets[1].ref)==support.hitPos,'ground and pixel walking must share the seam correction')
+
+local savedSupport=support.hitPos
+support.hitPos=visual.hitPos+V.new(0,0,9)
+assert(not originalGroundPoint(500,500),'do not select a remote surface behind visible geometry')
+support.hitPos=savedSupport;support.hitObject={id=bridge.id}
+assert(not originalGroundPoint(500,500),'support must belong to the same instance, not just the same record or label')
+support.hitObject=bridge;support.hitNormal=V.new(1,0,0)
+assert(not originalGroundPoint(500,500),'a railing remains a wall in collision geometry')
+support.hitNormal=V.new(0,0,0)
+assert(not originalGroundPoint(500,500),'a degenerate collision normal is not floor support')
+support.hitNormal=nil
+assert(not originalGroundPoint(500,500))
+support.hitNormal=V.new(0,0,1);support.hit=false
+assert(not originalGroundPoint(500,500),'a visual board edge alone is not proof of support')
+support.hit=true
+for _,field in ipairs({'actor','item'}) do
+    bridge[field]=true;local before=supportCalls
+    assert(not originalGroundPoint(500,500) and supportCalls==before,'do not reinterpret an actor or item as ground')
+    bridge[field]=nil
+end
+visual.hit=false;local before=supportCalls
+assert(not originalGroundPoint(500,500) and supportCalls==before,'a collision surface hidden behind a rendering miss is not a visible target')
+visual.hit=true
+for _,scale in ipairs({.1,1,10}) do
+    visual.hitNormal=V.new(0,0,scale);local before=supportCalls
+    assert(originalGroundPoint(500,500)==visual.hitPos and supportCalls==before,'flat visible floors are invariant under model scaling and need no extra ray')
+    visual.hitNormal=V.new(1,0,.2)*scale;support.hitNormal=V.new(1,0,.2)
+    assert(not originalGroundPoint(500,500),'steep slopes remain rejected at every model scale')
+end
+print('Bridge seams use nearby support on the same instance; scaling, railings, occlusion and visible ground targets passed')
