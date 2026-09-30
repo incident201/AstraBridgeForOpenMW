@@ -14,7 +14,7 @@ def feedback(op, action, before, after, inputs=None):
     elif why in {'blocked','no_path','path_end_out_of_reach','endpoint_mismatch','height_mismatch','navigation_unavailable','cannot_act','maneuver_blocked','ground_required','shot_path_blocked',
                  'no_route_progress','repeated_positions','repeated_obstruction','target_obstructed','viewpoint_blocked','viewpoint_adjustment_needed','target_not_aimed'}:
         state='blocked'
-    elif why in {'target_lost','ui_open','game_paused','player_controls_disabled','cancelled','location_changed','player_hurt','swimming_requires_manual_control','cast_not_confirmed','shot_not_confirmed','weapon_changed','health_low','levitation_ended','water_walking_ended','sequence_time_limit'}:
+    elif why in {'target_lost','ui_open','ui_input_required','game_paused','player_controls_disabled','cancelled','location_changed','player_hurt','swimming_requires_manual_control','cast_not_confirmed','shot_not_confirmed','weapon_changed','health_low','levitation_ended','water_walking_ended','sequence_time_limit'}:
         state='interrupted'
     else:state='submitted' if action.get('submitted') else 'observed'
     if why=='path_end_out_of_reach' and action.get('motion',{}).get('moved_m',0)>.2:state='partial'
@@ -83,6 +83,9 @@ def feedback(op, action, before, after, inputs=None):
     elif notices & {'lock_failed','trap_failed'}:state='failed';why=next(e['kind'] for e in events if e['kind'] in {'lock_failed','trap_failed'})
     elif 'lock_impossible' in notices:state='rejected';why='lock_impossible'
     elif notices & {'lock_opened','trap_disarmed'}:state='succeeded'
+    if action.get('reason')=='ui_input_required':
+        state='interrupted';why='ui_input_required'
+        events.append({'kind':'ui_input_required','next_command':'ui'})
     if (after.get('body') or {}).get('dead') or (before or {}).get('state')=='running' and after.get('state')=='ended':
         state='failed';why='player_down';events.append({'kind':'player_down'})
     return {'status':state,'events':events,'reason':why,

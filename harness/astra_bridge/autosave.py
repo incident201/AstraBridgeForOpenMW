@@ -36,7 +36,8 @@ class Autosave:
     def maybe_save(self,session):
         if not self.data['enabled'] or self.data['elapsed']<max(self.data['interval'],self.retry_at):return None
         current=session.latest_observation or {}
-        if current.get('state')!='running' or current.get('ui_mode')!='Gameplay' or current.get('body',{}).get('dead'):return None
+        if (current.get('state')!='running' or current.get('ui_mode')!='Gameplay'
+                or current.get('ui',{}).get('modal') or current.get('body',{}).get('dead')):return None
         index=self.data['next']%self.data['slots'];description=f"Astra auto {self.data['namespace']} {index+1}"
         try:
             saves=session.command('saves')['saves']

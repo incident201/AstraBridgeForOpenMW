@@ -18,8 +18,9 @@ class ScanDriver:
         assert op=='act' and set(args)=={'yaw','seconds'}
         self.calls.append(args)
         self.current['orientation']['heading_deg']=(self.current['orientation']['heading_deg']+args['yaw'])%360
-        if self.interrupt:self.current['ui_mode']='Dialogue'
-        return {'action':{'elapsed':abs(args['yaw'])/120,'reason':'ui_open' if self.interrupt else 'duration'},
+        if self.interrupt=='modal':self.current['ui']={'modal':True}
+        elif self.interrupt:self.current['ui_mode']='Dialogue'
+        return {'action':{'elapsed':abs(args['yaw'])/120,'reason':'ui_open' if self.interrupt and self.interrupt!='modal' else 'duration'},
                 'observation':self.observe()}
 
 def test_scan_turns_actor_in_one_direction_without_return():
@@ -44,3 +45,12 @@ def test_scan_levels_view_and_supports_an_explicit_vertical_band():
     assert all(v['observation']['orientation']['pitch_deg']==0 for v in result['views'])
     driver=ScanDriver();result=driver.scan(-35)
     assert all(v['observation']['orientation']['pitch_deg']==-35 for v in result['views'])
+
+
+def test_scan_stops_on_modal_even_when_ui_mode_and_action_reason_look_normal():
+    driver=ScanDriver(interrupt='modal');result=driver.scan()
+    assert len(driver.calls)==1 and not result['completed'] and result['reason']=='ui_input_required'
+    assert result['final']['ui']['modal']
+    driver=ScanDriver();driver.current['ui']={'modal':True}
+    with pytest.raises(BridgeError,match='ui_open'):driver.scan()
+    assert not driver.calls

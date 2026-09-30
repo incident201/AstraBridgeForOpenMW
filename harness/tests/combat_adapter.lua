@@ -3,7 +3,8 @@ package.path='mod/?.lua;'..package.path
 math.atan2=math.atan2 or math.atan
 local now,paused,charge,casts=0,true,20,0
 local health,playerDead=50,false
-local direct=arg[1]=='direct'
+local direct=arg[1]=='direct' or arg[1]=='modal_direct'
+local modalPaused=false
 local blockedShot=arg[1]=='blocked_shot'
 local ranged=arg[1]=='ranged' or blockedShot
 local ammo,shots,shotBusy,failShots=2,0,false,false
@@ -82,7 +83,7 @@ local function tick()
         if event[1]=='AstraPause' then paused=true;pauseEvents=pauseEvents+1;player.eventHandlers.AstraPaused(event[2])end
         if event[1]=='AstraResume' then paused=false;player.eventHandlers.AstraResumed(event[2])end
     end
-    if not paused then
+    if not paused and not modalPaused then
         local movement=movementOverridden and (object.controls.movement or 0) or bindings.MoveForward(.2,0)-bindings.MoveBackward(.2,0)
         local side=movementOverridden and (object.controls.sideMovement or 0) or bindings.MoveRight(.2,0)-bindings.MoveLeft(.2,0)
         local speed=movementOverridden and object.controls.run and 210 or 140
@@ -105,9 +106,36 @@ local function tick()
             queuedUse=use and not lastUse;lastUse=use
         end
     end
-    player.engineHandlers.onFrame(paused and 0 or .2)
+    player.engineHandlers.onFrame((paused or modalPaused) and 0 or .2)
 end
 player.eventHandlers.AstraReset();for _=1,10 do tick()end
+if arg[1]=='modal' or arg[1]=='modal_direct' then
+    require('openmw.ui')._astraUiSnapshot=function()
+        return {revision='tutorial',modal=modalPaused,elements={}}
+    end
+    for id,args in ipairs({{seconds=30,move=1,run=true},
+                          {air=true,actions={{op='wait',seconds=20},{op='cast'}},max_seconds=30}}) do
+        local op=id==1 and 'act' or 'chain'
+        data.response=nil;data.request={session='adapter',id=id,op=op,args=args}
+        local beforeCasts=casts
+        for _=1,5 do tick()end
+        assert(not data.response)
+        modalPaused=true
+        for _=1,10 do tick();if data.response then break end end
+        assert(data.response and data.response.result.reason=='ui_input_required','modal must interrupt '..op)
+        assert(paused and object.controls.movement==0 and object.controls.sideMovement==0 and object.controls.use==0)
+        if op=='chain' then
+            assert(data.response.result.completed_actions==0 and #data.response.result.steps==1 and casts==beforeCasts,
+                'a modal must not execute the remaining chain steps')
+        end
+        modalPaused=false
+        local stoppedAt=object.position
+        for _=1,5 do tick()end
+        assert((object.position-stoppedAt):length()==0)
+    end
+    print('Modal interrupts direct/legacy movement and combat chains without subsequent casts')
+    return
+end
 if arg[1]=='sequence_guard' then
     data.request={session='adapter',id=1,op='act',args={seconds=50,move=1,_guard={health=50,stop_on_damage=true,deadline=now+100}}}
     local runningFrames=0
@@ -337,3 +365,15 @@ for _=1,40 do tick();if data.response then break end end
 assert(data.response and not data.response.error)
 assert(data.response.result.outcome=='door_opening' and activations==1 and paused,
     'a visible door change must survive pausing, without repeating activation')
+
+-- OnActivate can show a tutorial while Lua UI mode remains Gameplay. The
+-- interactionSubmitted timer must not wait forever for paused simulation dt.
+ui._astraUiSnapshot=function()return {revision='tutorial',modal=modalPaused,elements={}}end
+ui._astraActivate=function(expected)
+    assert(expected==door);activations=activations+1;modalPaused=true;return true
+end
+data.response=nil;data.request={session='adapter',id=30,op='interact',args={ref='visible_door',approach=true}}
+for _=1,40 do tick();if data.response then break end end
+assert(data.response and data.response.result.reason=='ui_input_required' and paused)
+assert(activations==2 and data.response.result.outcome=='activation_sent','keep activation evidence without repeating it')
+print('Native activation modal interrupts confirmation waiting with Gameplay UI mode and zero dt')

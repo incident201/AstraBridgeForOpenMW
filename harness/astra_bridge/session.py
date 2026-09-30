@@ -410,7 +410,7 @@ class Session:
     def scan(self, pitch=0):
         current=self.observe()
         if current.get('state')!='running':raise BridgeError('no_player')
-        if current.get('ui_mode')!='Gameplay':raise BridgeError('ui_open')
+        if current.get('ui_mode')!='Gameplay' or current.get('ui',{}).get('modal'):raise BridgeError('ui_open')
         if current.get('target_lock',{}).get('status') not in {None,'unlocked','down'}:
             raise BridgeError('target_locked_unlock_first')
         heading=current['orientation']['heading_deg']
@@ -418,18 +418,18 @@ class Session:
         if abs(current['orientation'].get('pitch_deg',0)-pitch)>.5:
             result=self.call('look',{'pitch_deg':pitch})
             current=result['observation'];elapsed+=result['action'].get('elapsed',0)
-            if result['action'].get('reason')!='duration' or current.get('ui_mode')!='Gameplay':
+            if result['action'].get('reason')!='duration' or current.get('ui_mode')!='Gameplay' or current.get('ui',{}).get('modal'):
                 return {'views':[],'final':current,'completed':False,
-                        'reason':result['action'].get('reason','interrupted'),'elapsed':elapsed}
+                        'reason':'ui_input_required' if current.get('ui',{}).get('modal') else result['action'].get('reason','interrupted'),'elapsed':elapsed}
         views=[{'relative_yaw':0,'observation':current}]
         for offset in (90,180,270):
             delta=(heading+offset-current['orientation']['heading_deg']+180)%360-180
             # Rotate the actor with ordinary controls; no independent camera pose.
             result=self.call('act',{'yaw':delta,'seconds':.02})
             current=result['observation'];elapsed+=result['action'].get('elapsed',0)
-            if result['action'].get('reason')!='duration' or current.get('ui_mode')!='Gameplay':
+            if result['action'].get('reason')!='duration' or current.get('ui_mode')!='Gameplay' or current.get('ui',{}).get('modal'):
                 return {'views':views,'final':current,'completed':False,
-                        'reason':result['action'].get('reason','interrupted'),'elapsed':elapsed}
+                        'reason':'ui_input_required' if current.get('ui',{}).get('modal') else result['action'].get('reason','interrupted'),'elapsed':elapsed}
             views.append({'relative_yaw':offset,'observation':current})
         return {'views':views,'final':current,'completed':True,'reason':'completed','elapsed':elapsed}
 

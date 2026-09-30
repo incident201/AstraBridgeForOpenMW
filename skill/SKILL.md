@@ -105,7 +105,16 @@ These references describe the public interface; no source-code inspection is nee
 
 AstraBridge pauses the world after each action completes or is interrupted. Reasoning time does not consume effect duration or let enemies move. Turning, waiting, and moving within an action do consume simulation time. Choose `act.seconds` for the intended duration; there is no three-second cap or periodic pause within an action. A `chain` has no mandatory thinking pause between its steps.
 
-This also pauses NPC animation and time-dependent game scripts. During the opening ship scene, movement can return `action_unavailable` while the game has disabled controls and waits for the guard to arrive. `body.controls_enabled` reports this restriction; `can_move` alone describes physical mobility. Use `wait-until controls --seconds 30`, then inspect its result. A tutorial modal can interrupt the wait even when `ui_mode` is `Gameplay`: run `ui`, choose its current button, and resume. `act '{"seconds":10}'` also advances an idle scene. A still image between commands does not indicate a broken script.
+This also pauses NPC animation and time-dependent game scripts. During the opening ship scene, movement can return `action_unavailable` while the game has disabled controls and waits for the guard to arrive. `body.controls_enabled` reports this restriction; `can_move` alone describes physical mobility. Use `wait-until controls --seconds 30`, then inspect its result. A tutorial modal can interrupt the wait even when `ui_mode` is `Gameplay`: run `ui`, choose its current button, then issue a new wait if it is still needed. `act '{"seconds":10}'` also advances an idle scene. A still image between commands does not indicate a broken script.
+
+If a tutorial or confirmation window appears during movement, combat or a wait,
+the action stops and returns `feedback.status: "interrupted"` with reason
+`ui_input_required`, plus the current observation and the popup's controls. This
+also applies when `ui_mode` still says `Gameplay`; check `ui.modal`. Read the
+message, run `ui` if needed, and `choose` the actual enabled button. Closing it
+does not resume the interrupted action. Check how far you moved or whether the
+interaction already took effect, then issue a new command for the remaining work.
+Ordinary HUD notifications do not interrupt actions.
 
 During a long action, `status` returns live progress and `stop` interrupts independently of that action. Use `finish-session --description "..."` when the user requests saving, stopping recording and closing together; it keeps the game open if saving fails. Use `stop` alone when they only want to pause. Never wait out a long action after the user asks to stop.
 

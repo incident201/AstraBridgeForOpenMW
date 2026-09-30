@@ -5,6 +5,7 @@ local playerDead=false
 local corpseSettled=false
 local inReach=true
 local health=50
+local modal,notification,delayResume=false,false,false
 local data,events,bindings={},{},{}
 local V={};V.__index=V
 function V.new(x,y,z)return setmetatable({x=x,y=y,z=z},V)end
@@ -18,7 +19,12 @@ local function angle(x)return (x+math.pi)%(2*math.pi)-math.pi end
 package.preload['openmw.storage']=function()return {playerSection=function()return bus end}end
 package.preload['openmw.camera']=function()return {getYaw=function()return yaw end,getPitch=function()return pitch end}end
 package.preload['openmw.self']=function()return self end
-package.preload['openmw.ui']=function()return {}end
+package.preload['openmw.ui']=function()return {_astraUiSnapshot=function()
+    return {revision=modal and 'tutorial' or 'normal',modal=modal,elements=modal and {
+        {ref='ui_text_1',role='text',text='Tutorial: choose the button to continue',rect={0,0,100,20}},
+        {ref='ui_action_1',role='button',text='OK',enabled=true,rect={0,20,100,20}},
+    } or notification and {{ref='ui_text_2',role='text',panel='notification',text='A harmless notification',rect={0,0,100,20}}} or {}}
+end}end
 package.preload['openmw.util']=function()return {vector3=V.new}end
 package.preload['openmw.vfs']=function()return {}end
 package.preload['openmw.markup']=function()return {}end
@@ -54,9 +60,9 @@ local function tick()
     local queue=events;events={}
     for _,event in ipairs(queue)do
         if event[1]=='AstraPause' then paused=true;pauseEvents=pauseEvents+1;player.eventHandlers.AstraPaused(event[2])end
-        if event[1]=='AstraResume' then paused=false;player.eventHandlers.AstraResumed(event[2])end
+        if event[1]=='AstraResume' and not delayResume then paused=false;player.eventHandlers.AstraResumed(event[2])end
     end
-    if not paused then
+    if not paused and not modal then
         simulation=simulation+.02
         yaw=yaw+(self.controls.yawChange or 0);pitch=pitch+(self.controls.pitchChange or 0)
         local f=bindings.MoveForward(.02,0)-bindings.MoveBackward(.02,0)
@@ -65,7 +71,7 @@ local function tick()
         if lastAttack then attackFrames=attackFrames+1 end
     end
     self.controls.yawChange=0;self.controls.pitchChange=0
-    player.engineHandlers.onFrame(paused and 0 or .02)
+    player.engineHandlers.onFrame((paused or modal) and 0 or .02)
 end
 player.eventHandlers.AstraReset();for _=1,10 do tick()end
 local id=0
@@ -76,6 +82,65 @@ local function command(op,args,during)
         tick();if data.response then return data.response end
     end
     error('no reply')
+end
+if arg[1]=='modal' then
+    local function begin(op,args)
+        id=id+1;data.response=nil;data.request={session='modal',id=id,op=op,args=args}
+    end
+    local function interrupted()
+        local began=now
+        for _=1,12 do tick();if data.response then break end end
+        assert(data.response and not data.response.error,'modal must complete the request without further simulation or external stop')
+        assert(data.response.result.reason=='ui_input_required',data.response.result.reason)
+        assert(now-began<.25 and paused,'reply must not wait for the action deadline')
+        assert(self.controls.movement==0 and self.controls.sideMovement==0 and self.controls.use==0)
+        assert(not data.can_save,'a modal must not be an autosave opportunity')
+        local position=self.position
+        modal=false
+        for _=1,10 do tick()end
+        assert((self.position-position):length()==0,'dismissing a modal must not resume an interrupted action')
+    end
+    for _,case in ipairs({{'act',{seconds=140,move=1,attack=true}},
+                          {'move_local',{forward_m=30,seconds=140}},
+                          {'track',{ref='visible_test',seconds=140}},
+                          {'wait_until',{condition='ui',ui_mode='Dialogue',seconds=140}}}) do
+        begin(case[1],case[2])
+        for _=1,10 do tick()end
+        assert(not data.response)
+        modal=true;interrupted()
+    end
+    -- An interrupted resume handshake must not need an unpause acknowledgement.
+    delayResume=true;begin('act',{seconds=10,move=1});tick();modal=true
+    interrupted();delayResume=false
+    -- A zero-dt modal arriving during release previously left this phase stuck.
+    begin('act',{seconds=.1,attack=true});local used=false
+    for _=1,30 do
+        tick();local use=bindings.Use(.02,false)
+        if used and not use and not paused then break end
+        used=used or use
+    end
+    assert(used and not paused and not data.response)
+    modal=true;interrupted()
+    -- The result is not delivered yet while the final pause is settling.
+    begin('act',{seconds=.1,move=1})
+    local pausing=false
+    for _=1,30 do
+        tick()
+        for _,event in ipairs(events)do if event[1]=='AstraPause' then pausing=true end end
+        if pausing then break end
+    end
+    assert(pausing and not data.response);modal=true;interrupted()
+    notification=true
+    local r=command('act',{seconds=.2,move=1})
+    assert(r.result.reason=='duration','HUD notifications must not interrupt movement')
+    notification=false;modal=true
+    local start=self.position
+    assert(command('act',{seconds=10,move=1}).error=='ui_open','reject new movement until the modal is handled')
+    assert((self.position-start):length()==0)
+    local result=command('observe').result
+    assert(result.ui.modal and result.ui.elements[2].role=='button' and result.ui.elements[2].enabled)
+    print('Modal interrupts running/resuming/releasing/settling actions, stops input, retains UI and ignores HUD notifications')
+    return
 end
 -- Cross the former input cap and every fixed transport/watchdog duration.
 local pausesBefore=pauseEvents

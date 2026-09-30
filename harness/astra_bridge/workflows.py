@@ -96,8 +96,8 @@ def sequence(session, args):
             session.sequence_guard['health']=health
             # A planned interaction may open UI. Other steps may not silently
             # continue into an unexpected menu or a different cell.
-            if observation.get('ui_mode')!='Gameplay' and op not in {'interact','choose','trigger','use_item','edit','adjust','rest','buy','travel'}:
-                reason='ui_open';break
+            if (observation.get('ui_mode')!='Gameplay' or observation.get('ui',{}).get('modal')) and op not in {'interact','choose','trigger','use_item','edit','adjust','rest','buy','travel'}:
+                reason='ui_input_required' if observation.get('ui',{}).get('modal') else 'ui_open';break
     finally:
         session.batch_depth-=1
         session.sequence_guard=previous_guard

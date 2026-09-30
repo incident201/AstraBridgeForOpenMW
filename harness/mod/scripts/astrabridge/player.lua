@@ -40,6 +40,9 @@ local walkingRoute
 local pausedSneak=false
 local uiMessages,seenMessages = P.array(),{}
 local seenNotifications={}
+local modalOpen=false
+local motorOperations={act=true,look=true,focus=true,approach=true,move_local=true,walk=true,go=true,
+    fly=true,swim=true,evade=true,track=true,lock=true,strike=true,cast=true,chain=true,interact=true,wait_until=true}
 local function lockState()
     if not targetLock then return {status='unlocked'} end
     local out=Scene.identity(targetLock.ref)
@@ -529,6 +532,25 @@ local function finishCombat(p,reason)
     end
     pause(p.cmd,result)
 end
+local function interruptForModal()
+    local p=pending
+    -- UI queries/choices must still finish while the modal is open. Only an
+    -- action that resumed simulation (or is settling its result) is interrupted.
+    if not p or not p.cmd or not (p.start or p.finalPose) then return end
+    if p.phase=='pausing' then
+        if p.result and not p.error and p.result.reason~='cancelled' and p.result.reason~='player_down' then
+            p.result.reason='ui_input_required';p.result.outcome='interrupted'
+        end
+        clearInput() -- Do not restart the pause handshake on every modal frame.
+    elseif p.combat then
+        finishCombat(p,'ui_input_required')
+    else
+        local result=p.phase=='releasing' and p.result or {}
+        result.paused=true;result.reason='ui_input_required';result.outcome='interrupted'
+        result.elapsed=result.elapsed or p.elapsed or 0
+        pause(p.cmd,result)
+    end
+end
 beginChainStep=function(p,index)
     local step=p.chain.plan[index]
     local previous=p.combat
@@ -604,6 +626,7 @@ local function finish()
         return
     end
     local result, err = p.result, p.error
+    local inputRequired=result and result.reason=='ui_input_required'
     if result and p.finalPose and result.motion then
         -- Physics may finish an already queued movement frame after the pause
         -- request. Report the stable endpoint, not the pre-pause estimate.
@@ -650,6 +673,9 @@ local function finish()
             end
         end
     end
+    -- Keep confirmed side effects (e.g. an item taken) while reporting that the
+    -- outstanding action yielded to a prompt, including one shown during settle.
+    if inputRequired and result.reason~='player_down' then result.reason='ui_input_required' end
     if not err and p.cmd.op == 'observe' then result = observation(p.cmd.args) end
     if not err and p.cmd.op == 'inspect' then result,err = inspect(p.cmd.args) end
     if not err and p.cmd.op=='ui' then result=uiState() end
@@ -679,6 +705,10 @@ end
 
 local function dispatch(cmd)
     local op, args = cmd.op, cmd.args
+    if motorOperations[op] and ui._astraUiSnapshot then
+        modalOpen=uiState().modal==true
+        if modalOpen then pause(cmd,nil,'ui_open');return end
+    end
     local guardReason=Guards.check(args._guard,core.getSimulationTime(),A.stats and A.stats.dynamic and A.stats.dynamic.health(self))
     if guardReason then pause(cmd,{paused=true,reason=guardReason,elapsed=0});return end
     if (op=='chain' or op=='strike' or op=='cast') and not windowAllowed('Stats') then
@@ -1385,8 +1415,10 @@ local function onFrame(dt)
     Trajectory.sample(false)
     Scene.fov(desiredFov)
     lastFrame = lastFrame + 1
-    if ready and ui._astraUiSnapshot and (lastFrame%3==0 or pending and pending.cmd and pending.cmd.op=='choose') then
+    local motorPending=pending and pending.cmd and (pending.start or pending.finalPose)
+    if ready and ui._astraUiSnapshot and (motorPending or modalOpen or lastFrame%3==0 or pending and pending.cmd and pending.cmd.op=='choose') then
         local snapshot=uiState()
+        modalOpen=snapshot.modal==true
         local notifications={}
         for _,e in ipairs(snapshot.elements) do
             local notification=e.panel=='notification'
@@ -1411,7 +1443,7 @@ local function onFrame(dt)
         P.emit({version=1,session=bus:get('session'),event='simulation',active=running})
     end
     bus:set('can_save', ready and Player.isCharGenFinished(self) and not (A.isDead and A.isDead(self))
-        and I.UI.getMode() == nil and core.isWorldPaused())
+        and not modalOpen and I.UI.getMode() == nil and core.isWorldPaused())
     if bus:get('cancel') then
         bus:set('cancel',false)
         pausedSneak=false
@@ -1419,6 +1451,10 @@ local function onFrame(dt)
         elseif pending and pending.combat then finishCombat(pending,'cancelled')
         else pause(pending and pending.cmd, {paused=true,reason='cancelled',elapsed=pending and pending.elapsed or 0}) end
     end
+    -- Native tutorial/message boxes can demand input while Lua still reports
+    -- Gameplay, even with zero simulation dt. Check every action frame, before
+    -- resuming/running/releasing/pausing branches and before any further input.
+    if modalOpen then interruptForModal() end
     if pending then
         if pending.phase == 'pausing' then
             if pauseAck == pending.token and core.isWorldPaused() then
@@ -1754,6 +1790,7 @@ local function reset()
     pausedSneak=false
     uiMessages,seenMessages=P.array(),{}
     seenNotifications={}
+    modalOpen=false
     invalidate()
     pause(nil)
 end
