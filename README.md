@@ -21,6 +21,8 @@ repository; you do not need to download or manually copy it separately.
 The installer downloads a GitHub Release, verifies its SHA256 and file inventory,
 creates a separate private runtime/config, configures Data Files, installs the
 bundled Python wheels, prepares a runtime copy of the skill and runs doctor. It never builds OpenMW.
+Release files are downloaded directly from github.com; installation does not use
+the GitHub REST API or require an authentication token.
 On a release-tag checkout it selects that tag; on main it selects latest stable.
 The default destination is `~/AstraOpenMW/<tag>/`; existing installations and saves
 are never overwritten. Use `--directory` for another new destination.

@@ -3,16 +3,21 @@
 from __future__ import annotations
 import argparse
 import hashlib
+import http.client
 import json
 import os
 from pathlib import Path, PurePosixPath
 import platform
 import re
 import shutil
+import ssl
 import subprocess
 import sys
 import tarfile
 import tempfile
+import time
+import urllib.error
+import urllib.parse
 import urllib.request
 
 REPOSITORY = 'incident201/AstraBridgeForOpenMW'
@@ -26,17 +31,38 @@ def sha256(path):
         return digest.hexdigest()
 
 
+def http_read(url, consume, timeout):
+    if not url.startswith('https://'):
+        raise ValueError('Release downloads must use HTTPS')
+    for attempt in range(4):
+        try:
+            request = urllib.request.Request(url, headers={'User-Agent': 'AstraBridge-installer'})
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                return consume(response)
+        except urllib.error.HTTPError as exc:
+            if exc.code not in {429, 500, 502, 503, 504} or attempt == 3:
+                raise
+            exc.close()
+        except (urllib.error.URLError, TimeoutError, ConnectionError, ssl.SSLError, http.client.IncompleteRead):
+            if attempt == 3:
+                raise
+        time.sleep(2 ** attempt)
+
+
 def read_json(url):
-    request = urllib.request.Request(url, headers={'User-Agent': 'AstraBridge-installer'})
-    with urllib.request.urlopen(request, timeout=60) as response:
-        return json.load(response)
+    return http_read(url, json.load, timeout=60)
 
 
 def download(url, destination):
-    if not url.startswith('https://'):
-        raise ValueError('Release downloads must use HTTPS')
-    with urllib.request.urlopen(url, timeout=120) as response, destination.open('wb') as target:
-        shutil.copyfileobj(response, target)
+    def save(response):
+        # Reopen in write mode on every attempt: an interrupted transfer must
+        # never append to the partial archive from the previous attempt.
+        with destination.open('wb') as target:
+            shutil.copyfileobj(response, target)
+            length = response.headers.get('Content-Length')
+            if length is not None and target.tell() != int(length):
+                raise ConnectionError(f'Incomplete download: received {target.tell()} of {length} bytes')
+    http_read(url, save, timeout=120)
 
 
 def checkout_tag():
@@ -143,16 +169,12 @@ def install(args):
     else:
         if selected != 'latest' and not re.fullmatch(r'v\d+\.\d+\.\d+', selected):
             raise ValueError('Use --version latest or vX.Y.Z, or --from-bundle for development')
-        endpoint = 'latest' if selected == 'latest' else 'tags/' + selected
-        release = read_json(f'https://api.github.com/repos/{REPOSITORY}/releases/{endpoint}')
-        if release['draft'] or release['prerelease']:
-            raise ValueError('Requested release is not stable')
-        requested = release['tag_name']
-        assets = {item['name']: item['browser_download_url'] for item in release['assets']}
-        if 'manifest.json' not in assets:
-            raise ValueError('Release has no manifest.json')
-        manifest = read_json(assets['manifest.json'])
+        endpoint = 'latest/download' if selected == 'latest' else 'download/' + selected
+        manifest = read_json(f'https://github.com/{REPOSITORY}/releases/{endpoint}/manifest.json')
+        requested = None if selected == 'latest' else selected
     validate_manifest(manifest, requested)
+    if not args.from_bundle and not re.fullmatch(r'v\d+\.\d+\.\d+', manifest['git_tag'] or ''):
+        raise ValueError('Invalid release tag in manifest')
     target = (args.directory or Path.home() / 'AstraOpenMW' / (manifest['git_tag'] or ('dev-' + manifest['git_commit'][:12]))).expanduser().resolve()
     if target.exists():
         raise ValueError(f'Destination exists: {target}; choose --directory to preserve existing saves/config')
@@ -163,9 +185,9 @@ def install(args):
         if args.from_bundle:
             shutil.copyfile(bundle / archive.name, archive)
         else:
-            if archive.name not in assets:
-                raise ValueError('Release asset missing: ' + archive.name)
-            download(assets[archive.name], archive)
+            tag = manifest['git_tag']
+            name = urllib.parse.quote(manifest['asset_filename'], safe='')
+            download(f'https://github.com/{REPOSITORY}/releases/download/{tag}/{name}', archive)
         if sha256(archive) != manifest['asset_sha256']:
             raise ValueError('Release archive SHA256 mismatch; nothing installed')
         extract_bundle(archive, stage)
@@ -208,7 +230,7 @@ def main():
     parser.add_argument('--encoding', choices=['win1250', 'win1251', 'win1252'], default='win1251')
     try:
         install(parser.parse_args())
-    except (OSError, ValueError, KeyError, subprocess.CalledProcessError, tarfile.TarError) as exc:
+    except (OSError, ValueError, KeyError, http.client.IncompleteRead, subprocess.CalledProcessError, tarfile.TarError) as exc:
         parser.exit(1, f'Installation failed: {exc}\n')
 
 
