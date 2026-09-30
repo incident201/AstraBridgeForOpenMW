@@ -9,6 +9,7 @@ they also affect how a playthrough behaves.
 |---|---|---|
 | Yet Another Idle Animation Fix (YAIAF) 1.1 | Third-party animation assets by Qlonever | Shipped in the Lua mod's data directory; additional animation sources enabled in the private profile. |
 | Dark Brotherhood / Tribunal delay | AstraBridge-generated script override | Enabled when `Tribunal.esm` is active, unless `delay_tribunal` is explicitly disabled. |
+| Testing defaults for combat | OpenMW settings chosen by AstraBridge | New profiles start with `difficulty = -100` and `best attack = true`; users may change both. |
 | Synchronous physics at action boundaries | OpenMW setting applied by AstraBridge | `async num threads = 0` in the runtime profile. |
 | Idle-camera stabilization | AstraBridge Lua policy using OpenMW camera interfaces | Disables automatic vanity/standing-preview behavior during controlled play. |
 | NPC placement recovery | Explicit public command using native ResetActors | Never an automatic part of navigation; the skill restricts its use to observed malfunctions. |
@@ -145,6 +146,36 @@ Relevant checks: [generator/load-order tests](../harness/tests/test_tribunal.py)
 and [profile diagnostics tests](../harness/tests/test_diagnostics.py).
 
 ## Runtime settings and control fixes
+
+### Combat defaults chosen for testing
+
+[configure.py](../harness/configure.py) writes the following settings to
+`<installation>/config/settings.cfg`, which seeds a new runtime profile:
+
+```ini
+[Game]
+difficulty = -100
+best attack = true
+```
+
+These are deliberate changes to the game's default settings, chosen for
+convenience during testing. `difficulty = -100` lowers combat difficulty, and
+`best attack = true` enables automatic selection of the weapon's best melee
+attack type (chop, slash or thrust). The bundled OpenMW defaults are
+`difficulty = 0` and `best attack = false`.
+
+Neither setting is a fundamental limitation or requirement of AstraBridge.
+Users may choose their preferred difficulty and attack behavior. These values
+are initial defaults and are not forced back on each start.
+
+Before the first start, edit `<installation>/config/settings.cfg` to change the
+defaults used to create the profile. For an existing profile, use the game's
+settings UI or, with AstraBridge stopped, edit the `[Game]` section in
+`<installation>/AstraBridge/runtime/profile/settings.cfg`.
+[Session.prepare](../harness/astra_bridge/session.py) preserves an existing
+profile's difficulty and best-attack settings; changing only the seed file does
+not update that profile. Record the actual settings when comparing playthroughs
+or benchmark results.
 
 ### Synchronous physics
 
