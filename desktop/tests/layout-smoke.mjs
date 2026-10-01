@@ -58,7 +58,7 @@ try{
  for(const name of ['Game data','Gameplay','Graphics and recording']){
   await page.getByRole('button',{name,exact:true}).click();await fit(page,'settings-'+name.replaceAll(' ','-'));
  }
- for(const name of ['Atlas','Recordings','Diagnostics','Setup']){
+ for(const name of ['Atlas','Recordings','Profiles','Diagnostics','Setup']){
   await page.getByRole('navigation').getByRole('button',{name,exact:true}).click();
   await page.getByRole('heading',{name,level:1,exact:true}).waitFor();
   if(name==='Recordings'&&await page.locator('.node-row').count()){
@@ -67,7 +67,7 @@ try{
   }
   await fit(page,name.toLowerCase());
  }
- await app.close();app=null;
+ await app.evaluate(({dialog})=>{dialog.showMessageBox=async()=>({response:1,checkboxChecked:false});});await app.close();app=null;
  app=await electron.launch({executablePath:resolve('node_modules/electron/dist/electron'),args:[resolve('.'),'--ozone-platform=x11'],
   env:{...process.env,ASTRA_CONFIG:join(resolve(output),'not-installed.json'),ASTRA_RESOURCES:resolve('resources'),ASTRA_DESKTOP_DATA:join(resolve(output),'setup-userdata')}});
  const setup=await app.firstWindow();await setup.setViewportSize({width:960,height:680});
@@ -75,4 +75,4 @@ try{
  await setup.getByPlaceholder('Choose your existing Morrowind folder').fill('/example/game');
  await setup.getByRole('button',{name:'Next: Storage',exact:true}).click();await fit(setup,'setup-storage');
  console.log(JSON.stringify({passed:true,viewports:results.map(x=>({name:x.name,videoHeight:x.video?.height}))}));
-}finally{if(app)await app.close();await writeFile(join(output,'layout.json'),JSON.stringify(results,null,2)+'\n');}
+}finally{if(app){await app.evaluate(({dialog})=>{dialog.showMessageBox=async()=>({response:1,checkboxChecked:false});});await app.close();}await writeFile(join(output,'layout.json'),JSON.stringify(results,null,2)+'\n');}

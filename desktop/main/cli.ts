@@ -15,7 +15,7 @@ Usage: astrabridge [--config FILE] <command>
           [--game-mode mount|copy] [--recordings DIRECTORY] [--data-relative "Data Files"]
           [--development --repository DIRECTORY]
   start [--gpu auto|nvidia|GPU_ID] | stop | restart [--gpu auto|nvidia|GPU_ID] | status | update
-  agent connect [--name NAME] | disconnect | status
+  agent connect [--name NAME] [--profile ID] | disconnect | status
   game <command> [arguments]
   config show | set JSON
   gpus
@@ -49,7 +49,7 @@ async function main(){
     else result=await core[command as 'stop'|'status'|'update']();
   }else if(command==='agent'){
     const action=argv.shift();
-    if(action==='connect')result=await core.connect(take('--name'));
+    if(action==='connect')result=await core.connect(take('--name'),take('--profile'));
     else if(action==='disconnect')result=await core.disconnect();
     else if(action==='status')result=await core.api('/v1/agent/status');
     else throw new Error('Use agent connect, disconnect or status');
@@ -59,7 +59,7 @@ async function main(){
     else if(action==='set')result=await core.api('/v1/runtime/config','PATCH',JSON.parse(argv.join(' ')));
     else throw new Error('Use config show or config set JSON');
   }else if(command==='gpus'){await core.ensureDaemon();result=await core.api('/v1/runtime/gpus');}
-  else if(command==='recordings'){await core.ensureDaemon();const config=await core.configured();result={directory:config.recordingsDirectory,items:await core.api('/v1/runtime/recordings')};}
+  else if(command==='recordings'){result={directory:await core.recordingsFolder(),items:await core.api('/v1/runtime/recordings')};}
   else if(command==='logs')result=await core.logs(take('--name'));
   else if(command==='skill'&&argv.shift()==='export'){
     if(!argv[0])throw new Error('Provide a skill destination directory');

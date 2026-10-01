@@ -6,6 +6,7 @@ import {Readable} from 'node:stream';
 import {createWriteStream} from 'node:fs';
 import WebSocket from 'ws';
 import {Core} from './core';
+import {CloseRequest,type CloseChoice} from './close';
 
 if(process.env.ASTRA_DESKTOP_DATA)app.setPath('userData',process.env.ASTRA_DESKTOP_DATA);
 
@@ -13,8 +14,8 @@ protocol.registerSchemesAsPrivileged([
   {scheme:'astra',privileges:{standard:true,secure:true,supportFetchAPI:true}},
   {scheme:'astra-artifact',privileges:{standard:true,secure:true,supportFetchAPI:true,stream:true}},
 ]);
-let window:BrowserWindow|null=null,events:WebSocket|null=null,quitting=false;
-let viewerFullscreen=false,previousWindowFullscreen=false;
+let window:BrowserWindow|null=null,events:WebSocket|null=null,quitting=false,closeApproved=false;
+let viewerFullscreen=false,previousWindowFullscreen=false,viewerReview=false;
 const resources=process.env.ASTRA_RESOURCES??join(process.resourcesPath,'astra');
 const core=new Core(resources,undefined,text=>window?.webContents.send('astra:event',{type:'progress',data:text}));
 
@@ -26,11 +27,37 @@ async function connectEvents(){
   events.on('error',()=>{});
 }
 function allowedFrame(url:string){return url.startsWith('astra://app/');}
+const closing=new CloseRequest(async()=>{
+  if(core.managementBusy)throw new Error('Wait for the install, update or container operation to finish before closing');
+  const config=await core.load();return Boolean(config&&(await core.backend(config).inspect(config.name)).running);
+},async()=>{
+  const options={type:'question' as const,title:'Close AstraBridge?',message:'The runtime will keep running after this window closes.',
+    detail:'Keep running leaves the container, connected agent and recording session active. Manual control is released when the window closes. Stop runtime stops the game and finishes the current recording before closing; it does not create a game save.',
+    buttons:['Cancel','Keep running','Stop runtime'],defaultId:1,cancelId:0,noLink:true};
+  const result=window?await dialog.showMessageBox(window,options):await dialog.showMessageBox(options);
+  return (['cancel','keep','stop'] as CloseChoice[])[result.response]??'cancel';
+},()=>core.stop(),async error=>{
+  const options={type:'error' as const,title:'AstraBridge is still open',message:'Could not finish closing the runtime.',detail:String(error),buttons:['OK']};
+  return window?dialog.showMessageBox(window,options):dialog.showMessageBox(options);
+});
+async function requestClose(){
+  if(closeApproved||quitting)return;
+  if(await closing.request()){
+    if(closeApproved)return;closeApproved=true;quitting=true;
+    events?.close();events=null;
+    await Promise.race([core.api('/v1/runtime/live','DELETE').catch(()=>{}),new Promise(resolve=>setTimeout(resolve,2000))]);
+    app.quit();
+  }
+}
+
 
 app.whenReady().then(async()=>{
   const frontend=join(__dirname,'frontend');
   protocol.handle('astra',request=>{
-    const url=new URL(request.url);const path=resolve(frontend,'.'+decodeURIComponent(url.pathname==='/'?'/index.html':url.pathname));
+    const url=new URL(request.url);
+    if(url.hostname==='app'&&/^\/replay\/[a-f0-9]{32}\/[a-f0-9]+-[a-f0-9]+\/(?:init|[0-9]+)$/.test(url.pathname))
+      return core.fetch('/v1/runtime'+url.pathname);
+    const path=resolve(frontend,'.'+decodeURIComponent(url.pathname==='/'?'/index.html':url.pathname));
     if(url.hostname!=='app'||!path.startsWith(frontend+sep))return new Response('Not found',{status:404});
     return net.fetch(pathToFileURL(path).toString());
   });
@@ -46,6 +73,14 @@ app.whenReady().then(async()=>{
       if(operation==='install')return core.install(args);
       if(['start','stop','restart','update'].includes(operation)){
         const result=await core[operation as 'start'|'stop'|'restart'|'update']();await connectEvents();return result;
+      }
+      if(operation==='remove-container'){
+        const options={type:'warning' as const,title:'Remove runtime container?',message:'Remove the AstraBridge runtime container?',
+          detail:'This stops the game and finishes the current recording. Game files, saves, Atlas, notes, recordings and settings are kept. You can recreate the container here later.',
+          buttons:['Cancel','Remove container'],defaultId:0,cancelId:0,noLink:true};
+        const decision=window?await dialog.showMessageBox(window,options):await dialog.showMessageBox(options);
+        if(decision.response!==1)return {removed:false};
+        const status=await core.removeContainer();events?.close();events=null;return {removed:true,status};
       }
       if(operation==='viewer-fullscreen'){
         if(typeof args.enabled!=='boolean'||!window)throw new Error('Invalid fullscreen request');
@@ -71,11 +106,25 @@ app.whenReady().then(async()=>{
       }
       if(operation==='gpus')return core.api('/v1/runtime/gpus');
       if(operation==='configure')return core.api('/v1/runtime/config','PATCH',args);
+      if(operation==='profiles')return core.profiles();
+      if(operation==='profile'){
+        if(!['create','rename','duplicate','switch','delete'].includes(args.operation))throw new Error('Unknown profile operation');
+        if(args.operation==='delete'){
+          const catalog=await core.profiles(),profile=catalog.profiles.find((p:any)=>p.id===args.id);
+          if(!profile)throw new Error('Profile not found');
+          const options={type:'warning' as const,title:'Delete profile?',message:`Permanently delete “${profile.name}”?`,
+            detail:'All saves, Atlas, knowledge, notes, settings and session history in this profile will be deleted. This cannot be undone. Game files and video recordings on your computer are kept.',
+            buttons:['Cancel','Delete profile'],defaultId:0,cancelId:0,noLink:true};
+          const decision=window?await dialog.showMessageBox(window,options):await dialog.showMessageBox(options);
+          if(decision.response!==1)return {cancelled:true,...catalog};
+        }
+        return core.profile(args.operation,{...(args.id?{id:args.id}:{}),...(args.name!==undefined?{name:args.name}:{})});
+      }
       if(operation==='stop-game')return core.api('/v1/runtime/engine/stop','POST',{});
       if(operation==='agent-end')return core.api('/v1/runtime/agent/end','POST',{});
       if(operation==='recordings'){await core.ensureDaemon();return core.api('/v1/runtime/recordings');}
       if(operation==='open-recordings-folder'){
-        const config=await core.configured();const error=await shell.openPath(config.recordingsDirectory);if(error)throw new Error(error);return config.recordingsDirectory;
+        const directory=await core.recordingsFolder();const error=await shell.openPath(directory);if(error)throw new Error(error);return directory;
       }
       if(operation==='record'){
         if(!['start','stop','status'].includes(args.action))throw new Error('Invalid recording operation');
@@ -84,6 +133,12 @@ app.whenReady().then(async()=>{
       if(operation==='atlas'){await core.ensureDaemon();return core.api('/v1/runtime/atlas?'+new URLSearchParams(args).toString());}
       if(operation==='environment')return core.api('/v1/runtime/environment');
       if(operation==='sessions')return core.api('/v1/runtime/sessions');
+      if(operation==='replay-info')return core.api('/v1/runtime/replay'+(args.id?'?id='+encodeURIComponent(args.id):''));
+      if(operation==='replay-index'){
+        if(!/^[a-f0-9]{32}$/.test(args.id)||! /^[a-f0-9]+-[a-f0-9]+$/.test(args.generation))throw new Error('Invalid replay request');
+        return core.api(`/v1/runtime/replay/${args.id}/${args.generation}/index?`+new URLSearchParams(args.after===undefined?{time:String(args.time)}:{after:String(args.after)}));
+      }
+      if(operation==='viewer-review'){viewerReview=args.enabled===true;return {enabled:viewerReview};}
       if(operation==='live-start')return core.api('/v1/runtime/live','POST',args);
       if(operation==='live-stop')return core.api('/v1/runtime/live','DELETE');
       if(operation==='whep'){
@@ -107,11 +162,14 @@ app.whenReady().then(async()=>{
     }catch(error){throw new Error((error as Error).message);}
   });
   ipcMain.on('astra:input',(event,message:unknown)=>{
+    const value=message as {type?:string;event?:{type?:string}};
+    if(viewerReview&&(value?.type==='manual.acquire'||value?.type==='input'&&value.event?.type!=='release'))return;
     if(event.senderFrame&&allowedFrame(event.senderFrame.url)&&events?.readyState===WebSocket.OPEN)
       events.send(JSON.stringify(message));
   });
   window=new BrowserWindow({width:1320,height:900,minWidth:960,minHeight:680,title:'AstraBridge',backgroundColor:'#0c1320',
     webPreferences:{preload:join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
+  window.on('close',event=>{if(!closeApproved){event.preventDefault();void requestClose();}});
   window.on('leave-full-screen',()=>{
     if(viewerFullscreen){viewerFullscreen=false;previousWindowFullscreen=false;
       window?.webContents.send('astra:event',{type:'viewer.fullscreen',enabled:false});}
@@ -122,8 +180,5 @@ app.whenReady().then(async()=>{
 });
 app.on('window-all-closed',()=>app.quit());
 app.on('before-quit',event=>{
-  if(quitting)return;event.preventDefault();quitting=true;
-  events?.close();events=null;
-  Promise.race([core.api('/v1/runtime/live','DELETE').catch(()=>{}),new Promise(resolve=>setTimeout(resolve,2000))])
-    .finally(()=>app.quit());
+  if(closeApproved)return;event.preventDefault();void requestClose();
 });

@@ -42,8 +42,17 @@ Install creates managed state and a persistent container. Game data use a
 read-only host-folder mount by default; the user can instead request a managed
 copy in a separate game volume. Ordinary
 start/stop/restart retains the container ID. Updates explicitly recreate the
-container around the existing volumes. Closing Desktop disconnects the viewer
-and releases manual input; it does not stop an agent, recording or runtime.
+container around the existing volumes. When closing Desktop with a running container, the user chooses **Keep running**,
+**Stop runtime**, or **Cancel**. Keeping it running disconnects the viewer and
+releases manual input while retaining the agent and recording session. Stopping
+waits for engine shutdown and recording finalization before closing the window;
+it does not create a game save. A failed stop keeps Desktop open with an error.
+
+Setup provides **Remove container** with a separate confirmation. It stops a
+running runtime and removes only the container; named volumes, game files,
+recordings and connection configuration are preserved. **Recreate container**
+creates the matching runtime around those same data. This is not a data reset
+or an uninstall of the user's game.
 
 The daemon can run while the game is stopped. This permits configuration,
 recording browsing and retained Atlas queries without launching OpenMW.
@@ -64,6 +73,35 @@ chooses the encoding and data subdirectory. `Morrowind.ini` supplies active
 content order and archives; these can be edited before starting the game.
 The existing Tribunal addon generator separately reads its effective script
 during runtime profile preparation.
+
+## Playthrough profiles
+
+Desktop's **Profiles** page creates, renames, selects, duplicates and permanently
+deletes profiles. Every management operation requires OpenMW to be stopped; the
+daemon enforces this under the same lifecycle lock used for game startup. The
+container may keep running. Deletion has a separate confirmation and no trash.
+Deleting the active profile selects another; deleting the last one creates an
+empty default profile. Host video files and shared game assets are retained.
+
+Each profile owns its saves, game settings, Atlas, recognized objects, knowledge,
+notes, screenshot attachments, session history and action receipts. There is no
+shared knowledge database. Creating a profile copies configuration only;
+**Duplicate profile** copies persistent data into independent files/databases
+and rebases attached screenshot paths. It does not copy existing video files,
+engine transport buffers or caches. Deleting or editing the source cannot change
+the duplicate. The game installation and OCI image are shared.
+
+`/data/profiles.json` holds the active ID and profile names. New profiles live in
+`/data/profiles/<id>`. Existing flat state is registered as **Default** without
+moving saves. Recordings use `<host recordings folder>/<profile id>`; the legacy
+Default retains its original top-level recording files. The recording browser
+and **Open folder** follow the selected profile. Switching clears in-memory
+Atlas/artifact/replay caches and closes the previous session's databases.
+
+Exported gameplay skills include the selected profile ID. `agent connect
+--profile ID` rejects a mismatch before game startup; it does not select another
+profile. Updates snapshot the profile catalog and every profile, including
+screenshots referenced by retained notes. Removing a container preserves them.
 
 ## Ownership and pause behavior
 
@@ -123,8 +161,23 @@ and excludes thinking pauses. See [recording and live media](recording.md).
 
 A Desktop release identifies a specific image digest, API versions, native
 engine and FFmpeg build. Updates are explicit. Users install the new Desktop
-package and then update its runtime. Prior state is snapshotted before migration;
-failed updates preserve the previous image and a restore path. There is no
+package and then update its runtime. The new image is downloaded while the old container remains available. Applying
+an update requires the agent to disconnect and stops the game/recording before
+copying profile, saves, Atlas, notes and session state. The old container is
+replaced with one using the same persistent volumes and host mounts. A readiness
+or startup failure restores the previous data and runtime.
+
+Update progress is recorded in the private installation configuration before
+replacement. If Desktop exits unexpectedly, Setup offers **Recover interrupted
+update**; normal startup is blocked until recovery completes. Container-running
+and game-running state are preserved separately. Updates do not make a game save.
+
+After a successful update, one previous image and one complete update snapshot
+remain for recovery. Only older update snapshots and runtime images retired by
+this installation are candidates for cleanup. Manual backups, game data and
+recordings are excluded. Image removal is never forced; resources still in use
+or temporarily unavailable for cleanup are retried later. An older Desktop may
+not implicitly downgrade an installed runtime or its data. There is no
 automatic migration from the old portable-bundle installation format.
 
 ### Virtual input seat

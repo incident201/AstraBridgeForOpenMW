@@ -9,9 +9,18 @@ Movement and maps: [navigation.md](navigation.md). Combat and tools: [combat.md]
 Every gameplay command below follows `astrabridge game`, using the executable
 and `--config` path from the exported skill's `installation.json`.
 Use `astrabridge game COMMAND --help` for parser help; it does not run an action.
-Connect with the application command `astrabridge agent connect` before playing.
+Connect with `astrabridge agent connect --profile PROFILE_ID` before playing,
+using `profile.id` from that export. This checks the active profile without
+switching it; a mismatch is a host setup issue. The connection response includes
+`profile`, and application `status` reports it under `runtime.profile`.
 The application manages the runtime; do not start an internal daemon or enter
 the container during gameplay.
+
+All saves, Atlas, object recognition, notes and action receipts belong to the
+active profile. New profiles begin with empty memory; an explicit Desktop
+duplicate copies memory and saves once into independent storage. The host user
+manages profiles while the game is stopped. Gameplay commands do not change the
+selected profile. Reconnect and obtain fresh handles after an authorized switch.
 
 Notation:
 
@@ -214,6 +223,10 @@ The default is 1920×1080 at 60 fps: H.264 High, BT.709, 4:2:0, and stereo AAC-L
 
 The Desktop live viewer is independent of recording. Its 720p30/1080p60 choice,
 connection and displayed waiting time do not change the recording timeline.
+Its replay timeline, playback pause and **Go live** button are viewer controls;
+they do not issue game actions or pause the agent. Continue using current
+`observe` results even when the user is watching past footage. There is no replay
+command to substitute for `record-start` or `record-stop`.
 The CLI downloads returned screenshots to local export files. Recordings are
 written directly to the selected host recordings folder, and the CLI returns
 those direct paths. Do not enter the container to find runtime files. If
@@ -223,7 +236,7 @@ if an image is needed.
 
 Video and audio share the engine's sample clock; speaker latency does not alter the recording. `rendered_frames`, `repeated_frames`, `ring_dropped_frames`, `encoder_queue_peak` and `frame_interval_ms` expose capture performance. Audio gaps/overruns are explicit errors. `av_difference_ms` compares encoded video duration with source audio duration, including final frame rounding; it is not a measurement of audible lip sync. `audio_monitor` reports speaker availability; monitoring failure does not discard recorded audio. An empty recording has no uploadable video.
 
-Keep the game window size stable during recording. `video_window_resized` requires a new recording. Matching native engine hooks are required. Screenshots use completed frames and are resized before PNG encoding, so no full-size screenshot files accumulate. All public pixel inputs, `rect` and `aim_point` use screenshot coordinates; `screen.render_width/render_height` describe the separate game/video dimensions. Existing screenshot retention applies.
+Keep the private engine render resolution stable during recording. Resizing Desktop or entering its Fullscreen view does not resize that render surface. `video_window_resized` requires a new recording. Matching native engine hooks are required. Screenshots use completed frames and are resized before PNG encoding, so no full-size screenshot files accumulate. All public pixel inputs, `rect` and `aim_point` use screenshot coordinates; `screen.render_width/render_height` describe the separate game/video dimensions. Existing screenshot retention applies.
 
 Recording is fragmented while active for crash recovery. Normal stop prepares the upload file; if finalization fails, the original capture is preserved and the error is reported. Do not claim a recording succeeded without checking its final status. No automatic upload or file-size limit is imposed.
 
@@ -241,6 +254,7 @@ Recording is fragmented while active for crash recovery. Normal stop prepares th
 | `target_locked_unlock_first`, `locked_camera` | Inspect the lock; explicitly `lock` a different visible actor or `unlock` before independent turning/navigation. |
 | `spell_failed`, unavailable magic/ammunition | Read messages, effects and own resources; change the gameplay decision. |
 | `levitation_ended`, `water_walking_ended` | Effect-dependent route stopped. Inspect support/height/water state before continuing. |
+| Application status reports `updateRequired`, `updatePending`, or a missing container | Refer the host user to Setup. Image updates, recovery and container recreation are host management tasks. Resume authorized gameplay with the matching exported skill, reconnect and obtain fresh observations/handles. |
 | Controller timeout/disconnection/uncertain state | Do not automatically replay a mutation. Query `action-result REQUEST_ID` and status after reconnecting, stop if needed, then decide whether restart/load is necessary. |
 
 ### Emergency actor placement recovery

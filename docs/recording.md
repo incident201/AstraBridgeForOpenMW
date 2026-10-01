@@ -82,3 +82,26 @@ Switching quality or disconnecting the viewer does not restart Recorder.
 Slow live consumers discard stale media without blocking recording queues.
 They still share CPU/GPU resources with the game, so actual performance is
 reported rather than assuming 60 rendered frames per second on every machine.
+
+## Viewer timeline and replay
+
+The timeline below Live view lets a user seek through the current recording,
+pause playback and resume it. **Go live** returns to the existing WebRTC stream.
+These are viewing controls: they do not pause the engine, interrupt the agent,
+stop recording or restart the container. Past footage cannot receive game input.
+Entering replay releases held manual keys/buttons without relinquishing manual
+ownership or changing the game's running state. The usual focus-loss and
+connection-loss rules still apply.
+
+The timeline follows recorded engine time, including the existing exclusion of
+agent thinking pauses. Only fully written MP4 fragments are available, so the
+latest playable recording position can lag the live view. With recording off,
+the viewer can freeze its live picture, but has no recorded history to seek.
+
+The daemon incrementally indexes the fragmented MP4 and serves its initialization
+and complete media fragments. Desktop uses Media Source Extensions to buffer a
+short interval around playback. Seeking elsewhere reads the corresponding GOPs
+from the original file. No second encode, full recording copy or growing video
+buffer in application memory is required. The reader recognizes atomic faststart
+replacement at finalization and switches to range-based file playback. A paused
+picture stays paused until the user resumes or seeks.

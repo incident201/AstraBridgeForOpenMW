@@ -130,3 +130,16 @@ async def test_http_boundary_requires_auth_and_rejects_internal_commands(tmp_pat
         assert (await response.json())['error']=='agent_not_connected'
         assert (await client.get('/v1/artifacts/not-a-path',headers=headers)).status==404
     finally:await client.close()
+
+
+def test_update_prunes_only_older_update_snapshots_after_a_complete_recovery_copy(tmp_path):
+    (tmp_path/'saves').mkdir();(tmp_path/'saves/progress.omwsave').write_bytes(b'progress')
+    snapshot(tmp_path,'backup','update-old');snapshot(tmp_path,'backup','manual-copy')
+    snapshot(tmp_path,'backup','update-new')
+    with pytest.raises(ValueError,match='must be complete'):snapshot(tmp_path,'prune','update-missing')
+    assert (tmp_path/'backups/update-old').is_dir()
+    snapshot(tmp_path,'prune','update-new')
+    assert not (tmp_path/'backups/update-old').exists()
+    assert (tmp_path/'backups/update-new/saves/progress.omwsave').read_bytes()==b'progress'
+    assert (tmp_path/'backups/manual-copy').is_dir()
+    assert (tmp_path/'saves/progress.omwsave').read_bytes()==b'progress'

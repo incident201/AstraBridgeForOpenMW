@@ -11,15 +11,19 @@ import {WslContainerBackend} from './runtime/WslContainerBackend';
 import type {Progress,RuntimeBackend,RuntimeSpec} from './runtime/RuntimeBackend';
 
 export interface Release {version:string; image:string; digest:string; development?:boolean; runtime_api:number; game_api:number}
+export interface RecoveryVersion {image:string;digest:string;version?:string;snapshot:string;created:number}
+interface UpdateTransaction {before:Installation;snapshot:string;backedUp:boolean;replacing:boolean;wasRunning:boolean;gameWasRunning:boolean;api:{runtime_api:number;game_api:number}|null}
 export interface Installation extends RuntimeSpec {
   installed:boolean; storageDirectory:string; backend:'podman'|'wsl'; gameImported:boolean;
-  sourceGame:string; agentToken?:string; phase?:string;
+  sourceGame:string; agentToken?:string; agentProfile?:string; phase?:string;
   gameMode:'mount'|'copy';
+  version?:string;previous?:RecoveryVersion;transaction?:UpdateTransaction;retiredImages?:string[];cleanupPending?:boolean;
 }
 export interface InstallOptions {game:string; storage:string; encoding:string; gameMode?:'mount'|'copy'; recordings?:string; dataRelative?:string; development?:boolean; repository?:string; content?:string[]; archives?:string[]}
 
 export class Core {
   readonly configFile:string;
+  managementBusy=false;
   constructor(readonly resources:string,configFile?:string,private progress?:Progress){
     const directory=process.platform==='win32'?join(process.env.APPDATA??homedir(),'AstraBridge'):
       join(process.env.XDG_CONFIG_HOME??join(homedir(),'.config'),'astrabridge');
@@ -44,7 +48,8 @@ export class Core {
       catch(error){if((error as NodeJS.ErrnoException).code==='ESRCH')await rm(lock);else throw error;}
     }catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
     const handle=await open(lock,'wx',0o600);await handle.writeFile(JSON.stringify({pid:process.pid}));
-    try{return await operation();}finally{await handle.close();await rm(lock,{force:true});}
+    this.managementBusy=true;
+    try{return await operation();}finally{this.managementBusy=false;await handle.close();await rm(lock,{force:true});}
   }
   backend(config:Pick<Installation,'backend'|'storageDirectory'>):RuntimeBackend {
     return config.backend==='wsl'?new WslContainerBackend(undefined,this.progress):new PodmanBackend(config.storageDirectory,undefined,this.progress);
@@ -65,12 +70,12 @@ export class Core {
     if(!response.ok||!body.ok)throw Object.assign(new Error(body.message??body.error??`HTTP ${response.status}`),{details:body});
     return body.result;
   }
-  private async ready(config:Installation){
+  private async ready(config:Installation,expected?:{runtime_api:number;game_api:number}|null){
     const deadline=Date.now()+45_000;
     while(Date.now()<deadline){
       try{const health=await this.api('/health','GET',undefined,config);
-        const release=await this.release();
-        if(health.runtime_api!==release.runtime_api||health.game_api!==release.game_api)throw new Error('Runtime API version mismatch');
+        const release=expected===undefined?await this.release():expected;
+        if(release&&(health.runtime_api!==release.runtime_api||health.game_api!==release.game_api))throw new Error('Runtime API version mismatch');
         return health;
       }catch(error){if(String(error).includes('version mismatch'))throw error;}
       await new Promise(resolve=>setTimeout(resolve,200));
@@ -78,7 +83,9 @@ export class Core {
     throw new Error('Runtime did not become ready. Open Diagnostics or run astrabridge logs.');
   }
   async ensureDaemon(config?:Installation){
-    config??=await this.configured();const backend=this.backend(config);const state=await backend.inspect(config.name);
+    config??=await this.configured();
+    if(config.transaction)throw new Error('Recover the interrupted runtime update in Setup before starting');
+    const backend=this.backend(config);const state=await backend.inspect(config.name);
     if(!state.exists)throw new Error('Managed container is missing. Reinstall or explicitly update runtime.');
     if(!state.running)await backend.start(config.name);
     await this.ready(config);return config;
@@ -90,7 +97,7 @@ export class Core {
     let runtime=null,error=null;
     if(container.running){try{runtime=await this.api('/v1/runtime/status','GET',undefined,config);}catch(e){error=String(e);}}
     return {installed:config.installed,phase:config.phase,backend:config.backend,container,runtime,error,release,
-      currentDigest:config.digest,updateRequired:Boolean(release.digest&&release.digest!==config.digest),
+      currentDigest:config.digest,currentVersion:config.version,previousRuntime:config.previous??null,updatePending:Boolean(config.transaction),cleanupPending:Boolean(config.cleanupPending),updateRequired:Boolean(release.digest&&release.digest!==config.digest),
       storageDirectory:config.storageDirectory,recordingsDirectory:config.recordingsDirectory,gameMode:config.gameMode,sourceGame:config.sourceGame};
   }
   async install(options:InstallOptions){return this.exclusive(async()=>{
@@ -102,7 +109,7 @@ export class Core {
     const existing=await this.load();if(existing?.installed)throw new Error('Already installed; use start or update.');
     if(existing&&existing.sourceGame!==game)throw new Error('This incomplete installation belongs to another game directory. Use a separate --config.');
     const release=await this.release();const id=randomUUID().slice(0,12);
-    const config:Installation=existing??{name:'astrabridge-'+id,image:release.image,digest:release.digest,
+    const config:Installation=existing??{version:release.version,name:'astrabridge-'+id,image:release.image,digest:release.digest,
       token:randomBytes(32).toString('hex'),gameVolume:'astrabridge-game-'+id,stateVolume:'astrabridge-state-'+id,
       apiPort:18770,rtcPort:18771,mode:options.development?'development':'production',installed:false,
       backend:process.platform==='win32'?'wsl':'podman',storageDirectory:resolve(options.storage),gameImported:false,sourceGame:game,
@@ -133,13 +140,13 @@ export class Core {
     await backend.stop(config.name);config.installed=true;config.phase='ready';await this.save(config);
     return this.status();
   });}
-  async start(gpu?:string){const config=await this.ensureDaemon();
+  async start(gpu?:string,profile?:string){const config=await this.ensureDaemon();
     const release=await this.release();if(release.digest&&release.digest!==config.digest)throw new Error('Update runtime to match this Desktop before starting the game');
     if(gpu===undefined&&(process.env.__NV_PRIME_RENDER_OFFLOAD==='1'||process.env.__GLX_VENDOR_LIBRARY_NAME==='nvidia')){
       const settings=await this.api('/v1/runtime/config','GET',undefined,config);
       if(settings.graphics_gpu==='auto')gpu='nvidia';
     }
-    return this.api('/v1/runtime/engine/start','POST',gpu?{gpu}:{},config);
+    return this.api('/v1/runtime/engine/start','POST',{...(gpu?{gpu}:{}),...(profile?{profile}:{})},config);
   }
   async stop(){const config=await this.configured();const backend=this.backend(config);
     if((await backend.inspect(config.name)).running){
@@ -150,39 +157,97 @@ export class Core {
     delete config.agentToken;await this.save(config);return this.status();
   }
   async restart(gpu?:string){await this.stop();return this.start(gpu);}
+  async removeContainer(){return this.exclusive(async()=>{
+    const config=await this.configured();const backend=this.backend(config);
+    if(config.transaction)throw new Error('Recover the interrupted update before removing its container');
+    const state=await backend.inspect(config.name);
+    if(state.running)await this.stop();
+    if(state.exists)await backend.remove(config.name);
+    delete config.agentToken;config.phase='container-removed';await this.save(config);
+    return this.status();
+  });}
+
+  private async cleanupRecovery(config:Installation){
+    if(!config.previous)return;
+    const backend=this.backend(config);let pending=false;const retained:string[]=[];
+    try{await backend.pruneBackups(config.image,config.stateVolume,config.previous.snapshot);}
+    catch(error){pending=true;this.progress?.(`Backup cleanup deferred: ${String(error)}\n`);}
+    for(const image of new Set(config.retiredImages??[])){
+      if(image.split('@').pop()===config.digest||image.split('@').pop()===config.previous.digest)continue;
+      try{await backend.removeImage(image);}
+      catch(error){retained.push(image);pending=true;this.progress?.(`Image cleanup deferred: ${String(error)}\n`);}
+    }
+    config.retiredImages=retained;config.cleanupPending=pending;await this.save(config);
+  }
+  private async recover(config:Installation){
+    const transaction=config.transaction;if(!transaction)return this.status();
+    const old={...transaction.before};delete old.agentToken;
+    const backend=this.backend(old);const state=await backend.inspect(old.name);
+    if(transaction.replacing){
+      if(state.running)await backend.stop(old.name);
+      if(state.exists)await backend.remove(old.name);
+      if(!transaction.backedUp)throw new Error('Recovery snapshot is not complete; data were left untouched');
+      await backend.restore(old.image,old.stateVolume,transaction.snapshot);
+      await backend.create(old);
+    }else if(!state.exists)await backend.create(old);
+    if(transaction.wasRunning){
+      if(!(await backend.inspect(old.name)).running)await backend.start(old.name);
+      await this.ready(old,transaction.api);
+      if(transaction.gameWasRunning)await this.api('/v1/runtime/engine/start','POST',{},old);
+    }else if((await backend.inspect(old.name)).running)await backend.stop(old.name);
+    old.phase='ready';delete old.transaction;await this.save(old);
+    return this.status();
+  }
   async update(){return this.exclusive(async()=>{
     const config=await this.configured();const backend=this.backend(config);const release=await this.release();
-    if((await backend.inspect(config.name)).running){
-      const status=await this.api('/v1/runtime/status');if(status.owner.mode==='agent')throw new Error('Disconnect the agent before updating runtime');
-    }
+    // Persisted transactions always recover the old version before another attempt.
+    if(config.transaction)return this.recover(config);
+    const parts=(value:string|undefined)=>value?.match(/^(\d+)\.(\d+)\.(\d+)/)?.slice(1).map(Number);
+    const installed=parts(config.version),requested=parts(release.version);
+    if(installed&&requested&&requested.some((part,index)=>part<installed[index]&&requested.slice(0,index).every((v,i)=>v===installed[i])))
+      throw new Error('This Desktop is older than the installed runtime. Use the matching newer Desktop; saved data will not be downgraded automatically');
     const digest=await backend.pull(release.image);
     if(release.digest&&digest!==release.digest)throw new Error('Release digest mismatch');
     if(digest===config.digest){
-      if(!(await backend.inspect(config.name)).exists)await backend.create(config);
+      if(!(await backend.inspect(config.name)).exists){await backend.create(config);config.phase='ready';await this.save(config);}
+      if(config.cleanupPending)await this.cleanupRecovery(config);
       return this.status();
     }
-    const old={...config};const wasRunning=(await backend.inspect(config.name)).running;
-    if(wasRunning)await this.stop();
-    const snapshot='update-'+Date.now();await backend.backup(config.image,config.stateVolume,snapshot);
-    if((await backend.inspect(config.name)).exists)await backend.remove(config.name);
-    config.image=release.image.split('@')[0]+'@'+digest;config.digest=digest;delete config.agentToken;
+    const state=await backend.inspect(config.name);
+    const runtime=state.running?await this.api('/v1/runtime/status','GET',undefined,config):null;
+    if(runtime?.owner.mode==='agent')throw new Error('Image downloaded. Disconnect the agent before applying the runtime update');
+    const health=state.running?await this.api('/health','GET',undefined,config):null;
+    const old={...config,version:config.version??health?.environment?.project_version};delete old.agentToken;
+    const transaction:UpdateTransaction={before:old,snapshot:'update-'+Date.now()+'-'+randomUUID().slice(0,8),backedUp:false,replacing:false,
+      wasRunning:state.running,gameWasRunning:Boolean(runtime?.running),api:health?{runtime_api:health.runtime_api,game_api:health.game_api}:null};
+    delete config.agentToken;config.transaction=transaction;await this.save(config);
+    const candidate:Installation={...old,image:release.image.split('@')[0]+'@'+digest,digest,version:release.version,phase:'ready',
+      previous:{image:old.image,digest:old.digest,version:old.version,snapshot:transaction.snapshot,created:Date.now()},
+      retiredImages:[...old.retiredImages??[],...(old.previous?[old.previous.image]:[])]};
     try{
-      await backend.create(config);await backend.start(config.name);await this.ready(config);
-      await this.save(config);
-      if(wasRunning)await this.api('/v1/runtime/engine/start','POST',{},config);else await backend.stop(config.name);
+      this.progress?.('Stopping runtime and completing recording…\n');
+      if(state.running)await this.stop();
+      this.progress?.('Backing up saves, profile, Atlas and session data…\n');
+      await backend.backup(old.image,old.stateVolume,transaction.snapshot);
+      transaction.backedUp=true;transaction.replacing=true;await this.save(config);
+      if((await backend.inspect(old.name)).exists)await backend.remove(old.name);
+      this.progress?.('Creating and checking the new runtime…\n');
+      await backend.create(candidate);await backend.start(candidate.name);await this.ready(candidate);
+      if(transaction.gameWasRunning)await this.api('/v1/runtime/engine/start','POST',{},candidate);
+      if(!transaction.wasRunning)await backend.stop(candidate.name);
+      await this.save(candidate); // Commit before any old recovery resources are removed.
     }catch(error){
-      const state=await backend.inspect(config.name);
-      if(state.running)await backend.stop(config.name);if(state.exists)await backend.remove(config.name);
-      await backend.restore(old.image,old.stateVolume,snapshot);await backend.create(old);await this.save(old);
-      if(wasRunning){await backend.start(old.name);await this.ready(old);await this.api('/v1/runtime/engine/start','POST',{},old);}
-      throw error;
+      try{await this.recover(config);}
+      catch(recoveryError){throw new Error(`Update failed: ${String(error)}. Recovery is pending: ${String(recoveryError)}. Use Recover interrupted update in Setup.`);}
+      throw new Error(`Update failed; the previous runtime and saved data were restored. ${String(error)}`);
     }
+    await this.cleanupRecovery(candidate);
     return this.status();
   });}
-  async connect(name='Gameplay agent'){
-    await this.start();const config=await this.configured();
-    const result=await this.api('/v1/agent/connect','POST',{name},config);
-    config.agentToken=result.session_token;await this.save(config);
+  async connect(name='Gameplay agent',profile?:string){
+    await this.start(undefined,profile);const config=await this.configured();
+    const result=await this.api('/v1/agent/connect','POST',{name,...(profile?{profile}:{})},config);
+    config.agentToken=result.session_token;config.agentProfile=result.profile?.id;await this.save(config);
     return {...result,session_token:undefined};
   }
   async disconnect(){const config=await this.configured();const result=await this.api('/v1/agent/disconnect','POST',{},config);
@@ -197,11 +262,11 @@ export class Core {
     if(Array.isArray(value))return Promise.all(value.map(v=>this.materialize(v,config)));
     if(value&&typeof value==='object')return Object.fromEntries(await Promise.all(Object.entries(value).map(async([k,v])=>[k,await this.materialize(v,config)])));
     if(typeof value!=='string'||!/^\/v1\/artifacts\/[a-f0-9]{32}$/.test(value))return value;
-    const directory=join(config.storageDirectory,'exports');await mkdir(directory,{recursive:true});
+    const directory=join(config.storageDirectory,'exports',config.agentProfile??'default');await mkdir(directory,{recursive:true});
     const response=await this.fetch(value,{},config);if(!response.ok||!response.body)throw new Error('Artifact is no longer available');
     if(response.headers.get('X-Astra-Artifact-Kind')==='recording'){
-      const name=decodeURIComponent(response.headers.get('X-Astra-Artifact-Name')??'');
-      if(name&&basename(name)===name&&!name.includes('\\')){
+      const name=decodeURIComponent(response.headers.get('X-Astra-Artifact-Relative-Path')??response.headers.get('X-Astra-Artifact-Name')??'');
+      if(name&&!name.includes('\\')&&name.split('/').every(part=>Boolean(part)&&part!=='.'&&part!=='..')){
         const local=join(config.recordingsDirectory,name);
         try{if((await stat(local)).isFile()){await response.body.cancel();return local;}}catch{}
       }
@@ -219,10 +284,25 @@ export class Core {
     return {name:'container',text:await backend.logs(config.name)};
   }
   async exportSkill(destination:string,executable:string){
+    await this.ensureDaemon();const {active:profile}=await this.profiles();
     destination=resolve(destination);try{await access(destination);throw new Error('Skill destination already exists; choose a new directory');}
     catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
     await cp(join(this.resources,'skill'),destination,{recursive:true,errorOnExist:true});
-    await writeFile(join(destination,'installation.json'),JSON.stringify({executable,config:this.configFile},null,2)+'\n');
-    return {skill:join(destination,'SKILL.md'),executable,config:this.configFile};
+    await writeFile(join(destination,'installation.json'),JSON.stringify({executable,config:this.configFile,profile:{id:profile.id,name:profile.name}},null,2)+'\n');
+    return {skill:join(destination,'SKILL.md'),executable,config:this.configFile,profile};
+  }
+  async profiles(){await this.ensureDaemon();return this.api('/v1/runtime/profiles');}
+  async profile(operation:string,args:Record<string,unknown>){return this.exclusive(async()=>{
+    await this.ensureDaemon();const result=await this.api('/v1/runtime/profiles/'+operation,'POST',args);
+    if(['switch','delete','duplicate'].includes(operation)){
+      const config=await this.configured();delete config.agentToken;delete config.agentProfile;await this.save(config);
+    }
+    return result;
+  });}
+  async recordingsFolder(){
+    const {active}=await this.profiles(),config=await this.configured();
+    const sub=active.recordings_subdirectory;
+    if(typeof sub!=='string'||sub&&!/^[a-f0-9]{32}$/.test(sub))throw new Error('Invalid profile recording directory');
+    const directory=join(config.recordingsDirectory,sub);await mkdir(directory,{recursive:true});return directory;
   }
 }

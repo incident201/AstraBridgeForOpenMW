@@ -29,13 +29,18 @@ mutations after a connection failure; use the existing action receipt mechanism.
 | `POST /v1/runtime/engine/{start,stop,restart}` | Engine lifecycle inside the persistent daemon. |
 | `GET/PATCH /v1/runtime/config` | Explicit runtime configuration; stop the game before editing. |
 | `POST /v1/runtime/import-ini` | Import content/archive order using an explicitly selected encoding. |
-| `POST /v1/agent/connect` | Acquire agent ownership; accepts a display `name`. |
+| `POST /v1/agent/connect` | Acquire agent ownership; accepts `name` and optional expected `profile` ID. |
+| `GET /v1/runtime/profiles` | Active profile and profile catalog. |
+| `POST /v1/runtime/profiles/{create,rename,duplicate,switch,delete}` | Manage profiles while the game is stopped. Create takes `name`; rename/duplicate take `id,name`; switch/delete take `id`. |
 | `POST /v1/agent/disconnect` | Stop held input and release the authenticated agent session. |
 | `GET /v1/agent/status` | Public ownership state, without its credential. |
 | `POST /v1/runtime/agent/end` | Deliberate user termination of the current owner. |
 | `GET /v1/game/schema` | Public command catalog. |
 | `POST /v1/game/command` | Execute `{ "op": "...", "args": {...} }` as the connected agent. |
 | `POST /v1/runtime/recording/{start,stop,status}` | Recording management. |
+| `GET /v1/runtime/replay?id=...` | Current recording's viewer timeline, or a previously identified recording; reads completed file data only. |
+| `GET /v1/runtime/replay/{id}/{generation}/index?time=...` | A bounded batch of fragments around a recording time; `after=INDEX` requests following fragments. |
+| `GET /v1/runtime/replay/{id}/{generation}/{init,INDEX}` | MP4 initialization or a complete media fragment; rejects stale file generations. |
 | `GET /v1/runtime/recordings` | Recording inventory and artifact references. |
 | `GET /v1/runtime/atlas` | Retained travel information; supports location, paging and map queries. |
 | `GET /v1/runtime/environment` | Image/build identity and graphics diagnostics. |
@@ -66,11 +71,23 @@ manual input; it does not end an explicitly connected agent session.
 
 ## Host artifacts and recordings
 
+Runtime `status` includes `profile` with its ID and display name. Engine start
+and agent connect accept an optional expected `profile` ID and reject a mismatch
+without switching. Profile changes reset the active artifact registry and replay
+index. Atlas, sessions, saves, knowledge and recording inventories are scoped to
+the active profile. Profile mutation returns the updated catalog and `result`.
+Deletion is permanent; an interactive client must request confirmation first.
+
 The CLI materializes observation artifacts as local files. Recordings already
 exist in the configured host folder, so completed recording responses return
 those direct host paths without copying the MP4 again. The Desktop recording
 browser can play/export them and open their host folder. The renderer obtains
 media through the application bridge and range-capable artifact protocol.
+
+Observation exports use a profile-specific host subdirectory. Recording artifacts
+carry `X-Astra-Artifact-Relative-Path`, relative to the configured host recording
+root, so the CLI can return files from the active profile's subfolder without
+copying videos. `astrabridge recordings` returns that profile's folder and list.
 
 Atlas is always served by the daemon. Viewing it does not issue a gameplay
 observe/pause command. Offline/stored positions are marked historical, and no
@@ -79,3 +96,12 @@ navmesh or unvisited global geometry is exposed.
 `GET /v1/runtime/gpus` lists devices visible in the container. Runtime configuration
 accepts independent `graphics_gpu` and `encoding_gpu` selectors. See
 [GPU selection](gpu-selection.md) for IDs, probes and fallback behavior.
+
+Application-level `astrabridge status` also reports `currentVersion`,
+`previousRuntime`, `updateRequired`, `updatePending` and `cleanupPending`.
+These describe host management, not game state. `astrabridge update` recovers an
+interrupted transaction before allowing another update attempt. The new Desktop
+exports its bundled skill with executable/configuration paths and the active
+profile's ID/name in `installation.json`;
+re-export it after changing application versions, especially when the AppImage
+filename changes. Existing exported copies are not rewritten automatically.

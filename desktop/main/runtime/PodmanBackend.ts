@@ -110,4 +110,11 @@ export class PodmanBackend implements RuntimeBackend {
   }
   async backup(image:string,volume:string,id:string){await this.snapshot(image,volume,id,'backup');}
   async restore(image:string,volume:string,id:string){await this.snapshot(image,volume,id,'restore');}
+  async pruneBackups(image:string,volume:string,keep:string){await this.snapshot(image,volume,keep,'prune');}
+  async removeImage(image:string){
+    let resolved:string;
+    try{resolved=await this.localImage(image);}catch(error){if(String(error).includes('Pinned local runtime image is missing'))return;throw error;}
+    const result=await this.command(['image','rm','--no-prune',resolved]);
+    if(result.code!==0&&!/no such|not known|not found/i.test(result.stderr))checked(result);
+  }
 }

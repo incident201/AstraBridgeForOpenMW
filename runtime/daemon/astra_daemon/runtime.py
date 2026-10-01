@@ -9,6 +9,8 @@ import time
 import uuid
 import math
 import copy
+import logging
+from logging.handlers import RotatingFileHandler
 
 from astra_bridge.environment import identity
 from astra_bridge.protocol import BridgeError, number
@@ -19,27 +21,43 @@ from .input import Input
 from .live import Live
 from .ownership import Ownership
 from .storage import Storage
+from .replay import Replay
+from .profiles import Profiles
 
 
 class Runtime:
     def __init__(self, installation: Path, storage: Path, game: Path):
-        self.installation,self.root=installation,storage
-        self.storage=Storage(storage,game,installation)
-        self.graphics=Graphics(installation,storage)
+        self.installation,self.base,self.game_root=installation,storage,game
+        self.profiles=Profiles(storage,game,installation)
+        self.root=self.profiles.path();self.recordings_root=self.profiles.recordings()
+        self.recordings_root.mkdir(parents=True,exist_ok=True)
+        self.storage=Storage(self.root,game,installation)
+        self.graphics=Graphics(installation,self.root)
         self.owner=Ownership();self.session=None;self.input=None;self.live=None
         self.transition=False;self.mutation=asyncio.Lock()
         self.artifacts={};self.last_error=None;self.started=time.time()
+        self.replay=Replay(self.recordings_root)
         self.atlas_cache={'supported':False}
+        self.log_handler=None;self.file_logging=False
         self.build=json.loads((installation/'runtime-manifest.json').read_text()) if (installation/'runtime-manifest.json').exists() else {}
 
     def running(self):
         return bool(self.session and self.session.process and self.session.process.poll() is None)
 
+    def profile_logging(self,enabled=True):
+        self.file_logging=enabled
+        if self.log_handler:
+            logging.getLogger().removeHandler(self.log_handler);self.log_handler.close();self.log_handler=None
+        if enabled:
+            self.root.joinpath('logs').mkdir(parents=True,exist_ok=True)
+            self.log_handler=RotatingFileHandler(self.root/'logs/daemon.log',maxBytes=4*1024*1024,backupCount=3)
+            logging.getLogger().addHandler(self.log_handler)
+
     def status(self):
         session=self.session
         frame=session.display.frame_stream if session else None
         media=session.display.media_stream if session else None
-        return {'running':self.running(),'owner':self.owner.public(),'transitioning':self.transition,
+        return {'profile':self.profiles.public(),'running':self.running(),'owner':self.owner.public(),'transitioning':self.transition,
                 'active_action':session.control.status() if session else None,
                 'recording':session.recorder.status() if session and session.recorder else None,
                 'viewer':self.live.status() if self.live else {'running':False},
@@ -57,7 +75,7 @@ class Runtime:
         cfg=self.storage.prepare_profile()
         display=self.graphics.start(cfg['graphics']=='software',gpu or cfg['graphics_gpu'])
         if os.environ.get('ASTRA_GPU_BACKEND')=='wsl':os.environ['DISPLAY']=display
-        session=Session(self.installation/'runtime',self.installation,display=display,sound=cfg['sound'],storage=self.root)
+        session=Session(self.installation/'runtime',self.installation,display=display,sound=cfg['sound'],storage=self.root,recordings_dir=self.recordings_root)
         session.display.env.update(self.graphics.environment)
         self.session=session
         session.start()
@@ -65,10 +83,11 @@ class Runtime:
         self._history('engine_started',session=session.session_id)
         self.last_error=None
 
-    async def start_engine(self, gpu=None):
+    async def start_engine(self, gpu=None, profile=None):
         if gpu is not None and (not isinstance(gpu,str) or gpu not in ('auto','nvidia') and not gpu.startswith('pci:')):
             raise BridgeError('invalid_graphics_gpu')
         async with self.mutation:
+            if profile is not None and profile!=self.profiles.data['active']:raise BridgeError('profile_mismatch',profile=self.profiles.public())
             if self.running():
                 if gpu is not None and gpu!=self.graphics.info.get('requested_gpu'):
                     raise BridgeError('restart_required_to_change_gpu')
@@ -112,14 +131,15 @@ class Runtime:
                 s.display.media_stream.ui(mode=='manual')
                 if s.recorder:s.recorder.set_active('manual',mode=='manual')
 
-    async def acquire_agent(self, name):
+    async def acquire_agent(self, name, profile=None):
         async with self.mutation:
+            if profile is not None and profile!=self.profiles.data['active']:raise BridgeError('profile_mismatch',profile=self.profiles.public())
             if not self.running():raise BridgeError('game_not_running')
             if self.owner.mode=='agent':raise BridgeError('agent_already_connected')
             self.transition=True
             try:
                 await asyncio.to_thread(self._mode,'agent')
-                result=self.owner.acquire_agent(name)
+                result={**self.owner.acquire_agent(name),'profile':self.profiles.public()}
                 self._history('agent_connected',name=name)
                 return result
             finally:self.transition=False
@@ -168,22 +188,61 @@ class Runtime:
                 self.live=live
         return self.live.status() if self.live else {'running':False}
 
+    async def profile_operation(self,operation,args):
+        async with self.mutation:
+            if self.running():raise BridgeError('stop_game_before_managing_profiles')
+            if operation not in {'create','rename','switch','delete','duplicate'}:raise BridgeError('unknown_profile_operation')
+            allowed={'name'} if operation=='create' else {'id','name'} if operation in {'rename','duplicate'} else {'id'}
+            if set(args)-allowed or operation!='create' and not isinstance(args.get('id'),str):raise BridgeError('invalid_arguments')
+            key=args.get('id');old=self.profiles.data['active']
+            if key:self.profiles.get(key)
+            if operation in {'switch','delete','duplicate'}:
+                await asyncio.to_thread(self._stop_engine)
+                await asyncio.to_thread(self.graphics.close)
+            logging_enabled=self.file_logging
+            if operation=='delete':self.profile_logging(False)
+            try:
+                if operation=='create':result=await asyncio.to_thread(self.profiles.create,args.get('name'),self.storage.config())
+                elif operation=='duplicate':result=await asyncio.to_thread(self.profiles.duplicate,key,args.get('name'))
+                elif operation=='rename':result=self.profiles.rename(key,args.get('name'))
+                elif operation=='switch':result=self.profiles.select(key)
+                else:result=await asyncio.to_thread(self.profiles.delete,key,self.storage.config())
+            finally:
+                if old!=self.profiles.data['active']:
+                    self.root=self.profiles.path();self.recordings_root=self.profiles.recordings()
+                    self.recordings_root.mkdir(parents=True,exist_ok=True)
+                    self.storage=Storage(self.root,self.game_root,self.installation)
+                    self.graphics=Graphics(self.installation,self.root)
+                    self.replay=Replay(self.recordings_root);self.artifacts={};self.atlas_cache={'supported':False}
+                    self.last_error=None
+                if logging_enabled:self.profile_logging()
+            return {'result':result,**self.profiles.catalog()}
+
     def project(self, value):
         if isinstance(value,dict):return {k:self.project(v) for k,v in value.items()}
         if isinstance(value,list):return [self.project(v) for v in value]
-        if isinstance(value,str) and value.startswith(str(self.root)+'/'):
+        if isinstance(value,str) and value.startswith(str(self.base)+'/'):
             path=Path(value)
-            roots=[self.root/'recordings',self.root/'runtime/screenshots']
-            if path.is_file() and any(path.resolve().is_relative_to(p.resolve()) for p in roots):
-                key=hashlib.sha256(str(path.relative_to(self.root)).encode()).hexdigest()[:32]
-                self.artifacts[key]=path
-                return '/v1/artifacts/'+key
-            return None  # Do not publish private container filenames.
+            resolved=path.resolve()
+            if path.is_file() and (resolved.parent==self.recordings_root.resolve() or resolved.is_relative_to((self.root/'runtime/screenshots').resolve())):
+                key=hashlib.sha256((self.profiles.data['active']+'/'+str(path.relative_to(self.base))).encode()).hexdigest()[:32]
+                self.artifacts[key]=path;return '/v1/artifacts/'+key
+            return None
         return value
+
+    def replay_info(self, key=None):
+        session=self.session;recorder=session.recorder if session else None
+        active=recorder.path if recorder and not recorder.closing else None
+        if not active and session and session.last_recording and session.last_recording.get('path'):
+            self.replay.last=self.replay.identify(session.last_recording['path'])
+        info=self.replay.info(active,key)
+        if info['id'] and info['kind']=='file':info['url']=self.project(str(self.replay.paths[info['id']]))
+        return info
 
     def recordings(self):
         rows=[]
-        for path in sorted((self.root/'recordings').glob('*.mp4'),key=lambda p:p.stat().st_mtime,reverse=True):
+        for path in sorted(self.recordings_root.glob('*.mp4'),key=lambda p:p.stat().st_mtime,reverse=True):
+            if path.name.endswith('.finalizing.mp4'):continue
             row={'id':path.stem,'name':path.name,'bytes':path.stat().st_size,'created':path.stat().st_mtime,
                  'video':self.project(str(path))}
             for suffix,field in (('.json','metadata'),('.encoder.json','encoder'),('.ffmpeg.log','diagnostics')):
@@ -245,3 +304,4 @@ class Runtime:
     async def close(self):
         await self.stop_engine()
         await asyncio.to_thread(self.graphics.close)
+        self.profile_logging(False)

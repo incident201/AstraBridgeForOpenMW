@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import math
 import os
 from pathlib import Path
 import secrets
@@ -53,11 +54,11 @@ def application(runtime: Runtime, token: str):
     async def engine(request):
         action=request.match_info['action']
         data=await body(request) if request.can_read_body else {}
-        if data.keys()-{'gpu'}:raise BridgeError('invalid_arguments')
-        if action=='start':return answer(await runtime.start_engine(data.get('gpu')))
+        if data.keys()-{'gpu','profile'}:raise BridgeError('invalid_arguments')
+        if action=='start':return answer(await runtime.start_engine(data.get('gpu'),data.get('profile')))
         if action=='stop':return answer(await runtime.stop_engine())
         if action=='restart':
-            await runtime.stop_engine();return answer(await runtime.start_engine(data.get('gpu')))
+            await runtime.stop_engine();return answer(await runtime.start_engine(data.get('gpu'),data.get('profile')))
         raise web.HTTPNotFound()
     async def configuration(request):
         if request.method=='GET':return answer(runtime.storage.config())
@@ -79,7 +80,8 @@ def application(runtime: Runtime, token: str):
     async def schema(request):return answer(commands)
     async def agent(request):
         action=request.match_info['action']
-        if action=='connect':return answer(await runtime.acquire_agent((await body(request)).get('name','Gameplay agent')))
+        if action=='connect':
+            data=await body(request);return answer(await runtime.acquire_agent(data.get('name','Gameplay agent'),data.get('profile')))
         if action=='disconnect':return answer(await runtime.release(request.headers.get('X-Astra-Session')))
         if action=='status':return answer(runtime.owner.public())
         raise web.HTTPNotFound()
@@ -90,17 +92,33 @@ def application(runtime: Runtime, token: str):
         if action not in {'start','stop','status'}:raise web.HTTPNotFound()
         result=await asyncio.to_thread(runtime.session.control.execute,'record_'+action,{})
         return answer(runtime.project(result))
+    async def profiles(request):
+        if request.method=='GET':
+            async with runtime.mutation:return answer(runtime.profiles.catalog())
+        return answer(await runtime.profile_operation(request.match_info['operation'],await body(request)))
+    async def replay_info(request):
+        return answer(await asyncio.to_thread(runtime.replay_info,request.query.get('id')))
+    async def replay_index(request):
+        key=request.match_info['id'];generation=request.match_info['generation']
+        when=float(request.query.get('time','0'));after=int(request.query['after']) if 'after' in request.query else None
+        if not math.isfinite(when) or when<0 or after is not None and after< -1:raise BridgeError('invalid_arguments')
+        return answer(await asyncio.to_thread(runtime.replay.batch,key,generation,when,after))
+    async def replay_part(request):
+        data=await asyncio.to_thread(runtime.replay.part,request.match_info['id'],request.match_info['generation'],request.match_info['part'])
+        if not data:raise BridgeError('replay_not_ready')
+        return web.Response(body=data,content_type='video/mp4',headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'})
     async def recordings(request):return answer(runtime.recordings())
     async def atlas(request):
         args={k:int(v) if k in {'page','limit'} else float(v) if k=='radius_m' else v
               for k,v in request.query.items() if k in {'space','query','page','limit','radius_m','level','route'}}
-        return answer(await asyncio.to_thread(runtime.atlas,args))
+        async with runtime.mutation:return answer(await asyncio.to_thread(runtime.atlas,args))
     async def artifact(request):
         path=runtime.artifacts.get(request.match_info['id'])
         if not path or not path.is_file():raise web.HTTPNotFound()
-        kind='recording' if path.is_relative_to(runtime.root/'recordings') else 'observation'
+        kind='recording' if path.is_relative_to(runtime.recordings_root) else 'observation'
         return web.FileResponse(path,headers={'X-Content-Type-Options':'nosniff','Cache-Control':'private, no-cache',
-            'X-Astra-Artifact-Kind':kind,'X-Astra-Artifact-Name':quote(path.name,safe='')})
+            'X-Astra-Artifact-Kind':kind,'X-Astra-Artifact-Name':quote(path.name,safe=''),
+            **({'X-Astra-Artifact-Relative-Path':quote(str(path.relative_to(runtime.base/'recordings')),safe='/')} if kind=='recording' else {})})
     async def logs(request):
         name=request.query.get('name','daemon.log')
         files={p.name:p for p in (runtime.root/'logs').glob('*.log')}
@@ -182,6 +200,10 @@ def application(runtime: Runtime, token: str):
         web.get('/v1/game/schema',schema),web.post('/v1/game/command',game),
         web.post('/v1/agent/{action}',agent),web.get('/v1/agent/status',agent),
         web.post('/v1/runtime/agent/end',end_agent),web.post('/v1/runtime/recording/{action}',record),
+        web.get('/v1/runtime/profiles',profiles),web.post('/v1/runtime/profiles/{operation}',profiles),
+        web.get('/v1/runtime/replay',replay_info),
+        web.get('/v1/runtime/replay/{id}/{generation}/index',replay_index),
+        web.get('/v1/runtime/replay/{id}/{generation}/{part}',replay_part),
         web.get('/v1/runtime/recordings',recordings),web.get('/v1/runtime/atlas',atlas),
         web.get('/v1/artifacts/{id}',artifact),web.get('/v1/runtime/logs',logs),
         web.get('/v1/runtime/sessions',sessions),web.get('/v1/runtime/environment',environment),

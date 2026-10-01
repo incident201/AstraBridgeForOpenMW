@@ -25,6 +25,8 @@ export interface RuntimeBackend {
   importGame(image:string,volume:string,archive:Readable):Promise<void>;
   backup(image:string,volume:string,id:string):Promise<void>;
   restore(image:string,volume:string,id:string):Promise<void>;
+  pruneBackups(image:string,volume:string,keep:string):Promise<void>;
+  removeImage(image:string):Promise<void>;
 }
 export type Progress=(message:string)=>void;
 export interface ProcessResult {code:number; stdout:string; stderr:string}

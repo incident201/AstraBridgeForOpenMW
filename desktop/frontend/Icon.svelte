@@ -2,6 +2,10 @@
   export let name:string;
   export let size=22;
   const paths:Record<string,string[]>={
+    profiles:['M4 21v-2a6 6 0 0 1 12 0v2','M10 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8','M18 4a4 4 0 0 1 0 7M20 21v-2a6 6 0 0 0-2-4.5'],
+    plus:['M12 5v14M5 12h14'],
+    copy:['M8 8h13v13H8Z','M16 8V3H3v13h5'],
+    pause:['M8 5v14M16 5v14'],
     play:['M6 4.5 18 12 6 19.5Z'],
     fullscreen:['M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5'],
     minimize:['M3 8h5V3M21 8h-5V3M16 21v-5h5M8 21v-5H3'],

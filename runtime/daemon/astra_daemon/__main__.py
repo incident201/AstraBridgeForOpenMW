@@ -1,5 +1,4 @@
 import logging
-from logging.handlers import RotatingFileHandler
 import os
 from pathlib import Path
 
@@ -12,10 +11,9 @@ def main():
     installation=Path(os.environ.get('ASTRA_INSTALLATION','/opt/astrabridge'))
     storage=Path(os.environ.get('ASTRA_STORAGE','/data'))
     game=Path(os.environ.get('ASTRA_GAME','/managed-game/content'))
-    storage.joinpath('logs').mkdir(parents=True,exist_ok=True)
-    logging.basicConfig(level=logging.INFO,handlers=[logging.StreamHandler(),
-        RotatingFileHandler(storage/'logs/daemon.log',maxBytes=4*1024*1024,backupCount=3)])
+    logging.basicConfig(level=logging.INFO,handlers=[logging.StreamHandler()])
     runtime=Runtime(installation,storage,game)
+    runtime.profile_logging()
     web.run_app(application(runtime,os.environ.get('ASTRA_API_TOKEN','')),
                 host='0.0.0.0',port=int(os.environ.get('ASTRA_API_PORT','18770')),access_log=None,shutdown_timeout=120)
 

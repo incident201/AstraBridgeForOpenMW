@@ -54,4 +54,9 @@ export class WslContainerBackend implements RuntimeBackend {
   }
   async backup(image:string,volume:string,id:string){await this.snapshot(image,volume,id,'backup');}
   async restore(image:string,volume:string,id:string){await this.snapshot(image,volume,id,'restore');}
+  async pruneBackups(image:string,volume:string,keep:string){await this.snapshot(image,volume,keep,'prune');}
+  async removeImage(image:string){
+    const result=await this.command(['image','rm',image]);
+    if(result.code!==0&&!/no such|not found/i.test(result.stderr))checked(result);
+  }
 }

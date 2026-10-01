@@ -30,15 +30,15 @@ try{
   page=await app.firstWindow();page.on('pageerror',error=>errors.push(String(error)));
   await page.getByRole('button',{name:'Open viewer',exact:true}).click({timeout:30000});
   await page.waitForFunction(()=>{const v=document.querySelector('video');return v?.videoWidth===1280&&v.currentTime>1;},{},{timeout:90000});
-  report.viewer720=await page.locator('video').evaluate(v=>({width:v.videoWidth,height:v.videoHeight,time:v.currentTime,tracks:v.srcObject.getTracks().map(t=>({kind:t.kind,state:t.readyState,muted:t.muted}))}));
+  report.viewer720=await page.locator('video[aria-label="Live Morrowind game"]').evaluate(v=>({width:v.videoWidth,height:v.videoHeight,time:v.currentTime,tracks:v.srcObject.getTracks().map(t=>({kind:t.kind,state:t.readyState,muted:t.muted}))}));
   await page.screenshot({path:join(output,'play.png')});
   await page.getByLabel('Viewer quality').selectOption('1080p60');
   await page.waitForFunction(()=>document.querySelector('video')?.videoWidth===1920,{},{timeout:90000});
-  report.viewer1080=await page.locator('video').evaluate(v=>({width:v.videoWidth,height:v.videoHeight}));
+  report.viewer1080=await page.locator('video[aria-label="Live Morrowind game"]').evaluate(v=>({width:v.videoWidth,height:v.videoHeight}));
   await page.getByRole('button',{name:'Fullscreen',exact:true}).click();
   await page.mouse.move(10,10);await page.getByRole('button',{name:'Take manual control',exact:true}).click();
   await page.getByRole('button',{name:'Release control',exact:true}).waitFor();
-  await page.locator('video').focus();await page.keyboard.press('j');
+  await page.locator('video[aria-label="Live Morrowind game"]').focus();await page.keyboard.press('j');
   await page.waitForTimeout(400);
   await page.mouse.move(10,10);await page.getByRole('button',{name:'Release control',exact:true}).click();
   agent=(await api('/v1/agent/connect',{name:'Ownership fixture'})).session_token;
@@ -47,7 +47,7 @@ try{
   await api('/v1/agent/disconnect',{});agent=undefined;
   await page.mouse.move(10,10);await page.getByRole('button',{name:'Take manual control',exact:true}).click();
   await page.getByRole('button',{name:'Release control',exact:true}).waitFor();
-  await page.locator('video').focus();await page.keyboard.press('Escape');await page.waitForTimeout(400);
+  await page.locator('video[aria-label="Live Morrowind game"]').focus();await page.keyboard.press('Escape');await page.waitForTimeout(400);
   assert.ok(await page.locator('.viewer-panel').evaluate(e=>e.classList.contains('viewer-fullscreen')));
   report.escapePreservesFullscreen=true;
   await page.keyboard.press('Backquote');await page.waitForTimeout(200);
@@ -70,11 +70,11 @@ try{
     }
     await page.screenshot({path:join(output,name.toLowerCase()+'.png')});
   }
-  await app.close();app=null;report.afterGuiClose=await api('/v1/runtime/status');assert.ok(report.afterGuiClose.running);
+  await app.evaluate(({dialog})=>{dialog.showMessageBox=async()=>({response:1,checkboxChecked:false});});await app.close();app=null;report.afterGuiClose=await api('/v1/runtime/status');assert.ok(report.afterGuiClose.running);
   assert.deepEqual(errors,[]);report.passed=true;
 }catch(error){report.error=String(error);if(page)await page.screenshot({path:join(output,'failure.png')}).catch(()=>{});throw error;}
 finally{
-  if(app)await app.close();if(agent)await api('/v1/agent/disconnect',{}).catch(()=>{});
+  if(app){await app.evaluate(({dialog})=>{dialog.showMessageBox=async()=>({response:1,checkboxChecked:false});});await app.close();}if(agent)await api('/v1/agent/disconnect',{}).catch(()=>{});
   await api('/v1/runtime/live',undefined,'DELETE').catch(()=>{});
   await writeFile(join(output,'result.json'),JSON.stringify({...report,rendererErrors:errors},null,2)+'\n');
 }
