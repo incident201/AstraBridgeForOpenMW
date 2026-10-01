@@ -58,9 +58,10 @@ class Live:
         display=self.session.display
         first=display.frame_stream.fresh()
         media=display.media_stream
-        if not media.audio:raise BridgeError('engine_audio_unavailable')
+        self.audio_enabled=bool(display.sound)
+        if self.audio_enabled and not media.audio:raise BridgeError('engine_audio_unavailable')
         directory=self.session.runtime
-        encoder,attempts=select(first,QUALITIES[self.quality][2],True,directory,self.session.recording_settings)
+        encoder,attempts=select(first,QUALITIES[self.quality][2],self.audio_enabled,directory,self.session.recording_settings)
         # Recording's successful High/AAC/MP4 probe is not proof that a live
         # Baseline/Opus filter chain works. Probe this exact chain separately.
         candidates=[encoder]
@@ -68,7 +69,8 @@ class Live:
             candidates.append(Encoder(encoder.binary,'libx264',encoder.version))
         for candidate in candidates:
             with tempfile.TemporaryDirectory(prefix='live-probe-',dir=directory) as temporary:
-                tmp=Path(temporary);audio=tmp/'audio.f32';audio.write_bytes(bytes(48000*8))
+                tmp=Path(temporary);audio=tmp/'audio.f32' if self.audio_enabled else None
+                if audio:audio.write_bytes(bytes(48000*8))
                 result=subprocess.run(live_command(candidate,first,self.quality,tmp/'out.mkv',audio,probe=True),
                                       input=first['bgra']*4,capture_output=True,timeout=15)
                 attempts.append({'live':True,'encoder':candidate.codec,'gpu_id':candidate.gpu_id,
@@ -98,17 +100,19 @@ class Live:
                 if self.relay.poll() is not None or time.monotonic()>deadline:
                     self.close();raise BridgeError('live_relay_failed')
                 time.sleep(.05)
-        read,self.audio_write=os.pipe()
+        read=None
+        if self.audio_enabled:read,self.audio_write=os.pipe()
         self.log=(logs/'live.ffmpeg.log').open('ab')
-        self.process=subprocess.Popen(live_command(encoder,first,self.quality,'rtsp://127.0.0.1:18554/live',f'pipe:{read}'),
-            stdin=subprocess.PIPE,stdout=subprocess.DEVNULL,stderr=self.log,pass_fds=(read,),start_new_session=True)
-        os.close(read)
+        self.process=subprocess.Popen(live_command(encoder,first,self.quality,'rtsp://127.0.0.1:18554/live',f'pipe:{read}' if read is not None else None),
+            stdin=subprocess.PIPE,stdout=subprocess.DEVNULL,stderr=self.log,pass_fds=(read,) if read is not None else (),start_new_session=True)
+        if read is not None:os.close(read)
         self.stream_context=display.frame_stream.active();self.stream_context.__enter__()
-        self.audio_context=media.capture();self.audio_context.__enter__()
+        if self.audio_enabled:self.audio_context=media.capture();self.audio_context.__enter__()
         self.started=time.monotonic()
         self.video_thread=threading.Thread(target=self._video,args=(first,),daemon=True)
-        self.audio_thread=threading.Thread(target=self._audio,daemon=True)
-        self.video_thread.start();self.audio_thread.start()
+        self.video_thread.start()
+        if self.audio_enabled:
+            self.audio_thread=threading.Thread(target=self._audio,daemon=True);self.audio_thread.start()
 
     def _video(self, latest):
         stream=self.session.display.frame_stream
@@ -158,7 +162,7 @@ class Live:
 
     def status(self):
         return {'running':bool(self.process and self.process.poll() is None and not self.closed.is_set()),
-                'quality':self.quality,'frames':self.frames,'source_frames_skipped':self.dropped,
+                'quality':self.quality,'audio':getattr(self,'audio_enabled',False),'frames':self.frames,'source_frames_skipped':self.dropped,
                 'audio_discontinuities':self.audio_dropped,'error':self.error,
                 'encoder':getattr(self,'encoder',None),'probe_attempts':getattr(self,'attempts',[])}
 

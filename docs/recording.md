@@ -70,7 +70,8 @@ FFmpeg diagnostics, frame/audio statistics and environment information.
 ## Live viewer
 
 A separate FFmpeg process publishes H.264/Opus to private MediaMTX, which serves
-WebRTC to Desktop. The two viewer presets are 720p30 and 1080p60. Live H.264 uses
+WebRTC to Desktop. The two viewer presets are 720p30 and 1080p60. Disabling game sound
+produces a video-only live stream; it does not prevent viewing the game. Live H.264 uses
 no B-frames; VAAPI uses its `constrained_baseline` profile spelling. The live
 chain is probed separately from recording and can independently fall back to CPU.
 
