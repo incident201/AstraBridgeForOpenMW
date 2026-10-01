@@ -51,6 +51,19 @@ The build creates a local OCI image and `WORK/dist/release.json`. It does not pu
 images, tags, commits or releases. Copy that release metadata to
 `desktop/resources/release.json` before packaging the matching Desktop.
 
+To transfer a local runtime to Windows without publishing it, export the image
+with Podman's `save --format docker-archive` and load that archive using
+`wslc image load --input <archive>`. Use the build workspace's Podman graph when
+exporting. WSLC's archive loader requires Docker archive layout, even when the
+original build produced an OCI image.
+
+Loaded archives may have no registry digest. For a local `localhost/...` image,
+set the development Desktop's `release.json` `digest` to the loaded image's
+`Id` from `wslc image inspect`, preserving `development: true`. The Windows
+backend uses that immutable config ID for creation, snapshots and rollback;
+moving a local tag does not select different contents. Published releases still
+require their registry manifest digest. Write edited JSON as UTF-8 without BOM.
+
 ## Desktop build
 
 Use the pinned npm lockfile and Node 24 or newer. Keep caches and dependencies in

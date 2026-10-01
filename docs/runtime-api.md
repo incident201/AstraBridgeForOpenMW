@@ -5,6 +5,10 @@ the same API client. Gameplay commands are grouped under `astrabridge game`.
 Their options come from the Python command catalog, exported into the Desktop
 package during its build.
 
+The Windows backend reads WSLC's structured inspection results. Container
+existence does not depend on the language of Windows diagnostic messages;
+service/connection failures are reported rather than treated as missing data.
+
 ## Connection
 
 The default host ports are `127.0.0.1:18770` for HTTP/WebSocket and
