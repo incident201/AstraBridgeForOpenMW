@@ -234,7 +234,8 @@ class Runtime:
                     session=self.session
                     def observe():
                         with session.lock:
-                            if self.session is session and self.running():return session.observe(capture=False,passive=True)
+                            if self.session is session and self.running() and self.owner.mode=='manual' and not self.transition:
+                                return session.observe(capture=False,passive=True)
                     await asyncio.to_thread(observe)
                 except Exception as exc:self.last_error=str(exc)
             elif self.owner.mode!='idle' and not self.running():

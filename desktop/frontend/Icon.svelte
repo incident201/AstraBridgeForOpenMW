@@ -2,7 +2,9 @@
   export let name:string;
   export let size=22;
   const paths:Record<string,string[]>={
-    play:['M8 4.5 20 12 8 19.5Z'],
+    play:['M6 4.5 18 12 6 19.5Z'],
+    fullscreen:['M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5'],
+    minimize:['M3 8h5V3M21 8h-5V3M16 21v-5h5M8 21v-5H3'],
     stop:['M6 6h12v12H6z'],
     restart:['M20 7v5h-5','M20 12a8 8 0 1 0-2.3 5.7','M20 7l-2.3-2.3'],
     atlas:['m3 5 6-2 6 3 6-2v15l-6 2-6-3-6 2Z','M9 3v15M15 6v15'],

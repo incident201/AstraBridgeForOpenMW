@@ -16,12 +16,14 @@ async function fit(page,name){
    main:[main.clientHeight,main.scrollHeight],
    controls:[...document.querySelectorAll('main>header,.viewer-controls,.bottom-actions,.card-footer')].map(e=>{const b=e.getBoundingClientRect();return {top:b.top,bottom:b.bottom};}),
    video:(()=>{const v=document.querySelector('.video-wrap video');if(!v)return null;const b=v.getBoundingClientRect();return {top:b.top,bottom:b.bottom,height:b.height,fit:getComputedStyle(v).objectFit};})(),
+   icons:[...document.querySelectorAll('button > .icon,.metric-icon > .icon')].map(icon=>{const b=icon.getBoundingClientRect();const p=(icon.closest('.metric')??icon.parentElement).getBoundingClientRect();return Math.abs((b.top+b.bottom-p.top-p.bottom)/2);}),
    forms:[...document.querySelectorAll('.settings-fields,.setup-fields')].map(e=>[e.clientHeight,e.scrollHeight])};
  });
  results.push({name,...layout});
  assert.ok(layout.document<=layout.height+1,name+' document overflow');
  assert.ok(layout.main[1]<=layout.main[0]+1,name+' main overflow');
  for(const b of layout.controls)assert.ok(b.top>=0&&b.bottom<=layout.height,name+' control outside viewport');
+ for(const offset of layout.icons)assert.ok(offset<=1,name+' icon not vertically centered: '+offset);
  for(const [height,scroll] of layout.forms)assert.ok(scroll<=height+1,name+' form needs vertical scrolling');
  if(layout.video){assert.equal(layout.video.fit,'contain');assert.ok(layout.video.height>=100&&layout.video.top>=0&&layout.video.bottom<=layout.height);}
  await page.screenshot({path:join(output,name+'.png')});
@@ -34,6 +36,23 @@ try{
  for(const [width,height] of [[1920,1080],[1280,720],[960,680]]){
   await page.setViewportSize({width,height});await fit(page,`play-${width}x${height}`);
  }
+ await page.setViewportSize({width:1920,height:1080});
+ await page.getByRole('button',{name:'Fullscreen',exact:true}).click();
+ await page.waitForFunction(()=>Boolean(document.querySelector('.viewer-panel.viewer-fullscreen')));
+ await page.waitForFunction(()=>getComputedStyle(document.querySelector('.viewer-panel > .section-heading')).opacity==='0',{},{timeout:7000});
+ const full=await page.locator('.video-wrap').evaluate(e=>{const b=e.getBoundingClientRect();return {x:b.x,y:b.y,width:b.width,height:b.height,viewport:[innerWidth,innerHeight]};});
+ assert.equal(full.x,0);assert.equal(full.y,0);assert.equal(full.width,full.viewport[0]);assert.equal(full.height,full.viewport[1]);
+ await page.screenshot({path:join(output,'fullscreen.png')});
+ results.push({name:'fullscreen',...full});
+ await page.mouse.move(30,30);await page.getByRole('button',{name:'Exit fullscreen',exact:true}).click();
+ await page.waitForFunction(()=>!document.querySelector('.viewer-panel.viewer-fullscreen'));
+ await page.getByRole('button',{name:'Fullscreen',exact:true}).click();await page.waitForFunction(()=>Boolean(document.querySelector('.viewer-panel.viewer-fullscreen')));
+ await page.waitForFunction(()=>document.activeElement?.tagName==='VIDEO');
+ await page.keyboard.press('Escape');await page.waitForTimeout(300);
+ assert.ok(await page.locator('.viewer-panel').evaluate(e=>e.classList.contains('viewer-fullscreen')),'Escape must not exit the game viewer');
+ await page.mouse.move(30,30);await page.getByRole('button',{name:'Exit fullscreen',exact:true}).click();
+ await page.waitForFunction(()=>!document.querySelector('.viewer-panel.viewer-fullscreen'));
+ await page.setViewportSize({width:960,height:680});await fit(page,'play-after-fullscreen');
  await page.getByRole('navigation').getByRole('button',{name:'Settings',exact:true}).click();
  await page.getByRole('button',{name:'Save configuration',exact:true}).waitFor();
  for(const name of ['Game data','Gameplay','Graphics and recording']){

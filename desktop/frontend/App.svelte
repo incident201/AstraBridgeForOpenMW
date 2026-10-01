@@ -8,6 +8,7 @@
   let gameMode:'mount'|'copy'='mount';
   let setupStep='game',settingsSection='data',diagnosticSection='logs';
   let video:HTMLVideoElement,viewer=new Viewer(),watching=false,quality='720p30',muted=false;
+  let fullscreen=false,fullscreenControls=true,fullscreenTimer:ReturnType<typeof setTimeout>;
   let gpus:any[]=[];
   let configuration:any=null,content='',archives='',recordings:any[]=[],selectedRecording:any=null,metadata:any=null;
   let atlas:any={},space='',selectedNode:any=null,logName='daemon.log',logs:any={names:[],text:''},environment:any={},history:any[]=[];
@@ -38,7 +39,24 @@
     progress='';await task(async()=>{await window.astra.invoke('install',{game,storage,encoding,dataRelative,development,gameMode,recordings:recordingsDirectory||undefined});page='play';},'Installation ready. Start the game when you are ready.');
   }
   async function watch(){await task(async()=>{await viewer.start(video,quality);watching=true;});}
-  async function endWatch(){releaseInput();await viewer.close();watching=false;}
+  async function endWatch(){
+    releaseInput();if(fullscreen){await window.astra.invoke('viewer-fullscreen',{enabled:false});setViewerFullscreen(false);}
+    await viewer.close();watching=false;
+  }
+  function revealFullscreenControls(){
+    if(!fullscreen||document.pointerLockElement===video)return;
+    fullscreenControls=true;clearTimeout(fullscreenTimer);
+    fullscreenTimer=setTimeout(()=>fullscreenControls=false,2200);
+  }
+  function setViewerFullscreen(enabled:boolean){
+    fullscreen=enabled;
+    clearTimeout(fullscreenTimer);fullscreenControls=true;
+    if(fullscreen)revealFullscreenControls();
+  }
+  async function toggleFullscreen(){
+    try{input({type:'release'});const result=await window.astra.invoke('viewer-fullscreen',{enabled:!fullscreen});setViewerFullscreen(result.enabled);video.focus();}
+    catch(e){error=(e as Error).message;}
+  }
   async function changeQuality(){if(watching)await watch();}
   function releaseInput(){if(manual)window.astra.input({type:'manual.release'});if(document.pointerLockElement)void document.exitPointerLock();}
   function input(event:any){if(manual)window.astra.input({type:'input',event});}
@@ -60,19 +78,24 @@
   onMount(()=>{
     void refresh();const timer=setInterval(()=>void refresh(),2500);
     const unsubscribe=window.astra.subscribe(message=>{
+      if(message.type==='viewer.fullscreen')setViewerFullscreen(message.enabled);
       if(message.type==='status')runtime=message.data;
       if(message.type==='input.owner')runtime={...runtime,owner:message.data};
       if(message.type==='error')error=message.error;
       if(message.type==='progress')progress=(progress+message.data).slice(-12000);
     });
+    const pointerLockChanged=()=>{if(!document.pointerLockElement)revealFullscreenControls();};
+    document.addEventListener('mousemove',revealFullscreenControls);
+    document.addEventListener('pointerlockchange',pointerLockChanged);
     window.addEventListener('blur',releaseInput);
-    return()=>{clearInterval(timer);unsubscribe();releaseInput();void viewer.close();window.removeEventListener('blur',releaseInput);};
+    return()=>{clearInterval(timer);clearTimeout(fullscreenTimer);unsubscribe();releaseInput();void viewer.close();
+      document.removeEventListener('mousemove',revealFullscreenControls);document.removeEventListener('pointerlockchange',pointerLockChanged);window.removeEventListener('blur',releaseInput);};
   });
 </script>
 
 <svelte:head><title>AstraBridge</title></svelte:head>
 <div class="app-shell">
-  <aside>
+  <aside inert={fullscreen}>
     <div class="brand"><span class="brand-mark">A</span><div>AstraBridge<small>OPENMW<br>RUNTIME</small></div></div>
     <nav aria-label="Main navigation">
       {#each pages as [id,label]}<button class:active={page===id} on:click={()=>navigate(id)}><Icon name={id}/><span>{label}</span></button>{/each}
@@ -82,7 +105,7 @@
     </div>
   </aside>
   <main class:play-page={page==='play'}>
-    <header><div><p class="eyebrow">ASTRABRIDGE</p><h1>{pages.find(([id])=>id===page)?.[1]}</h1></div>
+    <header inert={fullscreen}><div><p class="eyebrow">ASTRABRIDGE</p><h1>{pages.find(([id])=>id===page)?.[1]}</h1></div>
       <div class="toolbar">
         {#if state.installed}
           <button disabled={busy||runtime.running} class="primary" on:click={()=>task(()=>window.astra.invoke('start'))}><Icon name="play" size={19}/>Start game</button>
@@ -97,14 +120,15 @@
     {#if !state.installed&&page!=='setup'}<section class="empty"><h2>Set up your game</h2><p>Import your Morrowind installation and install the AstraBridge runtime.</p><button class="primary" on:click={()=>navigate('setup')}>Open setup</button></section>{/if}
 
     {#if page==='play'&&state.installed}
-      <div class="status-grid">
+      <div class="status-grid" inert={fullscreen}>
         <div class="metric"><div class="metric-icon"><Icon name="control" size={26}/></div><div class="metric-copy"><small>CONTROL</small><strong>{owner==='agent'?'Agent connected':manual?'Manual control':'Paused / idle'}</strong><span>{runtime.owner?.name??'No active controller'}</span></div></div>
         <div class="metric"><div class="metric-icon"><Icon name="cursor" size={25}/></div><div class="metric-copy"><small>ACTIVE ACTION</small><strong>{runtime.active_action?.operation??'None'}</strong><span>{runtime.active_action?.phase??'Ready'}</span></div></div>
         <div class="metric" class:recording={Boolean(runtime.recording)}><div class="metric-icon"><Icon name="record" size={24}/></div><div class="metric-copy"><small>RECORDING</small><strong>{runtime.recording?'Recording':'Off'}</strong><span>{runtime.recording?.encoder??'1080p · 60 fps'}</span></div></div>
         <div class="metric"><div class="metric-icon accent"><Icon name="monitor" size={26}/></div><div class="metric-copy"><small>GRAPHICS</small><strong>{runtime.graphics?.hardware_accelerated?'GPU accelerated':'Not started'}</strong><span>{runtime.graphics?.renderer??'Private display'}</span></div></div>
       </div>
-      <section class="viewer-panel">
-        <div class="section-heading"><h2><Icon name="monitor" size={27}/>Live view</h2><div class="toolbar">
+      <section class="viewer-panel" class:fullscreen-controls={fullscreenControls} class:viewer-fullscreen={fullscreen} aria-labelledby="live-view-title">
+        <div class="section-heading"><h2 id="live-view-title"><Icon name="monitor" size={27}/>Live view</h2><div class="toolbar">
+          <button disabled={!watching} on:click={toggleFullscreen} aria-pressed={fullscreen}><Icon name={fullscreen?'minimize':'fullscreen'} size={20}/>{fullscreen?'Exit fullscreen':'Fullscreen'}</button>
           <select aria-label="Viewer quality" bind:value={quality} on:change={changeQuality} disabled={busy}><option>720p30</option><option>1080p60</option></select>
           {#if watching}<button on:click={endWatch}><Icon name="disconnect" size={19}/>Disconnect viewer</button>{:else}<button disabled={!runtime.running||busy} on:click={watch}><Icon name="monitor" size={20}/>Open viewer</button>{/if}
           <button disabled={!watching} on:click={()=>{muted=!muted;video.muted=muted;}}><Icon name={muted?'mute':'volume'} size={19}/>{muted?'Unmute':'Mute'}</button>
@@ -118,12 +142,12 @@
           {#if !watching}<div class="video-placeholder"><span>A</span><p>{runtime.running?'Open the viewer to watch your game.':'Start the game to open the live view.'}</p></div>{/if}
         </div>
         <div class="viewer-controls"><div class="toolbar">
-          {#if manual}<button on:click={releaseInput}><Icon name="cursor" size={20}/>Release control</button><button on:click={()=>video.requestPointerLock()}><Icon name="lock" size={18}/>Lock pointer for camera</button>
+          {#if manual}<button on:click={releaseInput}><Icon name="cursor" size={20}/>Release control</button><button on:click={()=>{video.focus();void video.requestPointerLock();}}><Icon name="lock" size={18}/>Lock pointer for camera</button>
           {:else}<button class="outline-accent" disabled={!watching||owner==='agent'} on:click={()=>window.astra.input({type:'manual.acquire'})}><Icon name="cursor" size={21}/>{owner==='agent'?'Agent owns input':'Take manual control'}</button>{/if}
           <span class="hint">Escape releases pointer lock. Leaving the window releases manual control.</span>
         </div><span class="hint">Viewer quality does not change recording quality.</span></div>
       </section>
-      <div class="toolbar bottom-actions">
+      <div class="toolbar bottom-actions" inert={fullscreen}>
         <button disabled={!runtime.running||busy} on:click={()=>task(()=>window.astra.invoke('record',{action:runtime.recording?'stop':'start'}))}><Icon name="record" size={20}/>{runtime.recording?'Stop recording':'Start recording'}</button>
         <button on:click={()=>task(()=>window.astra.invoke('skill-export'),'Skill exported. Give the exported folder to your agent.')}><Icon name="export" size={20}/>Export gameplay skill</button>
         {#if owner==='agent'}<button class="danger" on:click={()=>task(()=>window.astra.invoke('agent-end'),'Agent session ended. Manual control is now available.')}>End agent session</button>{/if}
@@ -207,7 +231,7 @@
       </section>
     {:else if page==='diagnostics'&&state.installed}
       <section class="card diagnostics-card"><div class="section-heading"><h2>Runtime diagnostics</h2><button on:click={loadDiagnostics}><Icon name="restart" size={18}/>Refresh</button></div>
-        <div class="status-grid"><div class="metric"><small>CAPTURE</small><strong>{Math.max(0,runtime.capture_fps??0).toFixed(1)} fps</strong></div><div class="metric"><small>VIEWER</small><strong>{runtime.viewer?.quality??'Off'}</strong></div><div class="metric"><small>ENCODER</small><strong>{runtime.viewer?.encoder?.encoder??'Not active'}</strong></div><div class="metric"><small>LIVE AUDIO GAPS</small><strong>{runtime.viewer?.audio_discontinuities??0}</strong></div></div>
+        <div class="status-grid" inert={fullscreen}><div class="metric"><small>CAPTURE</small><strong>{Math.max(0,runtime.capture_fps??0).toFixed(1)} fps</strong></div><div class="metric"><small>VIEWER</small><strong>{runtime.viewer?.quality??'Off'}</strong></div><div class="metric"><small>ENCODER</small><strong>{runtime.viewer?.encoder?.encoder??'Not active'}</strong></div><div class="metric"><small>LIVE AUDIO GAPS</small><strong>{runtime.viewer?.audio_discontinuities??0}</strong></div></div>
         <div class="section-heading"><div class="tabs" aria-label="Diagnostic sections">{#each [['logs','Logs'],['environment','Environment'],['sessions','Sessions']] as [id,label]}<button class:active={diagnosticSection===id} aria-pressed={diagnosticSection===id} on:click={()=>diagnosticSection=id}>{label}</button>{/each}</div>
         {#if diagnosticSection==='logs'}<select aria-label="Diagnostic log" bind:value={logName} on:change={loadDiagnostics}>{#each logs.names?.length?logs.names:['daemon.log'] as name}<option>{name}</option>{/each}</select>{/if}</div>
         <pre class="log">{diagnosticSection==='logs'?logs.text||'No log output yet.':JSON.stringify(diagnosticSection==='environment'?environment:history,null,2)}</pre>

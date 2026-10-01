@@ -14,6 +14,7 @@ protocol.registerSchemesAsPrivileged([
   {scheme:'astra-artifact',privileges:{standard:true,secure:true,supportFetchAPI:true,stream:true}},
 ]);
 let window:BrowserWindow|null=null,events:WebSocket|null=null,quitting=false;
+let viewerFullscreen=false,previousWindowFullscreen=false;
 const resources=process.env.ASTRA_RESOURCES??join(process.resourcesPath,'astra');
 const core=new Core(resources,undefined,text=>window?.webContents.send('astra:event',{type:'progress',data:text}));
 
@@ -45,6 +46,16 @@ app.whenReady().then(async()=>{
       if(operation==='install')return core.install(args);
       if(['start','stop','restart','update'].includes(operation)){
         const result=await core[operation as 'start'|'stop'|'restart'|'update']();await connectEvents();return result;
+      }
+      if(operation==='viewer-fullscreen'){
+        if(typeof args.enabled!=='boolean'||!window)throw new Error('Invalid fullscreen request');
+        if(args.enabled!==viewerFullscreen){
+          viewerFullscreen=args.enabled;
+          if(viewerFullscreen){previousWindowFullscreen=window.isFullScreen();window.setFullScreen(true);}
+          else if(!previousWindowFullscreen)window.setFullScreen(false);
+          window.webContents.send('astra:event',{type:'viewer.fullscreen',enabled:viewerFullscreen});
+        }
+        return {enabled:viewerFullscreen};
       }
       if(operation==='choose-directory'){
         const result=await dialog.showOpenDialog(window!,{properties:['openDirectory','createDirectory']});return result.canceled?null:result.filePaths[0];
@@ -99,8 +110,12 @@ app.whenReady().then(async()=>{
     if(event.senderFrame&&allowedFrame(event.senderFrame.url)&&events?.readyState===WebSocket.OPEN)
       events.send(JSON.stringify(message));
   });
-  window=new BrowserWindow({width:1320,height:900,minWidth:960,minHeight:680,title:'AstraBridge',backgroundColor:'#101719',
+  window=new BrowserWindow({width:1320,height:900,minWidth:960,minHeight:680,title:'AstraBridge',backgroundColor:'#0c1320',
     webPreferences:{preload:join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
+  window.on('leave-full-screen',()=>{
+    if(viewerFullscreen){viewerFullscreen=false;previousWindowFullscreen=false;
+      window?.webContents.send('astra:event',{type:'viewer.fullscreen',enabled:false});}
+  });
   window.webContents.setWindowOpenHandler(()=>({action:'deny'}));
   window.webContents.on('will-navigate',(event,url)=>{if(!allowedFrame(url))event.preventDefault();});
   await window.loadURL('astra://app/index.html');
