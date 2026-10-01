@@ -12,7 +12,7 @@
     "check": "svelte-check --tsconfig ./tsconfig.json && tsc --noEmit",
     "test": "tsx --test tests/*.test.ts",
     "package:linux": "npm run build && electron-builder --linux AppImage --publish never",
-    "package:windows": "npm run build && electron-builder --win nsis --publish never"
+    "package:windows": "npm run build && electron-builder --win zip --publish never"
   },
   "dependencies": {
     "tar": "7.5.22",
@@ -58,12 +58,8 @@
       "artifactName": "AstraBridge-${version}-linux-x86_64.AppImage"
     },
     "win": {
-      "target": "nsis",
-      "artifactName": "AstraBridge-${version}-windows-x86_64.exe"
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "target": "zip",
+      "artifactName": "AstraBridge-${version}-windows-x86_64.zip"
     },
     "afterPack": "packaging/after-pack.cjs",
     "toolsets": {

@@ -15,7 +15,9 @@ See [system requirements](docs/system-requirements.md) for host dependencies and
 
 ## Install and play
 
-Open the matching AstraBridge Linux AppImage or Windows installer/application.
+Open the matching AstraBridge Linux AppImage. On Windows, extract the portable
+ZIP and run `astrabridge.exe`; keep the extracted files together. Electron and
+the application's dependencies are included in the package.
 In **Setup**, choose your game folder, managed storage, game encoding and an
 optional recordings directory. By default AstraBridge mounts the game folder
 read-only without copying. **Copy into managed storage** creates an independent
@@ -34,14 +36,14 @@ astrabridge status
 Use `win1251` for Cyrillic data, `win1252` for Western European data or `win1250`
 for Central European data. Encoding is selected explicitly. On Linux the
 AppImage itself accepts these commands; `astrabridge` above denotes that
-executable. On Windows the installation includes an `astrabridge.exe` console
-launcher. `--config FILE` selects a different application configuration.
+executable. On Windows `astrabridge.exe` opens Desktop without arguments and
+runs CLI commands when arguments are supplied. `--config FILE` selects a different application configuration.
 Use `install --game-mode copy` for a managed copy; `mount` is the default.
 
 The game appears in Desktop's **Play** viewer. When no agent is connected,
 **Take manual control** enables mouse/keyboard input. Choose 720p30 or 1080p60
-for the live view. Closing Desktop leaves the runtime and any agent/recording
-running; use **Stop runtime** or `astrabridge stop` to stop them explicitly.
+for the live view. When closing Desktop, choose **Keep running** to leave the
+runtime active or **Stop runtime** to stop it and finish recording.
 
 ## Connect an agent
 
@@ -71,7 +73,9 @@ MP4 recordings and sidecars are written directly to a host folder, defaulting to
 DIRECTORY`. Desktop can browse, play and open this folder; `astrabridge recordings`
 reports it. Hardware encoding is probed automatically, with CPU fallback.
 
-Install a newer Desktop package explicitly, then use **Update runtime** or
+To update Desktop, open the newer AppImage or extract and run the newer Windows
+ZIP. Configuration and managed game data are stored separately from the
+application folder. Use **Update runtime** or
 `astrabridge update` to install its matching image. Managed game/state data are
 preserved. There are no automatic updates. Ordinary stop/restart does not remove
 the persistent container or its data.

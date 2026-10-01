@@ -191,12 +191,26 @@ jobs:
           npm run package:windows
           if errorlevel 1 exit /b 1
           release\win-unpacked\astrabridge.exe version
+      - name: Check Windows portable archive
+        if: runner.os == 'Windows'
+        working-directory: desktop
+        shell: pwsh
+        run: |
+          $archives = @(Get-ChildItem release -Filter 'AstraBridge-*-windows-x86_64.zip')
+          if ($archives.Count -ne 1) { throw 'Expected one Windows portable archive' }
+          $archive = $archives[0]
+          $destination = Join-Path $env:RUNNER_TEMP 'AstraBridge portable check'
+          Expand-Archive $archive.FullName $destination
+          $actual = & (Join-Path $destination 'astrabridge.exe') version | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or -not $actual.ok) { throw 'Packaged CLI failed' }
+          $expected = Get-Content resources/release.json -Raw | ConvertFrom-Json
+          if ($actual.result.digest -ne $expected.digest) { throw 'Packaged runtime identity differs' }
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ runner.os }}
           path: |
             desktop/release/*.AppImage
-            desktop/release/*.exe
+            desktop/release/*-windows-x86_64.zip
           if-no-files-found: error
   draft:
     needs: [runtime, desktop]
@@ -228,12 +242,13 @@ jobs:
           set -euo pipefail
           git fetch "$RUNNER_TEMP/source/release.bundle" "refs/tags/$RELEASE_VERSION:refs/tags/$RELEASE_VERSION"
           git checkout --detach "$RELEASE_VERSION"
-          (cd dist && sha256sum *.AppImage *.exe *-source.tar.gz release.json > SHA256SUMS)
+          (cd dist && sha256sum *.AppImage *-windows-x86_64.zip *-source.tar.gz release.json > SHA256SUMS)
           git push --atomic origin HEAD:refs/heads/main "refs/tags/$RELEASE_VERSION"
           cat > "$RUNNER_TEMP/release-notes.md" <<'NOTES'
           AstraBridge Desktop and CLI with a matching container runtime.
 
           - Linux uses rootless Podman; Windows uses WSL Containers.
+          - Windows Desktop and CLI are distributed together in a portable ZIP with their application dependencies.
           - Runtime image identity is pinned in `release.json` and embedded in Desktop.
           - Game data can be mounted from the host or copied into managed storage; recordings remain in a host folder.
           - Independent GPU selection, live viewer, manual input, Atlas, recordings and diagnostics.

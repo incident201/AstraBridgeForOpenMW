@@ -88,6 +88,9 @@ isolated Electron user data. They do not expose private game files to the render
 The Linux launcher runs commands through Electron's bundled Node mode without
 creating a GUI. Windows packages include the console launcher in
 `desktop/packaging/launcher.cpp`; it uses the same compiled CLI/Application Core.
+`package:windows` produces a portable ZIP containing that launcher, Electron and
+the application's resources. Windows packaging does not use an installer or
+uninstaller. The release pipeline also extracts the ZIP and invokes its CLI.
 
 ## Runtime development
 
@@ -133,7 +136,7 @@ encoder acceleration requires successful real-frame encoding.
 
 Releases are started manually with a version. CI checks source/CLI/runtime tests,
 builds the cached native engine and pinned FFmpeg, builds/tests the OCI runtime,
-packages Linux AppImage and Windows EXE, and creates a draft release. Desktop
+packages Linux AppImage and Windows portable ZIP, and creates a draft release. Desktop
 metadata records the pushed OCI digest. Hardware-specific tests run separately;
 they are not prerequisites for CPU-only CI builds.
 

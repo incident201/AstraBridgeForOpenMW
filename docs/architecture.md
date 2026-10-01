@@ -5,6 +5,12 @@ application. The runtime image contains modified OpenMW, the Python daemon and
 Lua mod, Weston, XWayland, Mesa/VAAPI components, pinned FFmpeg and MediaMTX.
 Game data and persistent state are supplied separately.
 
+The Windows application is a portable ZIP with Electron, resources and the
+`astrabridge.exe` launcher. It opens the GUI without arguments and invokes CLI
+mode with commands. Application configuration and runtime data live outside the
+extracted application folder, so replacing that folder preserves them. Runtime
+image installation and updates remain explicit application operations.
+
 ## Components
 
 ```mermaid

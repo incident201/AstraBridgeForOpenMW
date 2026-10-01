@@ -88,7 +88,9 @@ Verify `wsl --version` and `wslc version`. If the required release is still in
 preview on your update channel, follow Microsoft's preview installation guidance.
 
 No Docker Desktop, nested Podman or separate user Linux distribution is needed.
-The backend uses WSL Containers directly. The EXE contains Electron/Node; the
+The backend uses WSL Containers directly. The portable ZIP includes Electron/Node,
+the GUI, the CLI launcher and application dependencies; keep the extracted files
+together. There is no desktop installer. The
 Linux image supplies the game runtime and Mesa. Hardware graphics still needs a
 successful Mesa D3D12 → Weston headless → XWayland → GLX probe. Encoding needs an
 independent VAAPI/D3D12 or NVENC real-frame probe; CPU fallback remains available.
@@ -105,7 +107,7 @@ archives, pip and npm dependencies. The build honors proxy configuration;
 Desktop development requires Node 24+ and npm; use `npm ci` with the committed
 lockfile. Python tests use `runtime/requirements-dev.txt`. Install Lua 5.4 and a
 C++ compiler for source tests that exercise Lua fixtures and the small native
-media-clock program. Windows EXE packaging also needs MSVC Build Tools (the
+media-clock program. Windows package builds use MSVC Build Tools (the
 console launcher is compiled with `cl.exe`) and a Windows build environment.
 
 See [Development](development.md) for commands, cache locations and test setup.
