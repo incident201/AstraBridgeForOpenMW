@@ -3,7 +3,7 @@
 ## Keep documentation current
 
 - Every change to OpenMW engine code, including native adapters and the engine
-  patch recipe in `harness/native/`, must include corresponding updates to
+  patch recipe in `runtime/native/`, must include corresponding updates to
   [docs/openmw-modifications.md](docs/openmw-modifications.md) and any other
   affected documentation in `docs/`. Explicitly describe what changed, why it
   changed and which engine files or components are affected. Keep the inventory

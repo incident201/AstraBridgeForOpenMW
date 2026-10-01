@@ -1,6 +1,6 @@
 # Bundled mods and gameplay fixes
 
-This inventory describes the environment prepared by AstraBridge 0.2.2. The
+This inventory describes the environment prepared by AstraBridge 0.3.0 development. The
 main content additions are an animation fix and a generated Tribunal delay.
 Runtime settings and explicit recovery operations are listed separately because
 they also affect how a playthrough behaves.
@@ -40,12 +40,12 @@ This does not disable normal AI movement or solve every cause of a displaced NPC
 Three OpenMW animation files are shipped:
 
 ```text
-harness/mod/Animations/xbase_anim/_xYAIAF.kf
-harness/mod/Animations/xbase_anim_female/_xYAIAF.kf
-harness/mod/Animations/xbase_animkna/_xYAIAF.kf
+runtime/mod/Animations/xbase_anim/_xYAIAF.kf
+runtime/mod/Animations/xbase_anim_female/_xYAIAF.kf
+runtime/mod/Animations/xbase_animkna/_xYAIAF.kf
 ```
 
-[Session.prepare](../harness/astra_bridge/session.py) adds the bundled mod data
+[Session.prepare](../runtime/daemon/astra_bridge/session.py) adds the bundled mod data
 directory to the private OpenMW configuration. When the bundled animation
 asset is present, it enables:
 
@@ -58,11 +58,11 @@ This uses OpenMW's additional-animation-source mechanism. It does not install
 an ESP or replace the base skeleton NIFs in the user's game directory. Version
 1.1's filenames are intended to load before other animations; another animation
 mod can therefore affect the effective result. There is no separate YAIAF
-toggle in `local-settings.json`, and manually disabling the setting in the
+toggle in the runtime configuration, and manually disabling the setting in the
 generated profile is not persistent while `Session.prepare` enables it again.
 
-The original [README](../harness/mod/Docs/YAIAF%20README.txt),
-[changelog](../harness/mod/Docs/YAIAF%20CHANGELOG.txt) and
+The original [README](../runtime/mod/Docs/YAIAF%20README.txt),
+[changelog](../runtime/mod/Docs/YAIAF%20CHANGELOG.txt) and
 [redistribution permission](../LICENSES/YAIAF.txt) are retained. The assets keep
 that permission; they are not relicensed under AstraBridge's GPL license.
 
@@ -75,7 +75,7 @@ completion gate is reached. This avoids Dark Brotherhood attacks driving the
 opening of an otherwise base-game playthrough.
 
 This is **not a bundled copy of a third-party Dark Brotherhood delay mod**.
-[tribunal.py](../harness/astra_bridge/tribunal.py) generates a small OpenMW addon
+[tribunal.py](../runtime/daemon/astra_bridge/tribunal.py) generates a small OpenMW addon
 from the effective `dbattackScript` in the user's own active content files.
 The repository distributes the generator, not Bethesda's script text or a
 prebuilt copy of the resulting game-content addon.
@@ -99,7 +99,7 @@ conversations and the ordinary UI.
 
 ### Generation and load order
 
-On `astra start`, profile preparation:
+On `astrabridge start`, profile preparation:
 
 1. Checks that `Tribunal.esm` is in the active content list and the feature is enabled.
 2. Resolves content files using the configured data-directory order, including
@@ -108,8 +108,8 @@ On `astra start`, profile preparation:
    order, including an earlier mod's override.
 4. Inserts the guard after local declarations and before executable statements,
    preserving the existing source bytes, localization and local-variable layout.
-5. Writes `AstraBridge/runtime/data/AstraTribunalDelay.omwaddon` and appends it
-   to the generated `AstraBridge/runtime/profile/openmw.cfg` content list.
+5. Writes `/data/runtime/data/AstraTribunalDelay.omwaddon` and appends it
+   to the generated `/data/profile/openmw.cfg` content list inside the runtime.
 
 The addon preserves the script header/local-variable information, replaces the
 script source and clears the old compiled bytecode. OpenMW compiles that source;
@@ -122,8 +122,8 @@ remove assassins already spawned, undo quest progress or rewrite a saved game.
 
 ### Configuration and compatibility
 
-The feature defaults to enabled. To let another mod manage this behavior, merge
-the following setting into `<installation>/AstraBridge/local-settings.json`:
+The feature defaults to enabled. To let another mod manage this behavior, set the following field in Desktop Settings or through
+`astrabridge config set` while the game is stopped:
 
 ```json
 {
@@ -131,26 +131,26 @@ the following setting into `<installation>/AstraBridge/local-settings.json`:
 }
 ```
 
-The change takes effect on the next `astra start`. Without active Tribunal
+The change takes effect on the next `astrabridge start`. Without active Tribunal
 content, the generator is not applicable and no addon is enabled.
 
 Using the last script definition preserves prior modifications to that script,
 but is not a blanket compatibility guarantee. Generation rejects a missing,
 deleted, truncated or source-less effective script, an already generated input
 script, and unsupported nested `config=` arrangements. It is designed for the
-flat private profile produced by `configure.py`. A later plugin that replaces
+flat private profile produced by the runtime storage service. A later plugin that replaces
 `dbattackScript` can override the generated gate; do not assume the feature is
 effective solely because an addon file exists.
 
-Relevant checks: [generator/load-order tests](../harness/tests/test_tribunal.py)
-and [profile diagnostics tests](../harness/tests/test_diagnostics.py).
+Relevant checks: [generator/load-order tests](../runtime/tests/test_tribunal.py)
+and [profile diagnostics tests](../runtime/tests/test_diagnostics.py).
 
 ## Runtime settings and control fixes
 
 ### Combat defaults chosen for testing
 
-[configure.py](../harness/configure.py) writes the following settings to
-`<installation>/config/settings.cfg`, which seeds a new runtime profile:
+[Profile preparation](../runtime/daemon/astra_daemon/storage.py) seeds a new
+managed runtime profile with the following settings:
 
 ```ini
 [Game]
@@ -168,14 +168,18 @@ Neither setting is a fundamental limitation or requirement of AstraBridge.
 Users may choose their preferred difficulty and attack behavior. These values
 are initial defaults and are not forced back on each start.
 
-Before the first start, edit `<installation>/config/settings.cfg` to change the
-defaults used to create the profile. For an existing profile, use the game's
-settings UI or, with AstraBridge stopped, edit the `[Game]` section in
-`<installation>/AstraBridge/runtime/profile/settings.cfg`.
-[Session.prepare](../harness/astra_bridge/session.py) preserves an existing
-profile's difficulty and best-attack settings; changing only the seed file does
-not update that profile. Record the actual settings when comparing playthroughs
-or benchmark results.
+Use Desktop Settings or, while the game is stopped, the application command:
+
+```sh
+astrabridge config set '{"difficulty":0,"best_attack":false}'
+```
+
+The settings take effect on the next game start. Changes made in the game's own
+settings UI are retained by the runtime profile unless the user explicitly
+applies replacement values through AstraBridge configuration. The profile lives
+in managed storage at `/data/profile/settings.cfg` inside the runtime; normal
+configuration does not require entering the container. Record the actual
+settings when comparing playthroughs or benchmark results.
 
 ### Synchronous physics
 
@@ -194,7 +198,7 @@ private runtime profile, not a change to collision rules or player speed.
 
 ### Idle camera
 
-[camera_policy.lua](../harness/mod/scripts/astrabridge/camera_policy.lua) uses
+[camera_policy.lua](../runtime/mod/scripts/astrabridge/camera_policy.lua) uses
 the stock camera interfaces to disable automatic mode control and standing
 preview. Scripted actions are not physical keyboard activity, so the ordinary
 idle timer could otherwise begin a vanity orbit and separate the view direction
@@ -216,20 +220,12 @@ quest problems. Record its use when reporting a playthrough or benchmark.
 
 ## Inspecting the configured environment
 
-`AstraBridge/doctor.py` includes an `auto_fixes` report with
-`scope: "profile_on_disk"`. The implementation is
-[diagnostics.py](../harness/astra_bridge/diagnostics.py). It checks the prepared
-profile and required assets without opening saves, the navigation cache or the
-agent's spatial-memory database.
+Desktop Settings exposes the configured gameplay/recording choices. Diagnostics
+and the Runtime API report the engine, image, graphics and media environment.
+The imported game directory remains unchanged: generated addons and prepared
+settings live in the managed profile/runtime directories.
 
-For example, a fresh installation may report `pending_start` until the profile
-has been prepared. Tribunal delay can be `disabled`, `not_applicable`,
-`needs_prepare`, `overridden` or `unverified`, depending on its configuration
-and content. YAIAF checks cover the three animation files, the additional-source
-setting and the bundled data path. Physics checks cover the profile setting.
-
-`configured` is evidence about files on disk, not proof of the current state of
-a running engine or of universal compatibility with other mods. Retain the
-release identity and the actual game-data/mod configuration when comparing
-results. These environment choices belong alongside the
-[project's information and control boundaries](project-goals.md).
+A configured addon or animation setting is evidence about prepared files, not
+proof of universal compatibility with other mods. Retain the release identity
+and actual game-data/mod configuration when comparing results. These choices
+belong alongside the [project's information and control boundaries](project-goals.md).

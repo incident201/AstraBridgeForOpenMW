@@ -1,5 +1,0 @@
-#!/bin/sh
-set -eu
-ASTRA_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-cd "$ASTRA_ROOT"
-exec "$ASTRA_ROOT/.venv/bin/python" -m astra_bridge.cli "$@"

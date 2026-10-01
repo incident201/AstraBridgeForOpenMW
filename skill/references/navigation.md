@@ -61,11 +61,11 @@ An object may be above the standing surface, such as a hatch. Approach checks re
 The action runs continuously for the requested duration, then releases controls and pauses the world. There is no periodic three-second pause; transport and engine watchdog timeouts scale with the requested duration. UI changes, cell changes, death or a lost combat target can still interrupt it. Choose the duration from the observed surroundings and how soon another observation is needed. An attack may still have an unfinished animation: read `body.animation_busy`. The next `act` defaults to not sneaking, so include `sneak:true` on each intended sneaking step; `look` preserves an existing crouch. `stop` clears it.
 
 ```sh
-./astra act '{"move":1,"run":true,"seconds":10}'
-./astra act '{"move":-1,"strafe":0.5,"seconds":0.5}'
-./astra act '{"trigger":"Jump","move":1,"seconds":0.8}'
-./astra act '{"sneak":true,"move":0.5,"seconds":1}'
-./astra act '{"seconds":0.5}'
+astrabridge game act '{"move":1,"run":true,"seconds":10}'
+astrabridge game act '{"move":-1,"strafe":0.5,"seconds":0.5}'
+astrabridge game act '{"trigger":"Jump","move":1,"seconds":0.8}'
+astrabridge game act '{"sneak":true,"move":0.5,"seconds":1}'
+astrabridge game act '{"seconds":0.5}'
 ```
 
 The final example waits without input. Finite turns/settling can make actual elapsed time differ from the requested movement duration; use the reported `elapsed` and `motion`.
@@ -81,18 +81,18 @@ Use the numeric fields directly for simple decisions. For a confusing junction, 
 Example decision sequence:
 
 ```sh
-./astra observe
+astrabridge game observe
 # Choose a current terrain.passages entry from its direction, clearance and height.
-./astra go PASSAGE_REF --seconds 5
+astrabridge game go PASSAGE_REF --seconds 5
 # Check action.reason, action.motion and the returned screenshot.
 ```
 
 For a visibly reachable point not described well by a passage:
 
 ```sh
-./astra ground
+astrabridge game ground
 # Select a ground_targets entry after checking its screen location and navigation status.
-./astra go GROUND_REF --seconds 8
+astrabridge game go GROUND_REF --seconds 8
 ```
 
 `arrived` uses a tolerance reported by navigation. `partial`, `path_end_out_of_reach`, `blocked`, or `height_mismatch` do not mean the destination was reached. A bridge, stair or landing can be visible but not connected by the current navmesh. Choose another visible waypoint or a short direct action supported by the screenshot; do not force a hidden route.
@@ -104,8 +104,8 @@ For a visibly reachable point not described well by a passage:
 Use `status --player` to confirm the active effect and its remaining duration before moving.
 
 ```sh
-./astra fly --vertical-m 4 --seconds 8
-./astra fly --forward-m 8 --sideways-m 2 --vertical-m -1 --seconds 10
+astrabridge game fly --vertical-m 4 --seconds 8
+astrabridge game fly --forward-m 8 --sideways-m 2 --vertical-m -1 --seconds 10
 ```
 
 `fly` uses normal movement and finite camera turns. It checks body clearance and can make short 3D detours around local obstacles. This is local assistance, not a global aerial map. Pure ascent/descent preserves horizontal heading. A visible object or ground handle can replace offsets: `fly --ref REF`. Release a live target lock first.
@@ -125,12 +125,12 @@ Atlas is stored transactionally in `runtime/exploration-memory.sqlite3`; graphs,
 Access learned travel memory through `atlas`, `recall`, `revisit` and `return-to`. `runtime/userdata/navmesh.db` belongs to OpenMW's internal pathfinding cache. Direct agent access to that file or its copies/exports is forbidden during gameplay under the [mandatory gameplay boundaries](../SKILL.md#mandatory-gameplay-boundaries), including troubleshooting failed movement. Report a missing public capability instead of inspecting the cache. The engine's normal use of this cache through public navigation commands remains allowed.
 
 ```sh
-./astra atlas --list
-./astra atlas --space SPACE_REF --radius-m 80
-./astra atlas --query "PLACE OR LANDMARK" --page 0 --limit 20
-./astra atlas --level L2 --map
-./astra atlas --route NODE_REF
-./astra atlas --history --query "PLACE OR REASON"
+astrabridge game atlas --list
+astrabridge game atlas --space SPACE_REF --radius-m 80
+astrabridge game atlas --query "PLACE OR LANDMARK" --page 0 --limit 20
+astrabridge game atlas --level L2 --map
+astrabridge game atlas --route NODE_REF
+astrabridge game atlas --history --query "PLACE OR REASON"
 ```
 
 `--list` lists stored spaces and observed directed door transitions. `--query` searches names, landmarks and location labels across this playthrough. `--page` is zero-based; `--limit` defaults to 20 (1…1000), with `total`/`has_more`. `--level` filters an observed height band, not an inferred architectural floor. `--route` previews known walking legs and door transitions without moving. A route may contain `native_path_required` legs between known points; these remain attempts until the engine confirms a path. Names attached by `remember` are accepted when unique. `--space` reads a graph from another location without moving; its view is centred on the last recorded pose, and `archived:true` marks that historical view. Use the node ref with `revisit` from the active location; reaching another space requires learned door transitions. Old JSON/checkpoint files are imported without deleting them. Old visits lacking a trustworthy coordinate transform remain readable archives; a matching checkpoint can align them when loaded.
@@ -145,9 +145,9 @@ Useful fields:
 Travel-memory diagrams use **north up**, unlike the local walking surface. Cyan is sampled travel, grey a different height, green observed probe rays, dashed lines directions not traversed. A dashed direction is not knowledge of what lies beyond it.
 
 ```sh
-./astra atlas --radius-m 35
+astrabridge game atlas --radius-m 35
 # Choose a nodes[].ref with can_revisit=true; A4 is a label, not the ref.
-./astra revisit NODE_REF --seconds 10
+astrabridge game revisit NODE_REF --seconds 10
 ```
 
 `revisit NODE_REF [--run] [--seconds S] [--under-fire]` asks the motor to return to that recorded point. It is movement, not teleportation, and can fail or produce a partial path. Travel knowledge is persistent across cell visits, saves, loads and controller restarts. Loading an earlier save retains routes already learned in this playthrough; it does not imply that old doors, items or NPC states still apply. A new game uses a separate atlas profile.

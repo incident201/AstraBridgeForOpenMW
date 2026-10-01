@@ -149,7 +149,7 @@ namespace MWGui
 
     WindowManager::WindowManager(SDL_Window* window, osgViewer::Viewer* viewer, osg::Group* guiRoot,
         Resource::ResourceSystem* resourceSystem, SceneUtil::WorkQueue* workQueue, const std::filesystem::path& logpath,
-        bool consoleOnlyScripts, Translation::Storage& translationDataStorage, ToUTF8::FromType encoding,
+        bool consoleOnlyScripts, bool consoleDisabled, Translation::Storage& translationDataStorage, ToUTF8::FromType encoding,
         bool exportFonts, const std::string& versionDescription, Files::ConfigurationManager& cfgMgr)
         : mOldUpdateMask(0)
         , mOldCullMask(0)
@@ -158,6 +158,7 @@ namespace MWGui
         , mWorkQueue(workQueue)
         , mViewer(viewer)
         , mConsoleOnlyScripts(consoleOnlyScripts)
+        , mConsoleDisabled(consoleDisabled)
         , mCurrentModals()
         , mHud(nullptr)
         , mMap(nullptr)
@@ -359,7 +360,7 @@ namespace MWGui
         trackWindow(mTradeWindow, makeBarterWindowSettingValues());
         mGuiModeStates[GM_Barter] = GuiModeState({ mInventoryWindow, mTradeWindow });
 
-        auto console = std::make_unique<Console>(w, h, mConsoleOnlyScripts, mCfgMgr);
+        auto console = std::make_unique<Console>(w, h, mConsoleOnlyScripts, mConsoleDisabled, mCfgMgr);
         mConsole = console.get();
         mWindows.push_back(std::move(console));
         trackWindow(mConsole, makeConsoleWindowSettingValues());
@@ -2333,6 +2334,7 @@ namespace MWGui
 
     void WindowManager::toggleConsole()
     {
+        if (mConsoleDisabled) return;
         bool visible = mConsole->isVisible();
 
         if (!visible && !mGuiModes.empty())

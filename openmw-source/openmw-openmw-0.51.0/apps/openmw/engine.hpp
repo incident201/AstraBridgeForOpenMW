@@ -166,6 +166,7 @@ namespace OMW
         int mWarningsMode;
         std::string mFocusName;
         bool mScriptConsoleMode;
+        bool mConsoleDisabled = false;
         std::filesystem::path mStartupScript;
         int mActivationDistanceOverride;
         std::filesystem::path mSaveGameFile;
@@ -248,6 +249,7 @@ namespace OMW
 
         /// Enable console-only script functionality
         void setScriptConsoleMode(bool enabled);
+        void setConsoleDisabled(bool disabled) { mConsoleDisabled = disabled; }
 
         /// Set path for a script that is run on startup in the console.
         void setStartupScript(const std::filesystem::path& path);

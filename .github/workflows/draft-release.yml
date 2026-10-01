@@ -1,5 +1,4 @@
-name: Draft Linux x86_64 release
-
+name: Draft AstraBridge release
 on:
   workflow_dispatch:
     inputs:
@@ -7,163 +6,238 @@ on:
         description: Release version (vX.Y.Z)
         required: true
         type: string
-
 permissions:
-  contents: write
-
+  contents: read
 concurrency:
-  group: linux-release
+  group: astrabridge-release
   cancel-in-progress: false
-
 jobs:
-  release:
-    runs-on: ubuntu-22.04
-    timeout-minutes: 360
+  prepare:
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Prepare release commit and tag
+      - name: Prepare release locally
         env:
           RELEASE_VERSION: ${{ inputs.version }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = refs/heads/main
-          test "$(uname -m)" = x86_64
-          if gh release view "$RELEASE_VERSION" >/dev/null 2>&1; then
-            echo "Release $RELEASE_VERSION already exists" >&2
+          if git show-ref --verify --quiet "refs/tags/$RELEASE_VERSION"; then
+            echo 'Release tag already exists' >&2
             exit 1
           fi
-          python3 - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-          import re
-
-          tag = os.environ['RELEASE_VERSION']
-          if not re.fullmatch(r'v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)', tag):
-              raise SystemExit('Version must be vX.Y.Z')
-          path = Path('VERSION.json')
-          version = json.loads(path.read_text())
-          current = version['project_version']
-          if tuple(map(int, tag[1:].split('.'))) < tuple(map(int, current.split('.'))):
-              raise SystemExit('Release version must not be older than VERSION.json')
-          version['project_version'] = tag[1:]
-          path.write_text(json.dumps(version, indent=2) + '\n')
-          PY
+          python3 packaging/prepare_release.py "$RELEASE_VERSION"
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          if ! git diff --quiet -- VERSION.json; then
-            git add VERSION.json
-            git commit -m "Release $RELEASE_VERSION"
-          fi
-          if git show-ref --verify --quiet "refs/tags/$RELEASE_VERSION"; then
-            test "$(git rev-list -n 1 "$RELEASE_VERSION")" = "$(git rev-parse HEAD)" || {
-              echo "Tag $RELEASE_VERSION points to another commit" >&2
-              exit 1
-            }
-          else
-            git tag -a "$RELEASE_VERSION" -m "AstraBridge ${RELEASE_VERSION#v}"
-          fi
-          test -z "$(git status --porcelain)"
-
+          git add VERSION.json desktop/package.json desktop/package-lock.json
+          git diff --cached --quiet || git commit -m "Release $RELEASE_VERSION"
+          git tag -a "$RELEASE_VERSION" -m "AstraBridge $RELEASE_VERSION"
+          git bundle create release.bundle "refs/tags/$RELEASE_VERSION"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-source
+          path: release.bundle
+          retention-days: 7
+  runtime:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    permissions:
+      contents: read
+      packages: write
+    env:
+      WORK: ${{ runner.temp }}/astra-work
+      IMAGE: ghcr.io/incident201/astrabridge-runtime:${{ inputs.version }}
+      RELEASE_VERSION: ${{ inputs.version }}
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-source
+          path: ${{ runner.temp }}/source
+      - run: |
+          git fetch "$RUNNER_TEMP/source/release.bundle" "refs/tags/$RELEASE_VERSION:refs/tags/$RELEASE_VERSION"
+          git checkout --detach "$RELEASE_VERSION"
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-
-      - name: Check sources
+      - name: Host tools and source tests
         run: |
           sudo apt-get update
-          sudo apt-get install -y lua5.4
-          python -m pip install pytest mss imageio-ffmpeg Pillow
-          (cd harness && python -m pytest -q tests ../packaging/tests)
+          sudo apt-get install -y podman crun uidmap passt fuse-overlayfs lua5.4 g++
+          python -m pip install -r runtime/requirements-dev.txt
+          PYTHONPATH=runtime/daemon python -m pytest -q runtime/tests packaging/tests
           python packaging/check_source_only.py
-
-      - name: Restore native build cache
+      - uses: actions/cache/restore@v4
         id: native-cache
-        uses: actions/cache/restore@v4
         with:
           path: |
-            .release-work/build
-            .release-work/build-environment.json
-            .release-work/engine-receipt.json
-            .release-work/builder-image.tar
-            .release-work/ccache
-          key: linux-x86_64-native-v1-${{ hashFiles('packaging/Containerfile', 'packaging/build_release.py', 'packaging/source_cache.py') }}-${{ hashFiles('openmw-source/**', 'harness/native/**') }}
+            ${{ env.WORK }}/build
+            ${{ env.WORK }}/downloads
+            ${{ env.WORK }}/cache/ccache
+            ${{ env.WORK }}/cache/pip
+            ${{ env.WORK }}/builder-image.tar
+          key: oci-native-v1-${{ hashFiles('runtime/container/**', 'packaging/build_ffmpeg.py') }}-${{ hashFiles('openmw-source/**', 'runtime/native/**') }}
           restore-keys: |
-            linux-x86_64-native-v1-${{ hashFiles('packaging/Containerfile', 'packaging/build_release.py', 'packaging/source_cache.py') }}-
-
-      - name: Build portable Linux bundle
-        run: python3 packaging/build_release.py --container-tool docker --jobs 3 --work .release-work --output dist --resume --reuse-engine --cache-builder
-
-      - name: Verify warm engine reuse
+            oci-native-v1-${{ hashFiles('runtime/container/**', 'packaging/build_ffmpeg.py') }}-
+      - name: Build engine, FFmpeg and runtime image
+        run: python packaging/build_runtime.py --work "$WORK" --image "$IMAGE" --jobs 3 --cache-builder
+      - name: CPU recording through the production runtime
+        run: |
+          podman --root "$WORK/containers" --runroot "$WORK/run/podman" run --rm --network=none \
+            -v "$GITHUB_WORKSPACE/packaging:/checks:ro" -v "$WORK/tests:/results" \
+            --entrypoint /opt/astrabridge/python/bin/python "$IMAGE" \
+            /checks/cpu_recording_smoke.py --directory /results/cpu-recording
+      - uses: actions/cache/save@v4
         if: steps.native-cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            ${{ env.WORK }}/build
+            ${{ env.WORK }}/downloads
+            ${{ env.WORK }}/cache/ccache
+            ${{ env.WORK }}/cache/pip
+            ${{ env.WORK }}/builder-image.tar
+          key: ${{ steps.native-cache.outputs.cache-primary-key }}
+      - name: Publish tested OCI image and record registry digest
+        env:
+          REGISTRY_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          python3 packaging/build_release.py --container-tool docker --jobs 3 --work .release-work --output .release-work/reuse-check --resume --reuse-engine --cache-builder | tee .release-work/reuse-check.log
-          grep -q 'Reusing verified engine: native sources and build environment unchanged' .release-work/reuse-check.log
-          cmp dist/manifest.json .release-work/reuse-check/manifest.json
-
-      - name: Verify release assets
-        env:
-          RELEASE_VERSION: ${{ inputs.version }}
-        run: |
-          (cd dist && sha256sum -c SHA256SUMS)
-          python3 - <<'PY'
-          import json
-          import os
+          printf '%s' "$REGISTRY_TOKEN" | podman login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          podman --root "$WORK/containers" --runroot "$WORK/run/podman" push \
+            --digestfile "$WORK/dist/registry.digest" "$IMAGE" "docker://$IMAGE"
+          python - <<'PY'
+          import json, os
           from pathlib import Path
-          import subprocess
-          import tarfile
-
-          tag = os.environ['RELEASE_VERSION']
-          output = Path('dist')
-          asset = f'astrabridge-openmw-{tag}-linux-x86_64.tar.gz'
-          expected = {asset, f'astrabridge-{tag}-source.tar.gz', 'manifest.json', 'SHA256SUMS'}
-          assert {p.name for p in output.iterdir()} == expected
-          manifest = json.loads((output / 'manifest.json').read_text())
-          assert manifest['project_version'] == tag[1:]
-          assert manifest['git_tag'] == tag
-          assert manifest['git_commit'] == subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
-          assert manifest['platform'] == 'linux' and manifest['architecture'] == 'x86_64'
-          assert manifest['asset_filename'] == asset
-          with tarfile.open(output / asset, 'r:gz') as archive:
-              names = set(archive.getnames())
-              for name in ('AstraOpenMW/engine/openmw', 'AstraOpenMW/AstraBridge/astra',
-                           'AstraOpenMW/skill/openmw-play/SKILL.md', 'AstraOpenMW/python/bin/python3',
-                           'AstraOpenMW/LICENSES/GPL-3.0.txt', 'AstraOpenMW/manifest.json'):
-                  assert name in names, name
-              embedded = json.load(archive.extractfile('AstraOpenMW/manifest.json'))
-          assert embedded == dict(manifest, asset_sha256=None)
+          work=Path(os.environ['WORK'])
+          path=work/'dist/release.json';value=json.loads(path.read_text())
+          value['digest']=(work/'dist/registry.digest').read_text().strip()
+          assert value['git_tag']==os.environ['RELEASE_VERSION'] and not value['development']
+          path.write_text(json.dumps(value,indent=2)+'\n')
           PY
-
-      - name: Save native build cache
-        if: steps.native-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+          git archive --format=tar.gz --prefix=AstraBridge/ -o "$WORK/dist/astrabridge-$RELEASE_VERSION-source.tar.gz" HEAD
+      - uses: actions/upload-artifact@v4
         with:
+          name: runtime-release
           path: |
-            .release-work/build
-            .release-work/build-environment.json
-            .release-work/engine-receipt.json
-            .release-work/builder-image.tar
-            .release-work/ccache
-          key: ${{ steps.native-cache.outputs.cache-primary-key }}
-
-      - name: Push release commit and tag
-        env:
-          RELEASE_VERSION: ${{ inputs.version }}
-        run: git push --atomic origin HEAD:refs/heads/main "refs/tags/$RELEASE_VERSION"
-
-      - name: Create draft release
-        env:
-          RELEASE_VERSION: ${{ inputs.version }}
-          GH_TOKEN: ${{ github.token }}
+            ${{ env.WORK }}/dist/release.json
+            ${{ env.WORK }}/dist/*-source.tar.gz
+  desktop:
+    needs: runtime
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-source
+          path: release-source
+      - name: Use exact release sources
+        shell: bash
         run: |
-          gh release create "$RELEASE_VERSION" \
-            "dist/astrabridge-openmw-$RELEASE_VERSION-linux-x86_64.tar.gz" \
-            "dist/astrabridge-$RELEASE_VERSION-source.tar.gz" \
-            dist/manifest.json dist/SHA256SUMS \
-            --verify-tag --draft --title "AstraBridge $RELEASE_VERSION" \
-            --notes 'Frozen portable Linux x86_64 environment; see manifest.json.'
+          git fetch release-source/release.bundle "refs/tags/$RELEASE_VERSION:refs/tags/$RELEASE_VERSION"
+          git checkout --detach "$RELEASE_VERSION"
+      - uses: actions/download-artifact@v4
+        with:
+          name: runtime-release
+          path: runtime-release
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install build dependencies and embed runtime identity
+        shell: bash
+        run: |
+          mkdir -p desktop/resources
+          cp runtime-release/release.json desktop/resources/release.json
+          python -m pip install -r runtime/requirements.txt
+          cd desktop
+          npm ci
+          npm run check
+          npm test
+      - name: Package Linux
+        if: runner.os == 'Linux'
+        working-directory: desktop
+        run: |
+          npm run package:linux
+          env -u DISPLAY -u WAYLAND_DISPLAY APPIMAGE_EXTRACT_AND_RUN=1 ./release/*.AppImage version
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
+        with:
+          arch: x64
+      - name: Package Windows
+        if: runner.os == 'Windows'
+        working-directory: desktop
+        shell: cmd
+        run: |
+          cl /nologo /std:c++17 /EHsc /MT packaging\launcher.cpp /Fe:packaging\astrabridge.exe
+          if errorlevel 1 exit /b 1
+          npm run package:windows
+          if errorlevel 1 exit /b 1
+          release\win-unpacked\astrabridge.exe version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ runner.os }}
+          path: |
+            desktop/release/*.AppImage
+            desktop/release/*.exe
+          if-no-files-found: error
+  draft:
+    needs: [runtime, desktop]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-source
+          path: ${{ runner.temp }}/source
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-*
+          merge-multiple: true
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: runtime-release
+          path: dist
+      - name: Publish release refs and create draft
+        run: |
+          set -euo pipefail
+          git fetch "$RUNNER_TEMP/source/release.bundle" "refs/tags/$RELEASE_VERSION:refs/tags/$RELEASE_VERSION"
+          git checkout --detach "$RELEASE_VERSION"
+          (cd dist && sha256sum *.AppImage *.exe *-source.tar.gz release.json > SHA256SUMS)
+          git push --atomic origin HEAD:refs/heads/main "refs/tags/$RELEASE_VERSION"
+          cat > "$RUNNER_TEMP/release-notes.md" <<'NOTES'
+          AstraBridge Desktop and CLI with a matching container runtime.
+
+          - Linux uses rootless Podman; Windows uses WSL Containers.
+          - Runtime image identity is pinned in `release.json` and embedded in Desktop.
+          - Game data can be mounted from the host or copied into managed storage; recordings remain in a host folder.
+          - Independent GPU selection, live viewer, manual input, Atlas, recordings and diagnostics.
+
+          See the system requirements for host dependencies and GPU setup.
+          NOTES
+          gh release create "$RELEASE_VERSION" dist/* --verify-tag --draft \
+            --title "AstraBridge $RELEASE_VERSION" --notes-file "$RUNNER_TEMP/release-notes.md"

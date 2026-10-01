@@ -52,6 +52,8 @@ namespace OpenMW
         addOption("script-all-dialogue", bpo::value<bool>()->implicit_value(true)->default_value(false),
             "compile all dialogue scripts at startup");
 
+        addOption("disable-console", bpo::bool_switch(), "disable console UI and command execution");
+
         addOption("script-console", bpo::value<bool>()->implicit_value(true)->default_value(false),
             "enable console-only script functionality");
 

@@ -6,7 +6,12 @@ Movement and maps: [navigation.md](navigation.md). Combat and tools: [combat.md]
 
 ## Calling convention
 
-Every command below is prefixed with `./astra` and runs from the configured AstraBridge installation directory. Use `./astra COMMAND --help` for parser help; it does not run an action. Do not start the internal `serve` process manually.
+Every gameplay command below follows `astrabridge game`, using the executable
+and `--config` path from the exported skill's `installation.json`.
+Use `astrabridge game COMMAND --help` for parser help; it does not run an action.
+Connect with the application command `astrabridge agent connect` before playing.
+The application manages the runtime; do not start an internal daemon or enter
+the container during gameplay.
 
 Notation:
 
@@ -153,19 +158,19 @@ Use an owned repair hammer to open Repair. `ui.elements` includes the actual rep
 
 | Syntax | Behavior |
 |---|---|
-| `start` | Start a normal window with sound in the graphical session; preserve an already running controller. |
-| `start --display DISPLAY --recordings-dir PATH` | Optional X display/recording-directory overrides. Use the user's configured environment, not a new virtual display. |
+| Application: `astrabridge start` | Start the persistent runtime and game; preserve an already running game. Watch it through Desktop. |
+| Application: `astrabridge agent connect` | Reserve agent control across CLI calls. No inactivity timeout; manual input is disabled until disconnect. |
 | `new-game` | Start the actual introduction/character-creation flow. Discards unsaved current progress. |
 | `save "DESCRIPTION"` | Create a new save slot, description 1…160 UTF-8 bytes. Returns `saved` and `total_saves`. Only when the game permits saving. |
 | `saves` | List slots with descriptions, player names and fresh refs. |
 | `load SAVE_REF` | Load that slot; unsaved progress is lost and transient refs must be refreshed. |
 | `stop` | Interrupt immediately through an independent control channel, clear inputs and pause. The interrupted command retains its elapsed time/result. Does not save or quit. |
-| `restart` | Finalize any recording and relaunch the game, normally to the menu. Does not autosave or restart recording. |
-| `restart --load-latest` | Load the newest available slot after restarting; use only if that is actually desired. |
+| Application: `astrabridge restart` | Finalize recording and restart the persistent runtime, normally to the menu. Does not autosave, select a save or restart recording. Connect again afterward. |
 | `autosave [--enabled/--no-enabled] [--interval S] [--slots N]` | Configure or inspect the persistent autosave ring. Default: enabled, 300 simulation seconds, three slots. Saves only at a legal paused command boundary; long actions are not forcibly paused. Failed saves are reported/deferred. Manual slots are preserved. |
 | `finish-session --description "TEXT"` | Interrupt the active command, save, finalize recording and close. Reports each stage; keeps the game open if saving or recording finalization fails. |
 | `action-result [REQUEST_ID] [--full]` | Retrieve a durable command receipt; see [information](information.md#recover-a-command-result). |
-| `shutdown` | Close controller/game and recording. Does not autosave. |
+| Application: `astrabridge agent disconnect` | Interrupt an active action, clear held input, pause and release control. Does not save or stop the runtime. |
+| Application: `astrabridge stop` | Close game/recording and stop the persistent container. Does not autosave or delete managed data. |
 
 One gameplay command owns the controller at a time. While it runs, use `status` or `stop`; another gameplay command returns `controller_busy_use_status_or_stop`. `status --player` reads the engine and also needs the gameplay owner. For the complete save/record-stop/close request, use `finish-session`; use individual operations when the user requests only part of that lifecycle.
 
@@ -178,7 +183,7 @@ If saving is unavailable during the tutorial or a modal UI, do not bypass it. Pr
 `sequence` composes ordinary public actions, resolving owned item/spell names against fresh inventory/spell handles:
 
 ```sh
-./astra sequence '{"actions":[{"op":"use_item","name":"EXACT_OWNED_ITEM_NAME"},{"op":"wait_until","condition":"animation","seconds":5},{"op":"act","move":1,"seconds":3}],"max_seconds":15,"stop_on_damage":true,"stop_health_pct":35}'
+astrabridge game sequence '{"actions":[{"op":"use_item","name":"EXACT_OWNED_ITEM_NAME"},{"op":"wait_until","condition":"animation","seconds":5},{"op":"act","move":1,"seconds":3}],"max_seconds":15,"stop_on_damage":true,"stop_health_pct":35}'
 ```
 
 Steps use API names with underscores: `act`, `look`, `go`, `walk`, `revisit`, `return_to`, `approach`, `interact`, `move_local`, `use_item`, `select_spell`, `select_enchanted`, `cast`, `strike`, `chain`, `wait_until`, `trigger`, `choose`, `edit`, `adjust`, `focus`, `target_info`, `fly`, `swim`, `rest`, `buy`, `travel`, `lock`, `unlock`. Each step contains `op` plus that operation's normal fields. Item/spell selection also accepts an exact unique `name`. Every step is validated before execution. Do not preselect replies from dialogue that has not been opened/read.
@@ -190,14 +195,14 @@ A `select` object resolves a fresh handle immediately before its step. Filters: 
 Example for an already opened dialogue offering barter:
 
 ```sh
-./astra sequence '{"actions":[{"op":"choose","select":{"control":"service_barter"},"expect":{"ui_mode":"Barter"}},{"op":"buy","name":"OBSERVED_ITEM_NAME","quantity":2,"max_total":50}],"max_seconds":30}'
+astrabridge game sequence '{"actions":[{"op":"choose","select":{"control":"service_barter"},"expect":{"ui_mode":"Barter"}},{"op":"buy","name":"OBSERVED_ITEM_NAME","quantity":2,"max_total":50}],"max_seconds":30}'
 ```
 
 Default total simulation budget is 60 seconds; it has no fixed upper cap. The total simulation deadline and health/damage guards are checked at dispatch and every motor frame, including long `act`, turns and individual casts/strikes. Frame timing and the final pause can add roughly a frame to the measured limit; submitted atomic UI operations cannot be undone. A combat `chain` uses its own continuous motor deadline. `stop_on_damage` defaults to true and `stop_health_pct` to 0 (disabled). Interruptions stop the remaining sequence; already consumed items are not replayed. Only the final observation captures a screenshot. Sequence boundaries retain ordinary brief command pauses; use a combat `chain` for continuous concurrent movement/casting, and `interact --approach` for uninterrupted approach/aim/activation.
 
 ## Screenshot storage
 
-Ordinary screenshots are a rolling cache: the latest 128 by default, configurable via `screenshot_keep` (integer ≥8) in local `local-settings.json`. Screenshots explicitly attached by `remember` are protected; those notes retain up to six views each. Old automatic atlas links are returned only while their image exists. SQLite paths, nodes, names and door links survive cache cleanup. Use the screenshots to inspect appearances and obstacles; the atlas stores travel knowledge, not a substitute rendered view.
+Runtime screenshots are a rolling cache: the latest 128 by default. The user can configure `screenshot_keep` (integer ≥8) through runtime settings. Screenshots explicitly attached by `remember` are protected; those notes retain up to six views each. Old automatic atlas links are returned only while their image exists. SQLite paths, nodes, names and door links survive cache cleanup. The CLI downloads returned images into a local export directory; use the returned files to inspect appearances and obstacles. The atlas stores travel knowledge, not a substitute rendered view.
 
 Map SVG/PNG files are generated only with `observe --map` or `atlas --map`. The atlas map reuses `atlas-current.svg/png`; other generated maps have an eight-file cache. User-named files and recordings are not pruned.
 
@@ -205,7 +210,16 @@ Map SVG/PNG files are generated only with `observe --map` or `atlas --map`. The 
 
 `record-start` starts a new MP4 in the configured directory. `record-status` reports its path, recording/capture state and errors. `record-stop` finalizes it for upload; successful nonempty recordings report `upload_ready:true`. Finalization copies encoded streams without recompressing, and may take time for large files.
 
-The default is 1920×1080 at 60 fps: H.264 High (CRF 18, BT.709, 4:2:0) and stereo AAC-LC at 48 kHz / 384 kbps. The final MP4 uses fast start and no edit lists for YouTube uploads. Active gameplay and UI work are included. Thinking pauses freeze the native sound mix as well as the recording clock, preserving music, voices, effects and reverberation. `look` and `scan` remain real recorded turns. There is no hidden camera inspection mode. Starting with `--no-sound` explicitly produces video without an audio track.
+The default is 1920×1080 at 60 fps: H.264 High, BT.709, 4:2:0, and stereo AAC-LC at 48 kHz / 384 kbps. Encoder selection is automatic: check the returned metadata for the actual encoder and quality mode (software CRF 18 or hardware CQP 18; these are different measures). The final MP4 uses fast start and no edit lists. Active gameplay and UI work are included. Thinking pauses freeze the native sound mix as well as the recording clock, preserving music, voices, effects and reverberation. `look` and `scan` remain real recorded turns. There is no hidden camera inspection mode. Sound is controlled by the user's runtime configuration.
+
+The Desktop live viewer is independent of recording. Its 720p30/1080p60 choice,
+connection and displayed waiting time do not change the recording timeline.
+The CLI downloads returned screenshots to local export files. Recordings are
+written directly to the selected host recordings folder, and the CLI returns
+those direct paths. Do not enter the container to find runtime files. If
+`artifact_error` is reported, the action itself may still have completed: inspect
+its result/receipt instead of repeating the mutation. Request a fresh observation
+if an image is needed.
 
 Video and audio share the engine's sample clock; speaker latency does not alter the recording. `rendered_frames`, `repeated_frames`, `ring_dropped_frames`, `encoder_queue_peak` and `frame_interval_ms` expose capture performance. Audio gaps/overruns are explicit errors. `av_difference_ms` compares encoded video duration with source audio duration, including final frame rounding; it is not a measurement of audible lip sync. `audio_monitor` reports speaker availability; monitoring failure does not discard recorded audio. An empty recording has no uploadable video.
 

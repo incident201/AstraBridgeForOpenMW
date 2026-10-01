@@ -153,12 +153,13 @@ namespace MWGui
         }
     }
 
-    Console::Console(int w, int h, bool consoleOnlyScripts, Files::ConfigurationManager& cfgMgr)
+    Console::Console(int w, int h, bool consoleOnlyScripts, bool disabled, Files::ConfigurationManager& cfgMgr)
         : WindowBase("openmw_console.layout")
         , mCaseSensitiveSearch(false)
         , mRegExSearch(false)
         , mCompilerContext(MWScript::CompilerContext::Type_Console)
         , mConsoleOnlyScripts(consoleOnlyScripts)
+        , mDisabled(disabled)
         , mCfgMgr(cfgMgr)
     {
         setCoord(10, 10, w - 10, h / 2);
@@ -201,6 +202,7 @@ namespace MWGui
 
     void Console::onOpen()
     {
+        if (mDisabled) return;
         // Give keyboard focus to the combo box whenever the console is
         // turned on and place it over other widgets
         MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mCommandLine);
@@ -224,6 +226,7 @@ namespace MWGui
 
     void Console::execute(const std::string& command)
     {
+        if (mDisabled) return;
         // Log the command
         if (mConsoleMode.empty())
             print("> " + command + "\n");
@@ -264,6 +267,7 @@ namespace MWGui
 
     void Console::executeFile(const std::filesystem::path& path)
     {
+        if (mDisabled) return;
         std::ifstream stream(path);
 
         if (!stream.is_open())

@@ -1,0 +1,138 @@
+:root{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#dce5e5;background:#101719;font-synthesis:none;color-scheme:dark;font-size:14px}
+*{box-sizing:border-box}
+body{margin:0}
+button,input,select,textarea{font:inherit}
+button{background:#263437;color:#e6eeee;border:1px solid #3b4c50;border-radius:7px;padding:9px 14px;cursor:pointer;transition:background .12s}
+button:hover:not(:disabled){background:#34494d}
+button:disabled{opacity:.45;cursor:default}
+button.primary{background:#8cdbbf;border-color:#8cdbbf;color:#112c22;font-weight:650}
+button.danger{border-color:#96625d;color:#ffc5bf}
+input,select,textarea{background:#131f22;border:1px solid #3b4c50;border-radius:6px;color:#e4ecec;padding:9px 11px;min-width:0}
+input:focus,textarea:focus,select:focus,button:focus-visible{outline:2px solid #8cdbbf;outline-offset:2px}
+textarea{resize:vertical}
+input[type=checkbox]{accent-color:#8cdbbf;width:16px;height:16px}
+fieldset{border:0;padding:0;margin:0}
+label{display:flex;flex-direction:column;gap:7px;margin:18px 0;color:#d5e1e1}
+.checkbox{flex-direction:row;align-items:center}
+h1{margin:4px 0;font-size:27px;font-weight:650;letter-spacing:-.6px}
+h2{font-size:18px;line-height:1.4;margin:0 0 10px}
+h3{font-size:15px;margin:20px 0 10px}
+p{line-height:1.6;color:#a9babc}
+.app-shell{display:grid;grid-template-columns:210px 1fr;min-height:100vh}
+aside{background:#172124;border-right:1px solid #2b393d;display:flex;flex-direction:column;padding:28px 18px;position:fixed;width:210px;height:100vh}
+.brand{display:flex;gap:10px;align-items:center;font-size:19px;font-weight:650;margin:0 0 38px}
+.brand small{display:block;font-size:9px;letter-spacing:2px;color:#8ca3a6;font-weight:500;margin-top:5px}
+.brand-mark{display:grid;place-items:center;width:36px;height:40px;background:#8cdbbf;color:#123c2d;border-radius:7px;font-size:28px}
+nav{display:grid;gap:6px}
+nav button{background:transparent;border-color:transparent;text-align:left;padding:12px 16px;color:#aebfc1}
+nav button.active{background:#2d4444;color:#a7ebd2;border-color:#3d6059}
+.sidebar-footer{margin-top:auto;font-size:12px;color:#b0c4c6}
+.sidebar-footer small{display:block;padding:10px 0;color:#748f94}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#687c80;margin-right:8px}
+.dot.online{background:#8cdbbf}
+main{grid-column:2;padding:30px 34px;min-width:0}
+header,.section-heading,.viewer-controls{display:flex;align-items:center;justify-content:space-between;gap:15px}
+header{margin-bottom:28px}
+.eyebrow{font-size:10px;letter-spacing:2.2px;color:#80aaa3;margin:0}
+.toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.status-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:20px}
+.metric{border:1px solid #2e4044;border-radius:9px;background:#192629;padding:15px}
+.metric small{display:block;color:#8ea4a8;font-size:10px;letter-spacing:1.2px}
+.metric strong{display:block;font-size:15px;line-height:1.45;margin:9px 0 5px}
+.metric span{display:block;color:#8ea4a8;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card,.viewer-panel{background:#192629;border:1px solid #304146;border-radius:10px;padding:22px;margin-bottom:20px}
+.narrow{max-width:790px}
+.viewer-panel{padding:0;overflow:hidden}
+.viewer-panel .section-heading{padding:16px 20px}
+.section-heading h2,.section-heading h3{margin:0}
+.section-heading p{margin:5px 0 0}
+.video-wrap{position:relative;background:#070d0e;height:clamp(260px,calc(100vh - 410px),900px);min-height:260px}
+video{width:100%;height:100%;object-fit:contain;display:block}
+.video-placeholder{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;align-items:center;pointer-events:none}
+.video-placeholder span{font-size:80px;font-weight:700;color:#2a4042}
+.video-placeholder p{color:#708c91}
+.viewer-controls{padding:14px 18px;align-items:flex-start;flex-direction:column}
+.hint{font-size:12px;color:#8ea4a8;line-height:1.5;overflow-wrap:anywhere}
+.banner{border:1px solid #4c7165;background:#203b32;border-radius:7px;padding:12px 15px;display:flex;justify-content:space-between;align-items:center;margin-bottom:15px}
+.banner.error{background:#422826;border-color:#8b5c55;color:#f4c2ba}
+.banner button{padding:0 6px;border:0;background:none;font-size:22px}
+.working{height:3px;background:linear-gradient(90deg,#274b44,#8cdbbf,#274b44);font-size:0;margin:0 0 12px;border-radius:3px;animation:pulse 1.5s infinite}
+@keyframes pulse{50%{opacity:.35}
+}
+.field-row{display:flex;gap:8px}
+.field-row input{flex:1}
+.empty{text-align:center;padding:60px 20px}
+.bottom-actions{margin:20px 0}
+pre{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;max-height:360px;overflow:auto;background:#111c1f;padding:16px;border-radius:7px;color:#a9c4c8}
+code{overflow-wrap:anywhere;color:#abdccf}
+.atlas-grid,.recording-grid{display:grid;grid-template-columns:1.6fr 1fr;gap:20px;margin-top:20px}
+.recording-grid{grid-template-columns:1fr 1.8fr}
+.atlas-image{width:100%;background:#f8faf8;border-radius:7px}
+.node-row{display:block;text-align:left;width:100%;margin-bottom:8px;background:#1c2d31;border-color:#344b51}
+.node-row strong{font-size:13px;display:block;overflow-wrap:anywhere}
+.node-row span{display:block;font-size:11px;color:#91acb1;margin-top:7px}
+.node-row.selected{border-color:#8cdbbf;background:#284840}
+.details{padding:10px 18px;border-left:3px solid #8cdbbf}
+.playback{aspect-ratio:16/9;background:#080e10;margin-bottom:16px}
+details{margin:16px 0}
+summary{cursor:pointer;padding:10px 0;color:#b6d7d1}
+.log{max-height:500px}
+@media(max-width:1150px){main{padding:24px}
+.status-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+header{align-items:flex-start}
+.app-shell{grid-template-columns:180px 1fr}
+aside{width:180px;padding:24px 12px}
+.brand{font-size:17px}
+.atlas-grid,.recording-grid{grid-template-columns:1fr}
+}
+
+
+/* The viewport belongs to the application. Only data panels scroll. */
+html,body,#app{height:100%;overflow:hidden}
+.app-shell{height:100dvh;min-height:0;overflow:hidden}
+main{height:100%;min-height:0;display:flex;flex-direction:column;overflow:hidden;padding:22px 28px}
+main>header,main>.status-grid,main>.banner,main>.working,main>.bottom-actions{flex-shrink:0}
+header{margin-bottom:18px}
+.card{margin-bottom:0;min-height:0}
+.settings-card,.setup-card,.diagnostics-card,.recordings-card,.atlas-card{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.settings-card,.setup-card{max-width:1060px}
+.section-heading{flex-shrink:0}
+.tabs{display:flex;gap:6px;margin-top:14px;flex-shrink:0}
+.tabs button{background:transparent;border-color:transparent;color:#aebfc1}
+.tabs button.active{background:#2d4444;border-color:#3d6059;color:#a7ebd2}
+.form-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:0 18px}
+.form-grid label{min-width:0}
+select{max-width:100%;text-overflow:ellipsis}
+.settings-fields,.setup-fields{flex:1;min-height:0;overflow:auto}
+.settings-fields label,.setup-fields label{margin:12px 0}
+.settings-fields textarea{resize:none}
+.card-footer{padding-top:14px;flex-shrink:0}
+.setup-progress{max-height:140px}
+.diagnostics-card>.status-grid{margin:14px 0 0;flex-shrink:0}
+.diagnostics-card .log{flex:1;min-height:0;max-height:none;margin-bottom:0}
+.play-page .status-grid{grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:14px}
+.play-page .metric{padding:10px 12px}
+.play-page .metric strong{margin:5px 0 3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.play-page .viewer-panel{flex:1;min-height:0;display:flex;flex-direction:column;margin:0}
+.play-page .viewer-panel .section-heading{padding:10px 16px}
+.video-wrap{flex:1;min-height:0;height:auto;overflow:hidden}
+.video-wrap video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+.video-placeholder{overflow:hidden}
+.video-placeholder span{font-size:clamp(20px,5vh,60px)}
+.video-placeholder p{margin:4px 12px;text-align:center}
+.viewer-controls{padding:10px 16px;gap:5px;flex-shrink:0}
+.play-page .bottom-actions{margin:12px 0 0}
+.atlas-grid,.recording-grid{flex:1;min-height:0;overflow:hidden}
+.atlas-grid>div,.recording-grid>div{min-width:0;min-height:0}
+.scroll-region{overflow:auto}
+.map-pane,.recording-preview{display:flex;flex-direction:column;overflow:hidden}
+.map-pane .atlas-image{flex:1;min-height:0;object-fit:contain}
+.map-pane p{flex-shrink:0;margin:10px 0 0}
+.atlas-card>.details{max-height:25%;overflow:auto;flex-shrink:0}
+.atlas-card>pre{max-height:20%}
+.recording-preview .playback{flex:1;min-height:0;height:0;aspect-ratio:auto;object-fit:contain;margin-bottom:12px}
+.recording-preview .toolbar,.recording-preview details{flex-shrink:0}
+.recording-preview details[open]{max-height:35%;overflow:auto}
+@media(max-width:1150px){main{padding:16px 18px}.atlas-grid,.recording-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.metric strong{font-size:13px}.toolbar{gap:6px}button{padding:8px 10px}.viewer-controls .hint{font-size:11px}}
+@media(max-height:740px){main{padding-top:14px;padding-bottom:14px}header{margin-bottom:12px}.card{padding:16px}.play-page .status-grid{margin-bottom:10px}.play-page .metric{padding:7px 10px}.play-page .metric span{font-size:10px}.play-page .bottom-actions{margin-top:8px}.viewer-controls{padding:8px 14px}.settings-fields label,.setup-fields label{margin:9px 0}.settings-card>p{margin:8px 0}.tabs{margin-top:8px}}
+.banner{max-height:18vh;overflow:auto;overflow-wrap:anywhere;align-items:flex-start}

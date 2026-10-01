@@ -67,6 +67,12 @@ timer. Movement, turning, combat and waiting inside an action still consume
 simulation time. This is a deliberate difference from a continuously running
 human play session and should be stated when describing a benchmark.
 
+This pause policy applies while an agent owns control. Desktop also supports
+explicit manual control, with ordinary continuous play, when no agent is
+connected. Watching through WebRTC does not advance the world or benchmark
+recording clock. See [runtime architecture](architecture.md) for ownership and
+the separate media timelines.
+
 The agent can retain notes, learned names and travelled routes in persistent
 memory. Loading an earlier save does not make it forget everything it learned
 after that save. These records represent prior experience or agent-authored
@@ -126,14 +132,14 @@ was easy to obtain from an existing engine API.
 
 The boundary is implemented across several layers:
 
-- [Scene and visibility projection](../harness/mod/scripts/astrabridge/scene.lua)
+- [Scene and visibility projection](../runtime/mod/scripts/astrabridge/scene.lua)
   selects observable objects and exposes public handles.
-- [Recognition](../harness/mod/scripts/astrabridge/recognition.lua) applies the
-  inspection-distance rule; [knowledge memory](../harness/astra_bridge/knowledge.py)
+- [Recognition](../runtime/mod/scripts/astrabridge/recognition.lua) applies the
+  inspection-distance rule; [knowledge memory](../runtime/daemon/astra_bridge/knowledge.py)
   removes private instance keys, validates the response and supplies learned names.
-- The [native UI adapter](../harness/native/astraui.hpp) reads active game UI,
+- The [native UI adapter](../runtime/native/astraui.hpp) reads active game UI,
   respects enabled/modal controls and excludes console/debug UI.
-- The [protocol](../harness/astra_bridge/protocol.py) limits accepted operations
+- The [protocol](../runtime/daemon/astra_bridge/protocol.py) limits accepted operations
   and result fields. The [skill](../skill/SKILL.md) forbids obtaining gameplay
   knowledge through game files, saves, private databases, developer logs or
   external walkthroughs.

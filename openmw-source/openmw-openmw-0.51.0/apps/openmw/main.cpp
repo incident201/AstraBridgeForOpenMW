@@ -146,6 +146,10 @@ bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::Configurati
     // scripts
     engine.setCompileAll(variables["script-all"].as<bool>());
     engine.setCompileAllDialogue(variables["script-all-dialogue"].as<bool>());
+    const bool disableConsole = variables["disable-console"].as<bool>();
+    if (disableConsole && !variables["script-run"].as<std::string>().empty())
+        throw std::runtime_error("--disable-console cannot be combined with --script-run");
+    engine.setConsoleDisabled(disableConsole);
     engine.setScriptConsoleMode(variables["script-console"].as<bool>());
     engine.setStartupScript(variables["script-run"].as<std::string>());
     engine.setWarningsMode(variables["script-warn"].as<int>());

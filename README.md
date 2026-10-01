@@ -1,214 +1,82 @@
 # AstraBridge for OpenMW
 
-AstraBridge is an Agent-Computer Interface (ACI) for interacting with OpenMW.
-It lets an agent play Morrowind through the `astra` CLI and the `openmw-play`
-skill. Originally developed for GPT-6 Astra; other models can use the same public
-interface. Supply your own Morrowind installation; game files are never included.
+AstraBridge provides an agent-computer interface for playing Morrowind through
+modified OpenMW. Desktop and its CLI manage one containerized runtime. Supply
+your own Morrowind installation; game files are not included in the image.
 
-For project goals, the OpenMW change inventory and bundled fixes, see the
-[documentation for people and developers](docs/README.md).
+## Requirements
+
+- Linux x86_64: rootless Podman, a GPU driver and access to the GPU render device.
+- Windows x86_64: WSL Containers (`wslc`), with GPU access.
+- An existing Morrowind installation; extra disk space if choosing a managed copy.
+
+Docker Desktop and a separate user-installed WSL distribution are not required.
+See [system requirements](docs/system-requirements.md) for host dependencies and GPU setup.
 
 ## Install and play
 
-```sh
-git clone https://github.com/incident201/AstraBridgeForOpenMW.git
-cd AstraBridgeForOpenMW
-python3 install.py --game '/path/to/Morrowind'
-```
+Open the matching AstraBridge Linux AppImage or Windows installer/application.
+In **Setup**, choose your game folder, managed storage, game encoding and an
+optional recordings directory. By default AstraBridge mounts the game folder
+read-only without copying. **Copy into managed storage** creates an independent
+copy instead. Active content/archive order is imported from `Morrowind.ini`.
+Review **Settings** before starting,
+particularly for an installation without an INI file or with custom content.
 
-Ask your agent to install or update the `openmw-play` skill from this
-repository's [`skill/`](skill/SKILL.md) directory and use it with the runtime
-created by `install.py`. Then play. The skill is already included in the
-repository; you do not need to download or manually copy it separately.
-
-The installer downloads a GitHub Release, verifies its SHA256 and file inventory,
-creates a separate private runtime/config, configures Data Files, installs the
-bundled Python wheels, prepares a runtime copy of the skill and runs doctor. It never builds OpenMW.
-Release files are downloaded directly from github.com; installation does not use
-the GitHub REST API or require an authentication token.
-On a release-tag checkout it selects that tag; on main it selects latest stable.
-The default destination is `~/AstraOpenMW/<tag>/`; existing installations and saves
-are never overwritten. Use `--directory` for another new destination.
-
-Requirements: Linux x86_64, Python 3.10+ to run the installer, an
-X11/XWayland graphical session and working graphics drivers. The release manifest
-states its minimum glibc and CPU ISA versions; the installer rejects incompatible
-systems. Releases target ordinary **x86_64**, without an AVX2 requirement, and
-**glibc 2.35 or newer**. A pinned Python 3.12 interpreter and its
-offline wheels are included, so the runtime does not use the system Python.
-For English game data add `--encoding win1252` (default: `win1251`). Bootstrap is
-offline, using wheels shipped in the release; downloading the release needs Internet.
+The same application also provides CLI mode:
 
 ```sh
-python3 install.py --game '/path/to/Morrowind' --version latest
-python3 install.py --game '/path/to/Morrowind' --version v0.1.0
+astrabridge install --game "/path/to/Morrowind" --storage "/path/to/AstraBridge" --encoding win1252
+astrabridge start
+astrabridge status
 ```
 
-If doctor reports a missing display or host library, correct that prerequisite and
-rerun `<installation>/AstraBridge/.venv/bin/python <installation>/AstraBridge/doctor.py`.
-The installed runtime is retained for diagnostics. Start with
-`<installation>/AstraBridge/astra start` from your graphical session.
+Use `win1251` for Cyrillic data, `win1252` for Western European data or `win1250`
+for Central European data. Encoding is selected explicitly. On Linux the
+AppImage itself accepts these commands; `astrabridge` above denotes that
+executable. On Windows the installation includes an `astrabridge.exe` console
+launcher. `--config FILE` selects a different application configuration.
+Use `install --game-mode copy` for a managed copy; `mount` is the default.
 
-### Optional GPU video encoding
+The game appears in Desktop's **Play** viewer. When no agent is connected,
+**Take manual control** enables mouse/keyboard input. Choose 720p30 or 1080p60
+for the live view. Closing Desktop leaves the runtime and any agent/recording
+running; use **Stop runtime** or `astrabridge stop` to stop them explicitly.
 
-Recording automatically tries a system FFmpeg from `PATH` with NVIDIA NVENC or
-Intel/AMD VAAPI. It performs a short encode before recording starts, then falls
-back to the bundled CPU encoder if hardware encoding is unavailable. Install a
-suitable system FFmpeg and GPU driver to enable this; no extra GPU binaries or
-drivers are downloaded by AstraBridge. Recording remains H.264 High, 1080p/60,
-with AAC audio. Hardware uses CQP 18; the CPU fallback uses CRF 18. These quality
-settings are not numerically equivalent across encoders.
+## Connect an agent
 
-Optional overrides in `<installation>/AstraBridge/local-settings.json`:
-
-```json
-{
-  "recording_encoder": "auto",
-  "ffmpeg_binary": "/usr/bin/ffmpeg"
-}
-```
-
-`recording_encoder` accepts `auto`, `cpu`, `vaapi` or `nvenc`. Explicit GPU modes
-report an error if no working encoder is available. `ffmpeg_binary` pins an
-external executable; `IMAGEIO_FFMPEG_EXE` is also supported when that setting is
-absent. Without an explicit binary, automatic CPU fallback prefers the bundled
-FFmpeg. `vaapi_device` can select a render node such as `/dev/dri/renderD128`.
-Recording status and sidecars identify the actual encoder, FFmpeg version and
-device; `.encoder.json` contains the startup probe results. Selection happens
-before the recording starts; a later encoder failure is reported without
-silently restarting the recording.
-
-## Frozen environments and benchmarks
-
-`VERSION.json` defines one project version for the AstraBridge ACI, skill, modified OpenMW,
-public protocol and binary bundle. OpenMW's upstream version remains 0.51.0.
-The initial public protocol revision is **1**, matching the existing wire protocol;
-project version and protocol revision need not increase together.
-
-`main` is development. A `vX.Y.Z` tag plus its matching Release is the frozen
-environment. Never move a published tag or replace its assets; corrections get a
-new version. The release contains:
-
-- `astrabridge-openmw-vX.Y.Z-linux-x86_64.tar.gz`
-- `manifest.json` and `SHA256SUMS`
-- `astrabridge-vX.Y.Z-source.tar.gz`
-
-The archive contains `AstraOpenMW/engine/{openmw,lib,resources}`,
-`AstraBridge/` (including offline wheels), `skill/openmw-play/`, `LICENSES/`, and
-`manifest.json`, plus a private `python/` interpreter. No Morrowind files or user profiles are included.
-
-The manifest records project/protocol/upstream versions, Git commit/tag, platform,
-architecture, glibc/CPU ISA floors, engine hash, capabilities and hashes of every runtime
-file. The external manifest also records the archive hash. The embedded manifest
-has `asset_sha256: null` because an archive cannot contain its own hash; the
-installer replaces it with the identical external manifest after verification.
-`SHA256SUMS` covers the archive, external manifest and source archive.
-
-Before every benchmark/playtest, save the public environment identity:
+Use **Export gameplay skill** or:
 
 ```sh
-/path/to/AstraOpenMW/v0.1.0/AstraBridge/astra version > environment.json
+astrabridge skill export "/path/to/openmw-play"
 ```
 
-It includes project version, protocol revision, environment commit, tag and actual
-engine hash. Each session also writes an environment sidecar under its private
-runtime, and each recording gets a `.environment.json` sidecar. Keep these with
-benchmark results and record your game-data/mod configuration separately. Use the
-same tag and verified release assets when comparing models.
-
-## Development / build from source
-
-Git contains source, skill, installer and build tools. Binaries, wheels, runtime
-libraries, generated manifests and build outputs belong outside tracked files.
-
-The manual GitHub release workflow caches the builder image, native build tree
-and compiler results. When native sources and the build environment are
-unchanged, it verifies the cached engine and its runtime files and reuses them;
-Python/skill changes and version bumps still produce fresh release assets and
-manifests. Native changes use Ninja and ccache to rebuild affected code. Changes
-to the build recipe invalidate the compatible cache. A cold cache still needs
-one full build; CI then verifies a second packaging pass reuses the engine.
-
-The release builder uses **Podman or Docker on the developer's machine** and an
-Ubuntu 22.04 build container. GCC, headers and build packages stay in the container;
-nothing is installed into the host system. End users need neither containers nor
-a compiler, package manager, `zstd`, FUSE, or a separate Python runtime installation.
+Give that exported folder to the agent. It contains the current gameplay
+instructions and connection settings. Gameplay uses an explicit agent session:
 
 ```sh
-# First development build:
-python3 packaging/build_release.py --development --work .release-work/dev --output dist/dev
-python3 install.py --game '/path/to/Morrowind' --from-bundle dist/dev
-
-# After editing sources: update the cached source tree and rebuild changed files
-python3 packaging/build_release.py --development --resume --replace-output --work .release-work/dev --output dist/dev
+astrabridge agent connect
+astrabridge game observe
+astrabridge agent disconnect
 ```
 
-Development builds may contain uncommitted edits and are marked as development
-in the manifest. Add new source files with `git add` so they enter the source
-snapshot; committing is only required for stable releases. `--jobs N` controls
-parallelism. A changed container recipe/image requires a new work directory.
+The viewer remains available while the agent controls the game; manual input is
+disabled until the agent disconnects. The [skill](skill/SKILL.md) documents the
+full gameplay interface.
 
-Work and output directories may be anywhere, including an external disk. With
-Podman, `--container-storage /path/to/container-cache` also relocates the large
-container images. `--container-tool docker` explicitly selects Docker when both
-container runtimes are installed. No developer-specific paths are stored in the
-build recipe.
+## Recordings and updates
 
-An engine-only native development build remains available with
-`harness/native/build_engine.py`; its optional `--arch-deps` is an Arch-specific
-**developer convenience**, not a release or installation requirement. Explicit
-`--host-build --development` also permits native local bundle builds.
+MP4 recordings and sidecars are written directly to a host folder, defaulting to
+`<managed storage>/recordings`. Select another folder with `install --recordings
+DIRECTORY`. Desktop can browse, play and open this folder; `astrabridge recordings`
+reports it. Hardware encoding is probed automatically, with CPU fallback.
 
-For a release in GitHub Actions, select **Actions → Draft Linux x86_64 release →
-Run workflow** on `main` and enter a new `vX.Y.Z` version. This is the only
-trigger for that workflow. It updates `VERSION.json` in a release commit, tags
-the clean commit, runs source checks, builds in the Ubuntu 22.04 container,
-verifies the four release assets, then pushes the commit and tag and creates a
-draft GitHub Release. The commit and tag are pushed only after the build passes.
-Review the draft and publish it when ready. An existing release is never replaced.
+Install a newer Desktop package explicitly, then use **Update runtime** or
+`astrabridge update` to install its matching image. Managed game/state data are
+preserved. There are no automatic updates. Ordinary stop/restart does not remove
+the persistent container or its data.
 
-The equivalent manual procedure is to update `VERSION.json`, commit all changes,
-tag that clean commit, and run the same packaging entry point. Use a fresh
-work/output directory:
+## Documentation
 
-```sh
-TAG=vX.Y.Z # replace with a new version
-git tag -a "$TAG" -m "AstraBridge ${TAG#v}"
-python3 packaging/build_release.py --work ".release-work/$TAG" --output "dist/$TAG"
-(cd "dist/$TAG" && sha256sum -c SHA256SUMS)
-git push origin main "$TAG"
-gh release create "$TAG" "dist/$TAG/"* --verify-tag --draft --title "AstraBridge $TAG" --notes 'Frozen environment; see manifest.json.'
-```
-
-The packaging script builds modified OpenMW, copies resources and shared-library
-closure/OSG plugins, includes xdotool, a pinned standalone Python and matching offline wheels,
-gathers license notices and emits manifests/checksums. glibc and graphics
-driver libraries remain host-provided. Build on the oldest supported target for a
-lower glibc requirement; packaging computes the actual ELF symbol floor and
-refuses stable releases that require newer than glibc 2.35. The archive uses gzip,
-which the installer reads with the Python standard library.
-
-To reuse a previously built engine, explicitly supply `--engine-prefix` and
-`--engine-receipt`. The generated receipt records Git trees, actual source/native content digests
-and `engine_sha256`; all must match this checkout and executable. This is a build-cache
-path, never the ordinary install path. `--wheelhouse` and `--tools-prefix` accept
-previously downloaded build inputs. Preserve dependency source/provenance and
-notices when distributing third-party libraries; see `LICENSES/README.md`.
-
-Run tests with `python3 harness/bootstrap.py --tests` then, from `harness/`,
-`.venv/bin/python -m pytest -q tests ../packaging/tests`. Lua tests require `lua`;
-window capture integration requires a configured test display. Packaging tests
-exercise archive validation, hash mismatches and version selection without game data.
-
-Manual fallback (installer internals): verify `SHA256SUMS`, safely unpack the
-bundle into a new directory, then run `AstraBridge/configure.py`,
-`AstraBridge/bootstrap.py --offline` and `.venv/bin/python doctor.py`. Prefer the
-installer so that manifest validation and installed skill setup are also performed.
-
-## License
-
-Original AstraBridge ACI, skill, installer and build-tool code is distributed
-under **GPL-3.0-only**, with the full GPLv3 text in [LICENSE](LICENSE). OpenMW keeps
-its upstream GPLv3 license and copyright notices. Third-party components keep
-their own terms; YAIAF's permission is in [LICENSES/YAIAF.txt](LICENSES/YAIAF.txt).
-Release library and wheel notices are collected in `LICENSES/` in the bundle.
+See [docs](docs/README.md) for project goals, OpenMW modifications, bundled fixes,
+architecture, APIs, recording and development/build instructions.

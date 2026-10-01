@@ -1,0 +1,70 @@
+{
+  "name": "astrabridge",
+  "version": "0.3.0-dev",
+  "private": true,
+  "description": "AstraBridge Desktop and CLI for OpenMW",
+  "author": "AstraBridge contributors",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "main": "out/main.cjs",
+  "scripts": {
+    "build": "node build.mjs",
+    "check": "svelte-check --tsconfig ./tsconfig.json && tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts",
+    "package:linux": "npm run build && electron-builder --linux AppImage --publish never",
+    "package:windows": "npm run build && electron-builder --win nsis --publish never"
+  },
+  "dependencies": {
+    "tar": "7.5.22",
+    "ws": "8.18.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@sveltejs/vite-plugin-svelte": "7.3.1",
+    "@types/node": "24.10.1",
+    "@types/ws": "8.18.1",
+    "electron": "42.11.3",
+    "electron-builder": "26.15.3",
+    "esbuild": "0.27.0",
+    "svelte": "5.57.1",
+    "svelte-check": "4.3.4",
+    "tsx": "4.21.0",
+    "typescript": "5.9.3",
+    "vite": "8.3.1"
+  },
+  "build": {
+    "appId": "io.github.incident201.astrabridge",
+    "productName": "AstraBridge",
+    "executableName": "astrabridge-desktop",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources",
+        "to": "astra"
+      }
+    ],
+    "linux": {
+      "target": "AppImage",
+      "category": "Game",
+      "artifactName": "AstraBridge-${version}-linux-x86_64.AppImage"
+    },
+    "appImage": {
+      "artifactName": "AstraBridge-${version}-linux-x86_64.AppImage"
+    },
+    "win": {
+      "target": "nsis",
+      "artifactName": "AstraBridge-${version}-windows-x86_64.exe"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "afterPack": "packaging/after-pack.cjs"
+  }
+}

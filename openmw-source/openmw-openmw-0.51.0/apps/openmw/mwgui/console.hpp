@@ -42,7 +42,7 @@ namespace MWGui
         std::string mEditString;
         std::ofstream mCommandHistoryFile;
 
-        Console(int w, int h, bool consoleOnlyScripts, Files::ConfigurationManager& cfgMgr);
+        Console(int w, int h, bool consoleOnlyScripts, bool disabled, Files::ConfigurationManager& cfgMgr);
         ~Console();
 
         void onOpen() override;
@@ -110,6 +110,7 @@ namespace MWGui
         std::vector<std::string> mNames;
 
         bool mConsoleOnlyScripts;
+        const bool mDisabled;
         Files::ConfigurationManager& mCfgMgr;
         bool compile(const std::string& cmd, Compiler::Output& output);
 

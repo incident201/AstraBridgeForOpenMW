@@ -38,7 +38,7 @@ For a target outside attack range, either `approach ACTOR_REF --reach melee` / `
 Call `chain` with one JSON object:
 
 ```sh
-./astra chain '{"ref":"ACTOR_REF","pursue":true,"actions":[{"op":"strike","charge":0.8},{"op":"strike","charge":0.8}],"max_seconds":12,"stop_health_pct":35}'
+astrabridge game chain '{"ref":"ACTOR_REF","pursue":true,"actions":[{"op":"strike","charge":0.8},{"op":"strike","charge":0.8}],"max_seconds":12,"stop_health_pct":35}'
 ```
 
 Replace `ACTOR_REF` inside the JSON with the actual opaque ref. The queue has **no pause between its steps**. Its final response has an observation and `action.steps`, `completed_actions`, `total_actions`, `elapsed`, resource changes and reason.
@@ -86,14 +86,14 @@ Examples:
 
 ```sh
 # Approach a moving enemy and make several attempts without thinking pauses.
-./astra chain '{"ref":"ACTOR_REF","pursue":true,"actions":[{"op":"strike"},{"op":"strike"},{"op":"strike"}],"max_seconds":15}'
+astrabridge game chain '{"ref":"ACTOR_REF","pursue":true,"actions":[{"op":"strike"},{"op":"strike"},{"op":"strike"}],"max_seconds":15}'
 
 # Keep facing the enemy while backing away and casting a known self-heal.
-./astra chain '{"ref":"ACTOR_REF","movement":{"direction":"back","meters":2,"face_target":true},"actions":[{"op":"cast","spell":"EXACT_KNOWN_SELF_HEAL_NAME"},{"op":"wait","seconds":1}],"max_seconds":8}'
+astrabridge game chain '{"ref":"ACTOR_REF","movement":{"direction":"back","meters":2,"face_target":true},"actions":[{"op":"cast","spell":"EXACT_KNOWN_SELF_HEAL_NAME"},{"op":"wait","seconds":1}],"max_seconds":8}'
 
 # Cast the currently selected self-only spell while moving forward independently.
 # First clear a live actor lock if one exists.
-./astra chain '{"movement":{"direction":"forward","meters":3,"face_target":false},"actions":[{"op":"cast"}],"max_seconds":8}'
+astrabridge game chain '{"movement":{"direction":"forward","meters":3,"face_target":false},"actions":[{"op":"cast"}],"max_seconds":8}'
 ```
 
 These are ground maneuvers, not flight/swimming autopilots. They check local surface/obstacles, but do not automatically predict or dodge incoming arrows/spells. Choose the direction from visible evidence.
@@ -101,10 +101,10 @@ These are ground maneuvers, not flight/swimming autopilots. They check local sur
 ### Retreat and evade shortcuts
 
 ```sh
-./astra retreat ACTOR_REF --meters 2 --seconds 4
-./astra evade left ACTOR_REF --meters 2 --seconds 4
-./astra evade right ACTOR_REF --meters 2 --seconds 4
-./astra retreat ACTOR_REF --meters 2 --seconds 8 --actions '[{"op":"cast","spell":"EXACT_KNOWN_SELF_HEAL_NAME"}]'
+astrabridge game retreat ACTOR_REF --meters 2 --seconds 4
+astrabridge game evade left ACTOR_REF --meters 2 --seconds 4
+astrabridge game evade right ACTOR_REF --meters 2 --seconds 4
+astrabridge game retreat ACTOR_REF --meters 2 --seconds 8 --actions '[{"op":"cast","spell":"EXACT_KNOWN_SELF_HEAL_NAME"}]'
 ```
 
 `retreat` means `evade back`. The actor ref is optional only when a valid lock supplies it. `--run` is optional. Without `--actions`, seconds are ≥0.2 (default 4), distance ≥0.25 m (default 2). With `--actions`, the shortcut creates a face-target chain and uses `--seconds` as its total budget; use ≥0.5. No fixed upper cap is imposed. It does not mean "move, pause, then cast": movement and the queued uses run together.
@@ -127,8 +127,8 @@ There is no `pick-lock`/`disarm` high-level command. `strike` rejects tools as `
 4. Refocus the intended container/door and confirm it is in reach. Send one short normal Use pulse:
 
 ```sh
-./astra act '{"attack":true,"seconds":0.12}'
-./astra act '{"seconds":0.8}'
+astrabridge game act '{"attack":true,"seconds":0.12}'
+astrabridge game act '{"seconds":0.8}'
 ```
 
 5. Inspect the outcome before another attempt. The waits above are tested examples, not a guarantee every animation has finished on every configuration.

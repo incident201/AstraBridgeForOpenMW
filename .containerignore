@@ -1,0 +1,9 @@
+.git
+**/__pycache__
+**/.pytest_cache
+**/node_modules
+desktop/out
+desktop/resources
+desktop/release
+build
+dist

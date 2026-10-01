@@ -1,0 +1,42 @@
+ARG BASE_IMAGE=docker.io/library/ubuntu@sha256:496754492fb28b4d3049432f2ca787449331e23fb14f0dd3fffea86bf5a93eb4
+FROM ${BASE_IMAGE} AS base
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates python3 python3-venv tini \
+    weston xwayland xauth xdotool x11-utils mesa-utils pciutils \
+    libgl1-mesa-dri libglx-mesa0 libegl-mesa0 mesa-va-drivers intel-media-va-driver vainfo \
+    libva2 libva-drm2 libva-x11-2 libx264-164 libopus0 \
+    libopenscenegraph161 libcollada-dom2.5-dp0 libbullet3.24 \
+    libsdl2-2.0-0 libopenal1 libyaml-cpp0.8 libluajit-5.1-2 \
+    libboost-program-options1.83.0 libboost-filesystem1.83.0 libboost-iostreams1.83.0 \
+    libavcodec60 libavformat60 libavutil58 libswscale7 libswresample4 \
+    libicu74 libsqlite3-0 libfreetype6 libpng16-16t64 liblz4-1 \
+    libxcb-composite0 libxcomposite1 libxrandr2 libxcursor1 libxi6 \
+    && rm -rf /var/lib/apt/lists/*
+
+FROM base AS builder
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    g++ cmake ninja-build ccache git python3-pip pkg-config binutils curl xz-utils \
+    libboost-program-options-dev libboost-filesystem-dev libboost-iostreams-dev \
+    libopenscenegraph-dev libcollada-dom-dev libbullet-dev libsdl2-dev libopenal-dev \
+    libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev \
+    libyaml-cpp-dev libluajit-5.1-dev liblz4-dev libicu-dev libsqlite3-dev \
+    libfreetype-dev libpng-dev libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev \
+    libweston-13-dev libva-dev libx264-dev libopus-dev libssl-dev zlib1g-dev nasm \
+    lua5.4 make autoconf automake libtool \
+    && rm -rf /var/lib/apt/lists/*
+ENV CCACHE_DIR=/work/cache/ccache PYTHONDONTWRITEBYTECODE=1
+WORKDIR /src
+
+FROM base AS runtime
+COPY stage/ /opt/astrabridge/
+RUN dpkg-query -W '-f=${Package}=${Version}\n' > /opt/astrabridge/runtime-packages.txt \
+    && python3 -c "import json,hashlib; from pathlib import Path; p=Path('/opt/astrabridge/runtime-manifest.json'); m=json.loads(p.read_text()); m['packages_sha256']=hashlib.sha256(p.with_name('runtime-packages.txt').read_bytes()).hexdigest(); p.write_text(json.dumps(m,indent=2)+'\n')"
+ENV PYTHONPATH=/opt/astrabridge/runtime/daemon \
+    ASTRA_INSTALLATION=/opt/astrabridge ASTRA_STORAGE=/data \
+    ASTRA_FFMPEG=/opt/astrabridge/bin/ffmpeg ASTRA_MODE=production \
+    XDG_RUNTIME_DIR=/tmp/astra-display SDL_VIDEODRIVER=x11 \
+    PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+WORKDIR /opt/astrabridge
+EXPOSE 18770/tcp 18771/tcp
+ENTRYPOINT ["/usr/bin/tini", "--", "/opt/astrabridge/python/bin/python", "-m", "astra_daemon"]

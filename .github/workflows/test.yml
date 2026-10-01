@@ -4,7 +4,10 @@ permissions:
   contents: read
 jobs:
   tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    env:
+      PYTHONPATH: runtime/daemon
+      PYTHONDONTWRITEBYTECODE: '1'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -12,8 +15,19 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: sudo apt-get update && sudo apt-get install -y lua5.4
-      - run: python -m pip install pytest mss imageio-ffmpeg Pillow
-      - run: python -m pytest -q tests ../packaging/tests
-        working-directory: harness
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - run: sudo apt-get update && sudo apt-get install -y lua5.4 g++
+      - run: python -m pip install -r runtime/requirements-dev.txt
+      - run: python -m pytest -q runtime/tests packaging/tests
       - run: python packaging/check_source_only.py
+      - name: Desktop checks
+        working-directory: desktop
+        run: |
+          npm ci
+          npm run check
+          npm test
+          npm run build

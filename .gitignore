@@ -4,10 +4,10 @@
 /local-data/
 /recordings/
 /AstraOpenMW/
-/harness/runtime/
-/harness/.venv/
-/harness/local-settings.json
-/harness/*.log
+/runtime/runtime/
+/runtime/.venv/
+/runtime/local-settings.json
+/runtime/*.log
 *.pyc
 __pycache__/
 .pytest_cache/
@@ -39,8 +39,8 @@ wheelhouse/
 ffmpeg
 openmw.x86_64
 /engine/
-/harness/tools/
-**/runtime/
+/runtime/tools/
+/runtime/runtime/
 **/userdata/
 **/recordings/
 **/.venv/
@@ -49,3 +49,11 @@ openmw.x86_64
 /BUILD-INFO.json
 /SHA256SUMS
 /manifest.json
+
+# Desktop build products
+node_modules/
+/desktop/dist/
+/desktop/out/
+/desktop/release/
+/desktop/resources/
+*.AppImage

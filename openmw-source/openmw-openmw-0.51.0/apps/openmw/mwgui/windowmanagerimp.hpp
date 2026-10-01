@@ -129,7 +129,7 @@ namespace MWGui
 
         WindowManager(SDL_Window* window, osgViewer::Viewer* viewer, osg::Group* guiRoot,
             Resource::ResourceSystem* resourceSystem, SceneUtil::WorkQueue* workQueue,
-            const std::filesystem::path& logpath, bool consoleOnlyScripts, Translation::Storage& translationDataStorage,
+            const std::filesystem::path& logpath, bool consoleOnlyScripts, bool consoleDisabled, Translation::Storage& translationDataStorage,
             ToUTF8::FromType encoding, bool exportFonts, const std::string& versionDescription,
             Files::ConfigurationManager& cfgMgr);
         virtual ~WindowManager();
@@ -364,6 +364,7 @@ namespace MWGui
         void setWerewolfOverlay(bool set) override;
 
         void toggleConsole() override;
+        bool isConsoleDisabled() const override { return mConsoleDisabled; }
         void toggleDebugWindow() override;
         void togglePostProcessorHud() override;
         void toggleSettingsWindow() override;
@@ -424,6 +425,7 @@ namespace MWGui
         std::unique_ptr<StatsWatcher> mStatsWatcher;
 
         bool mConsoleOnlyScripts;
+        const bool mConsoleDisabled;
 
         std::map<MyGUI::Window*, WindowSettingValues> mTrackedWindows;
         void trackWindow(Layout* layout, const WindowSettingValues& settings);

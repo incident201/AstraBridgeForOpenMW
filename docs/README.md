@@ -9,6 +9,10 @@ and deliberate changes to the game environment.
 | [Project goals and information boundaries](project-goals.md) | Why the interface assists movement and UI interaction; what the agent may learn; limitations of the fairness claim. |
 | [OpenMW modifications](openmw-modifications.md) | Inventory of the native changes, their purpose, affected source files and the division of work between C++, Lua and Python. |
 | [Bundled mods and gameplay fixes](mods-and-fixes.md) | YAIAF, the generated Dark Brotherhood delay, profile settings and explicit recovery tools. |
+| [Runtime and Desktop architecture](architecture.md) | Container lifecycle, managed data, host recordings, input ownership and platform boundaries. |
+| [Runtime API](runtime-api.md) | HTTP/WebSocket/WebRTC interfaces and the shared Desktop/CLI client. |
+| [Recording and live media](recording.md) | Host recording files, encoder selection and independent recording/viewer timelines. |
+| [Development and builds](development.md) | Local builds, tests, development mounts and release packaging. |
 
 For installation, configuration, recording setup and release builds, use the
 [main README](../README.md). For the public command reference and instructions
@@ -16,7 +20,7 @@ given to a gameplay agent, use the [agent skill](../skill/SKILL.md).
 
 ## Scope and source of truth
 
-This inventory was checked against **AstraBridge 0.2.2**, using **OpenMW 0.51.0**
+This inventory describes **AstraBridge 0.3.0 development**, using **OpenMW 0.51.0**
 as the upstream baseline. The current project, upstream and protocol versions
 are recorded in [VERSION.json](../VERSION.json). Source links point to the files
 in this checkout; use a release tag when reviewing a frozen environment.
@@ -36,3 +40,6 @@ These are developer documents, not an additional source of game knowledge for
 an agent during a playthrough. The skill defines that gameplay boundary. In
 particular, the quest identifier documented for the Tribunal compatibility
 addon is an implementation detail, not a public quest-state query.
+
+- [System requirements](system-requirements.md): host dependencies, storage, GPU prerequisites and build tools.
+- [GPU selection](gpu-selection.md): independent rendering/encoding choices, probes and fallback behavior.

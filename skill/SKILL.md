@@ -5,14 +5,21 @@ description: "Play Morrowind through the configured AstraBridge Agent-Computer I
 
 # Play OpenMW through AstraBridge
 
-Control the game through the public `astra` CLI. For an installed skill, read adjacent `installation.json` for `ASTRA_HOME`. Otherwise the user supplies the AstraBridge installation directory, or sets `ASTRA_HOME` to it. Run commands from that directory:
+Control the game through the public `astrabridge game` CLI. Read adjacent
+`installation.json` for `executable` and `config`. Invoke that executable with
+`--config` and the recorded configuration path. Use the shell's normal quoting
+for paths with spaces; on PowerShell, use its `&` invocation operator.
 
 ```sh
-cd "$ASTRA_HOME"
-./astra status
+"/path/to/AstraBridge.AppImage" --config "/path/to/installation.json" agent connect
+"/path/to/AstraBridge.AppImage" --config "/path/to/installation.json" game status
 ```
 
-`ASTRA_HOME` is a directory hint for the agent; it does not configure the CLI. If setup is incomplete, refer the user to the repository's English `README.md`. Do not turn a gameplay request into installation or development work.
+Examples below abbreviate the configured executable as `astrabridge`. Unless
+explicitly marked as application commands, command names in this skill and its
+references follow `astrabridge game`. If setup is incomplete, refer the user to
+the repository's English `README.md`. Do not turn gameplay into installation or
+development work.
 
 Explicitly requested installation or development is a separate task. During gameplay, private source files, internal logs and test fixtures are not alternate channels for observing game state. These rules govern agent behavior; AstraBridge validates its public commands and is not a filesystem sandbox for unrestricted shell tools.
 
@@ -30,19 +37,25 @@ Explicitly requested installation or development is a separate task. During game
 
 ## Reproducible environment
 
-Install with the repository `install.py --game /path/to/Morrowind`. For a frozen
-benchmark select `--version v0.1.0` (or another published tag). Before every
-playtest run `./astra version` and retain its JSON with the result: project and
-protocol versions, Git commit/tag, and engine hash. Session and recording
-environment sidecars are saved automatically. The installed `manifest.json`
-is public version metadata, not game-state data.
+The user installs the matching Desktop/runtime release. Before a playtest,
+retain `astrabridge version` and `astrabridge status`: these application commands
+report the release/image identity and running environment. Session and recording
+environment sidecars are saved automatically. Version and image metadata are
+public environment information, not game-state data.
 
 ## Start or resume
 
-1. Run `./astra status`. If no controller is running, use `./astra start` in the user's graphical session. If the installation needs a discrete-GPU launcher such as `prime-run`, prefix the start command with it. On the target KDE/Nvidia machine this opens a normal XWayland window with sound. Do not use `--headless` there.
-2. Run `./astra observe` and open the returned `screenshot` with the image-viewing tool. A path in JSON is not itself an image presented to the model.
+1. Run `astrabridge status`, then `astrabridge agent connect` when starting authorized gameplay. Connecting starts the configured game if necessary and reserves control across subsequent CLI calls. If already connected with this configuration, continue that session; do not end another owner's session to take over. No host display or manual container commands are needed.
+2. Run `astrabridge game observe` and open the returned local `screenshot` with the image-viewing tool. A path in JSON is not itself an image presented to the model.
 3. Follow the user's choice of continuing, loading, or starting a new game. Use `saves` to obtain a fresh save handle before `load`; do not load an arbitrary latest slot or a developer fixture.
 4. Use `status --player` for a fast character summary. It does not open menus, capture an image, or invalidate item/spell handles.
+
+The agent session remains connected between commands and during long reasoning
+pauses. The Desktop viewer can stay open, but manual input is disabled while
+the agent owns control. Use `astrabridge agent disconnect` when handing control
+back; this stops active input and leaves the game paused. Closing a terminal or
+Desktop does not disconnect the agent or stop the runtime. After a runtime
+restart, connect again and refresh all transient handles.
 
 ## Choose the right operation
 
@@ -130,4 +143,13 @@ Keep memory grounded in evidence. Record landmarks, choices, and routes through 
 
 During character creation, choose from the actual displayed descriptions and the user's preferences. Inventory, combat, spells, or saving may remain unavailable until the game enables them; complete the tutorial normally.
 
-Automatic saves default to three separate owned slots every 300 simulation seconds, at a legal paused boundary; configure them with `autosave`. Keep descriptive manual saves at important milestones. Use `knowledge` for persistent tasks, unfinished conversations and summaries backed by observed text. At a stopping point, update the current goal and unfinished actions. Stop recording when done. Shut down the game when requested or when ending the session deliberately; shutdown/restart do not save progress automatically.
+Automatic saves default to three separate owned slots every 300 simulation seconds, at a legal paused boundary; configure them with `autosave`. Keep descriptive manual saves at important milestones. Use `knowledge` for persistent tasks, unfinished conversations and summaries backed by observed text. At a stopping point, update the current goal and unfinished actions. Stop recording when done. Use `finish-session` for its explicit save/finalize/close workflow, or disconnect when handing back control. Application-level `astrabridge stop` and `astrabridge restart` do not save progress automatically; use them only when ending or recovering the runtime is intended.
+
+### Runtime GPU selection
+
+`astrabridge gpus` lists available runtime devices. The host user can select
+rendering and encoding devices in Desktop Settings or with `astrabridge config`.
+`astrabridge start --gpu GPU_ID` and `restart --gpu GPU_ID` override rendering
+for that start. Gameplay `record` commands remain unchanged: the runtime probes
+the configured encoder and records the result in metadata. If an explicitly
+selected device is unavailable, report the error to the host user.

@@ -862,6 +862,7 @@ namespace MWLua
     void LuaManager::handleConsoleCommand(
         const std::string& consoleMode, const std::string& command, const MWWorld::Ptr& selectedPtr)
     {
+        if (MWBase::Environment::get().getWindowManager()->isConsoleDisabled()) return;
         PlayerScripts* playerScripts = nullptr;
         if (!mPlayer.isEmpty())
             playerScripts = dynamic_cast<PlayerScripts*>(mPlayer.getRefData().getLuaScripts());

@@ -27,11 +27,11 @@ Scene objects have three forms (examples omit geometry):
 
 ### First encounter
 
-1. Run `./astra observe` and view its screenshot. If a row says `kind: "actor"`,
+1. Run `astrabridge game observe` and view its screenshot. If a row says `kind: "actor"`,
    `actor_kind: "npc"`, `details_visible: false` and has no `name`, you see a person
    whose identity you have not yet learned. This is expected; nothing failed.
 2. Choose the person using the screenshot, direction and distance. Copy that row's
-   actual `ref` into `./astra approach REF --reach activate`. Replace `REF` with
+   actual `ref` into `astrabridge game approach REF --reach activate`. Replace `REF` with
    the returned value; do not copy the illustrative `visible_session_1` above.
 3. Read the action result and new observation. When close enough, the row has
    `details_visible: true`, its localized `name`, and `name_source: "observed"`.
@@ -76,12 +76,12 @@ particular NPC, creature, door or item. In these commands replace `OBJECT_REF` a
 `NOTE_REF` with actual returned handles:
 
 ```sh
-./astra knowledge add --kind note --object-ref OBJECT_REF --text "Door on the left of the stairs; inspect later"
-./astra knowledge add --kind conversation --object-ref OBJECT_REF --text "Ask about the missing ring"
-./astra knowledge list --object-ref OBJECT_REF
-./astra knowledge update --ref NOTE_REF --status done
-./astra knowledge objects --query "Fargoth"
-./astra knowledge objects --object-ref OBJECT_REF
+astrabridge game knowledge add --kind note --object-ref OBJECT_REF --text "Door on the left of the stairs; inspect later"
+astrabridge game knowledge add --kind conversation --object-ref OBJECT_REF --text "Ask about the missing ring"
+astrabridge game knowledge list --object-ref OBJECT_REF
+astrabridge game knowledge update --ref NOTE_REF --status done
+astrabridge game knowledge objects --query "Fargoth"
+astrabridge game knowledge objects --object-ref OBJECT_REF
 ```
 
 The catalog contains only previously encountered instances in the active atlas
@@ -101,14 +101,14 @@ across older saves and restarts, and remain readable while the object is out of 
 Memory lives in `runtime/agent-memory.sqlite3`, separate from the spatial atlas. Use the public commands:
 
 ```sh
-./astra knowledge add --kind task --text "Current objective and next step"
-./astra knowledge add --kind conversation --text "Unfinished conversation and what to ask next"
-./astra knowledge list --status open --query "TEXT"
-./astra knowledge update --ref NOTE_REF --status done
-./astra knowledge evidence --query "TEXT"
-./astra knowledge evidence --ref EVIDENCE_REF --offset 0 --limit 4000
-./astra knowledge add --kind fact --text "My summary" --evidence EVIDENCE_REF --quote "Exact supporting passage"
-./astra knowledge events --page 0 --limit 20
+astrabridge game knowledge add --kind task --text "Current objective and next step"
+astrabridge game knowledge add --kind conversation --text "Unfinished conversation and what to ask next"
+astrabridge game knowledge list --status open --query "TEXT"
+astrabridge game knowledge update --ref NOTE_REF --status done
+astrabridge game knowledge evidence --query "TEXT"
+astrabridge game knowledge evidence --ref EVIDENCE_REF --offset 0 --limit 4000
+astrabridge game knowledge add --kind fact --text "My summary" --evidence EVIDENCE_REF --quote "Exact supporting passage"
+astrabridge game knowledge events --page 0 --limit 20
 ```
 
 `evidence_ref` identifies text already returned by dialogue, journal inspection or reading an opened document. It remains readable after the menu closes or the controller restarts. Fact summaries require a real evidence ref and an exact nonempty quote from it. They remain agent-written summaries; the quote supports review rather than certifying every inference. Tasks/conversation notes are explicitly agent notes. Status can be `open`, `done` or `abandoned`.
@@ -120,9 +120,9 @@ New inventory quantities, journal changes and effect start/end events are preser
 Choose an ID before submitting an important mutation:
 
 ```sh
-./astra use-item ITEM_REF --request-id heal-at-door-01
-./astra action-result heal-at-door-01
-./astra action-result heal-at-door-01 --full
+astrabridge game use-item ITEM_REF --request-id heal-at-door-01
+astrabridge game action-result heal-at-door-01
+astrabridge game action-result heal-at-door-01 --full
 ```
 
 Every ordinary command also returns an automatically generated `request_id`. `status.active_action` reports it while the command runs; `action-result` without a ref returns the most recent receipt. Result queries work while another action is active.
