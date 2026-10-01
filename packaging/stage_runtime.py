@@ -53,9 +53,9 @@ manifest={**version,'platform':'linux','architecture':'x86_64','engine_sha256':h
           'mediamtx':versions['mediamtx'],'base_image':versions['base_image'],
           'packages_sha256':hashlib.sha256(packages.encode()).hexdigest()}
 manifest['ffmpeg'].pop('inputs',None)
-for kind,width in (('encoders',6),('filters',3)):
+for kind,width in (('encoders','6'),('filters','2,3')):
     listing=subprocess.check_output([str(bin/'ffmpeg'),'-hide_banner','-'+kind],text=True,stderr=subprocess.DEVNULL)
-    manifest['ffmpeg'][kind]=sorted(set(re.findall(r'^\s*[A-Z.]{'+str(width)+r'}\s+(\S+)',listing,re.M)))
+    manifest['ffmpeg'][kind]=sorted(set(re.findall(r'^\s*[A-Z.]{'+width+r'}\s+(\S+)',listing,re.M)))
 required_encoders={'libx264','h264_vaapi','h264_nvenc','aac','libopus'}
 required_filters={'vflip','scale','pad','setsar','format','hwupload','scale_vaapi'}
 if not required_encoders.issubset(manifest['ffmpeg']['encoders']) or not required_filters.issubset(manifest['ffmpeg']['filters']):
