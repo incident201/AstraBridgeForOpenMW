@@ -81,6 +81,11 @@ disabling a Desktop button is not the enforcement mechanism.
 - Losing a manual connection releases held keys/buttons and pauses the game.
   Daemon restarts invalidate previous ownership tokens.
 
+Desktop's Fullscreen button expands the viewer through the native window mode.
+Use `Exit fullscreen` to return; the controls reappear when moving the pointer.
+Escape is not assigned to exiting the viewer, so it retains its game behavior
+and the browser's normal pointer-lock release behavior.
+
 The gameplay CLI and live viewer are independent. A user may watch an agent
 without obtaining input ownership.
 

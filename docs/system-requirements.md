@@ -14,13 +14,13 @@ packaged release. Game files must be supplied by the user.
 | Storage | A local filesystem supported by rootless Podman, such as ext4 or XFS, with writable storage and enough free space/inodes. Do not place Podman's graph directory directly on SMB/NFS. Game and recording folders may be elsewhere if their permissions and mount behavior allow it. |
 | Graphics | A working host GPU driver and hardware OpenGL 3.3 or newer through the container's private Weston/XWayland session. Intel/AMD need accessible DRM render nodes; NVIDIA additionally needs the Container Toolkit/CDI integration below. |
 | Desktop GUI | A host X11 or Wayland session and the shared libraries required by Electron: GTK 3, NSS/NSPR, D-Bus, ATK/AT-SPI, CUPS, X11/XCB, XKB, DRM/GBM and ALSA. The CLI does not create a window, but uses the same packaged executable. |
-| AppImage | FUSE 2 compatibility (`libfuse2` or the distribution's equivalent). On systems without FUSE, use `APPIMAGE_EXTRACT_AND_RUN=1` and a writable temporary directory. |
+| AppImage | Kernel FUSE access for mounted execution. The pinned static AppImage runtime bundles its userspace FUSE library. On systems without FUSE, use `APPIMAGE_EXTRACT_AND_RUN=1` and a writable temporary directory. |
 | Network | HTTPS access to GitHub Releases and GHCR for installation/explicit updates. Normal gameplay uses loopback HTTP/WebSocket and WebRTC TCP, ports 18770 and 18771. Only one default installation may be running on these ports at a time. |
 
 For Ubuntu 24.04, typical host packages are:
 
 ```sh
-sudo apt install podman crun uidmap passt fuse-overlayfs libfuse2t64 \
+sudo apt install podman crun uidmap passt fuse-overlayfs \
   libgtk-3-0t64 libnss3 libnspr4 libdbus-1-3 libatk1.0-0t64 \
   libatk-bridge2.0-0t64 libatspi2.0-0t64 libcups2t64 libx11-6 libxcb1 \
   libxcomposite1 libxdamage1 libxext6 libxfixes3 libxrandr2 libxkbcommon0 \

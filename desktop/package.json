@@ -65,6 +65,9 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
     },
-    "afterPack": "packaging/after-pack.cjs"
+    "afterPack": "packaging/after-pack.cjs",
+    "toolsets": {
+      "appimage": "1.0.3"
+    }
   }
 }

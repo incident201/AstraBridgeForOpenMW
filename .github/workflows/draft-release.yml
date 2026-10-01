@@ -175,7 +175,8 @@ jobs:
         working-directory: desktop
         run: |
           npm run package:linux
-          env -u DISPLAY -u WAYLAND_DISPLAY APPIMAGE_EXTRACT_AND_RUN=1 ./release/*.AppImage version
+          env -u DISPLAY -u WAYLAND_DISPLAY APPIMAGE_EXTRACT_AND_RUN=1 ./release/*.AppImage version > packaged-version.json
+          python -c 'import json; a=json.load(open("packaged-version.json")); b=json.load(open("resources/release.json")); assert a["ok"] and a["result"]==b'
       - uses: ilammy/msvc-dev-cmd@v1
         if: runner.os == 'Windows'
         with:
