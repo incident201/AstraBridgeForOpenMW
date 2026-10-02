@@ -2,19 +2,19 @@
 
 def feedback(op, action, before, after, inputs=None):
     why=action.get('reason')
-    if why in {'arrived','within_reach','focused','duration','tracked','completed','use_completed','target_down','maneuver_complete','condition_met','ui_opened'}:
+    if why in {'landed','arrived','within_reach','focused','duration','tracked','completed','use_completed','target_down','maneuver_complete','condition_met','ui_opened'}:
         state='succeeded'
-    elif why in {'step_limit','wall_time_limit','turn_limit','chain_time_limit','settled_outside_goal','condition_timeout'}:
+    elif why in {'landing_unstable','airborne','step_limit','wall_time_limit','turn_limit','chain_time_limit','settled_outside_goal','condition_timeout'}:
         state='partial'
     elif why in {'insufficient_magicka','insufficient_charge','no_ammunition','power_already_used',
                  'nothing_selected','item_unavailable','not_a_weapon','silenced','out_of_reach','underwater_ranged_unavailable','ballistic_unreachable','rest_unavailable'}:
         state='rejected'
-    elif why in {'player_down','action_not_started'}:
+    elif why in {'jump_not_started','player_down','action_not_started'}:
         state='failed'
     elif why in {'blocked','no_path','path_end_out_of_reach','endpoint_mismatch','height_mismatch','navigation_unavailable','cannot_act','maneuver_blocked','ground_required','shot_path_blocked',
                  'no_route_progress','repeated_positions','repeated_obstruction','target_obstructed','viewpoint_blocked','viewpoint_adjustment_needed','target_not_aimed'}:
         state='blocked'
-    elif why in {'target_lost','ui_open','ui_input_required','game_paused','player_controls_disabled','cancelled','location_changed','player_hurt','swimming_requires_manual_control','cast_not_confirmed','shot_not_confirmed','weapon_changed','health_low','levitation_ended','water_walking_ended','sequence_time_limit'}:
+    elif why in {'entered_water','levitation_active','target_lost','ui_open','ui_input_required','game_paused','player_controls_disabled','cancelled','location_changed','player_hurt','swimming_requires_manual_control','cast_not_confirmed','shot_not_confirmed','weapon_changed','health_low','levitation_ended','water_walking_ended','sequence_time_limit'}:
         state='interrupted'
     else:state='submitted' if action.get('submitted') else 'observed'
     if why=='path_end_out_of_reach' and action.get('motion',{}).get('moved_m',0)>.2:state='partial'
@@ -25,8 +25,12 @@ def feedback(op, action, before, after, inputs=None):
     inputs=inputs or {}
     if op=='act' and why=='duration' and (inputs.get('move') or inputs.get('strafe')) and action.get('motion',{}).get('moved_m',1)<.05:
         state='blocked';why='no_observed_movement'
+    aerial=action.get('aerial',{})
+    if op in {'act','trigger'} and action.get('reason')=='duration' and aerial and not aerial.get('took_off'):
+        state='failed';why='jump_not_started'
     events=[]
-    if action.get('damage_taken'):events.append({'kind':'player_damaged','amount':action['damage_taken']})
+    if aerial.get('damage_taken'):events.append({'kind':'player_damaged','amount':aerial['damage_taken']})
+    if action.get('damage_taken') and not aerial.get('damage_taken'):events.append({'kind':'player_damaged','amount':action['damage_taken']})
     changes=action.get('changes',{})
     if 'gold_change' in changes:events.append({'kind':'gold_changed','amount':changes['gold_change']})
     if changes.get('location_changed'):events.append({'kind':'location_changed','name':after.get('location')})

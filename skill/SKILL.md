@@ -96,7 +96,8 @@ a gameplay workaround.
 | Approach/talk to a visible NPC, open a door, pick up an item | `interact REF --approach` |
 | Check an interaction before moving | `target-info REF` |
 | Combine ordinary actions | `sequence` with fresh `select`, optional `bind` and `expect`, and explicit time budget |
-| Wait for fatigue, animation or clear passage | `wait-until` with condition and time budget |
+| Jump toward a visible landing area / steer while falling | `jump` / `air-move`; see [jumping and falling](references/navigation.md#jumping-and-falling) |
+| Wait for landing, fatigue, animation or clear passage | `wait-until` with condition and time budget |
 | Rest, buy a quantity or pay for travel | `rest HOURS`, `buy NAME --quantity N --max-total GOLD`, `travel DEST --max-cost GOLD`; open the relevant service first |
 | Select a menu response or item | `ui --query "TEXT"` / `ui --panel PANEL`, then `choose` using its ref or exact caption |
 | Read an open book or scroll | `read` for a chunk, `read --search "TEXT"` for targeted passages, `read --all` when the full text is needed |

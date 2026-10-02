@@ -18,7 +18,7 @@ def compact(observation, before=None, target_ref=None):
         result['scene'].update(total=len(objects),has_more=True,details='details scene --page N / --query TEXT')
     if 'body' in result:
         result['body']={k:v for k,v in result['body'].items() if v or k in
-                        {'can_move','dead','controls_enabled','looking_enabled','jumping_enabled'}}
+                        {'can_move','dead','controls_enabled','looking_enabled','jumping_enabled','on_ground','swimming','vertical_speed_mps'}}
     ui = observation.get('ui', {})
     if observation.get('ui_mode') != 'Gameplay' or ui.get('modal'):
         result['ui'] = {k:v for k,v in ui.items() if k not in {'elements','text','dialogue','supported'}}

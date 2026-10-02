@@ -12,6 +12,7 @@ they also affect how a playthrough behaves.
 | Testing defaults for combat | OpenMW settings chosen by AstraBridge | New profiles start with `difficulty = -100` and `best attack = true`; users may change both. |
 | Synchronous physics at action boundaries | OpenMW setting applied by AstraBridge | `async num threads = 0` in the runtime profile. |
 | Idle-camera stabilization | AstraBridge Lua policy using OpenMW camera interfaces | Disables automatic vanity/standing-preview behavior during controlled play. |
+| Jump and fall controls | AstraBridge Lua adapter using normal actor controls | One jump impulse, directional air steering, observed flight state and stopping on landing; ordinary game physics and skill effects remain in force. |
 | NPC placement recovery | Explicit public command using native ResetActors | Never an automatic part of navigation; the skill restricts its use to observed malfunctions. |
 
 ## Yet Another Idle Animation Fix
@@ -229,3 +230,27 @@ A configured addon or animation setting is evidence about prepared files, not
 proof of universal compatibility with other mods. Retain the release identity
 and actual game-data/mod configuration when comparing results. These choices
 belong alongside the [project's information and control boundaries](project-goals.md).
+
+## Jump and fall controls
+
+The bundled Lua adapter provides `jump`, `air-move` and `wait-until landed`.
+These compose normal player input: one jump impulse, optional Run and horizontal
+steering during a jump or an ordinary fall. Landing ends the movement helper;
+a short time budget can instead pause in midair for the next agent decision.
+After contact, a brief update with movement input released lets normal landing
+damage reach the result before pausing. The helpers preserve the current heading and require an active camera lock to
+be released first.
+
+`runtime/mod/scripts/astrabridge/airborne.lua` tracks the player's observed
+height over simulation time, retains the last measured vertical speed across
+pauses and resets on load or a position discontinuity. The player adapter
+reports ground support, ascending/descending state, observed takeoff/landing,
+relative peak height and health lost during an action. Compact observations
+preserve explicit false ground/water flags. A Jump input without observed
+takeoff is not reported as a successful jump.
+
+This adds no jump power, air-control multiplier, double jump, teleport or
+landing prediction. Existing OpenMW physics, collision, Acrobatics, fatigue,
+launch momentum and fall damage determine the result. No additional native
+engine patch or game-content plugin is required. Operational commands and
+result interpretation are documented in the [gameplay skill](../skill/references/navigation.md#jumping-and-falling).

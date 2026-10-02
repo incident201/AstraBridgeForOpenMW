@@ -3,7 +3,10 @@ package.path='mod/?.lua;'..package.path
 math.atan2=math.atan2 or math.atan
 local now,paused,charge,casts=0,true,20,0
 local health,playerDead=50,false
-local direct=arg[1]=='direct' or arg[1]=='modal_direct'
+local aerialMode=arg[1]=='aerial'
+local verticalVelocity,denyJump,simulationTime=0,false,0
+local landingDamagePending=false
+local direct=aerialMode or arg[1]=='direct' or arg[1]=='modal_direct'
 local modalPaused=false
 local blockedShot=arg[1]=='blocked_shot'
 local ranged=arg[1]=='ranged' or blockedShot
@@ -30,7 +33,7 @@ local stats={dynamic={},level=function()return {current=1}end}
 for _,k in ipairs({'health','magicka','fatigue'}) do stats.dynamic[k]=function()return {current=50,base=50,modifier=0}end end
 stats.dynamic.health=function()return {current=health,base=50,modifier=0}end
 local actor={stats=stats,objectIsInstance=function(o)return o==enemy end,getPathfindingAgentBounds=function()return {}end,getWalkSpeed=function()return 140 end,getRunSpeed=function()return 210 end,STANCE={Nothing=0,Weapon=1,Spell=2},EQUIPMENT_SLOT={CarriedRight=16},
-    getStance=function()return ranged and 1 or 2 end,isOnGround=function()return not submerged end,isSwimming=function()return submerged end,
+    getStance=function()return ranged and 1 or 2 end,isOnGround=function()return not submerged and (not aerialMode or object.position.z==0) end,isSwimming=function()return submerged end,
     canMove=function()return true end,isDead=function(o)return o==object and playerDead end,
     getEquipment=function()if ranged and ammo>0 then return star end end,
     inventory=function()return {countOf=function()return ammo end}end,
@@ -59,7 +62,7 @@ package.preload['openmw.ui']=function()return {
         unavailable_reason=charge<4 and 'insufficient_charge' or nil,cost=4,charge_current=charge}}end,
 }end
 package.preload['openmw.core']=function()return {
-    isWorldPaused=function()return paused end,getRealTime=function()return now end,getSimulationTime=function()return now end,
+    isWorldPaused=function()return paused end,getRealTime=function()return now end,getSimulationTime=function()return aerialMode and simulationTime or now end,
     sendGlobalEvent=function(n,d)events[#events+1]={n,d}end,
     magic={enchantments={records={private_enchantment={effects={{effect={name='Heal'},range=0,duration=1,magnitudeMin=3,magnitudeMax=3,area=0}}}}}},
 }end
@@ -84,11 +87,21 @@ local function tick()
         if event[1]=='AstraResume' then paused=false;player.eventHandlers.AstraResumed(event[2])end
     end
     if not paused and not modalPaused then
+        simulationTime=simulationTime+.2
         local movement=movementOverridden and (object.controls.movement or 0) or bindings.MoveForward(.2,0)-bindings.MoveBackward(.2,0)
         local side=movementOverridden and (object.controls.sideMovement or 0) or bindings.MoveRight(.2,0)-bindings.MoveLeft(.2,0)
         local speed=movementOverridden and object.controls.run and 210 or 140
-        object.position=V.new(object.position.x+side*speed*.2,object.position.y+movement*speed*.2,0)
+        object.position=V.new(object.position.x+side*speed*.2,object.position.y+movement*speed*.2,object.position.z)
         if object.controls.jump then jumpPulses=jumpPulses+1 end
+        if aerialMode then
+            if landingDamagePending then health=health-3;landingDamagePending=false end
+            if object.controls.jump and object.position.z==0 and not denyJump then verticalVelocity=560 end
+            if object.position.z>0 or verticalVelocity>0 then
+                verticalVelocity=verticalVelocity-280*.2
+                object.position=V.new(object.position.x,object.position.y,math.max(0,object.position.z+verticalVelocity*.2))
+                if object.position.z==0 then verticalVelocity=0;landingDamagePending=true end
+            end
+        end
         local use=bindings.Use(.2,false)
         if ranged then
             -- Weapon use holds, then releases a projectile. An unrelated charge
@@ -109,6 +122,56 @@ local function tick()
     player.engineHandlers.onFrame((paused or modalPaused) and 0 or .2)
 end
 player.eventHandlers.AstraReset();for _=1,10 do tick()end
+if aerialMode then
+    local serial=0
+    local function submit(op,args)
+        serial=serial+1;data.response=nil;data.request={session='aerial',id=serial,op=op,args=args or {}}
+    end
+    local function finishCommand()
+        for _=1,150 do tick();if data.response then break end end
+        assert(data.response,'command must finish')
+        return data.response.result,data.response.error
+    end
+    local function command(op,args) submit(op,args);return finishCommand() end
+    local r=command('jump',{direction='forward',run=true})
+    assert(r.reason=='landed' and r.aerial.took_off and r.aerial.landed)
+    assert(r.aerial.peak_rise_m>4 and r.aerial.damage_taken==3 and jumpPulses==1)
+    assert(object.position.y>100 and object.controls.movement==0 and not object.controls.jump)
+    local stoppedAt=object.position
+    for _=1,20 do tick() end
+    assert((object.position-stoppedAt):length()==0)
+    r=command('jump',{seconds=.4})
+    assert(r.reason=='airborne' and r.aerial.took_off and not r.aerial.landed)
+    assert(r.body.on_ground==false and r.body.air_state=='ascending')
+    local _,err=command('jump',{})
+    assert(err=='jump_requires_ground' and jumpPulses==2)
+    r=command('air_move',{direction='right',seconds=.4})
+    assert(r.reason=='duration' and r.aerial.started_airborne and not r.aerial.took_off and object.position.x>0)
+    r=command('wait_until',{condition='landed',seconds=10})
+    assert(r.reason=='condition_met' and r.aerial.landed and r.body.air_state=='grounded')
+    _,err=command('air_move',{direction='forward'})
+    assert(err=='airborne_required')
+    denyJump=true
+    r=command('jump',{})
+    assert(r.reason=='jump_not_started' and not r.aerial.took_off)
+    denyJump=false
+    object.position=V.new(0,0,700);verticalVelocity=-100
+    r=command('air_move',{direction='left',seconds=10})
+    assert(r.reason=='landed' and r.aerial.started_airborne and not r.aerial.took_off)
+    assert(object.position.x<0 and object.controls.sideMovement==0)
+    object.position=V.new(0,0,700);verticalVelocity=0
+    submit('air_move',{direction='right',seconds=20})
+    for _=1,5 do tick() end
+    data.cancel=true;r=finishCommand()
+    assert(r.reason=='cancelled' and object.controls.sideMovement==0 and not object.controls.jump)
+    require('openmw.ui')._astraUiSnapshot=function()return {revision='tutorial',modal=modalPaused,elements={}}end
+    submit('air_move',{direction='forward',seconds=20})
+    for _=1,3 do tick() end
+    modalPaused=true;r=finishCommand()
+    assert(r.reason=='ui_input_required' and r.aerial.started_airborne and object.controls.movement==0)
+    print('Aerial helpers: one launch, directional steering, landing, no takeoff, cancellation and modal interruption')
+    return
+end
 if arg[1]=='modal' or arg[1]=='modal_direct' then
     require('openmw.ui')._astraUiSnapshot=function()
         return {revision='tutorial',modal=modalPaused,elements={}}

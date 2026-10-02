@@ -6,7 +6,7 @@ from .protocol import BridgeError, number, validate, ACTION_DEFAULTS
 from . import selectors
 
 
-SEQUENCE_OPS = {'act','look','go','walk','revisit','return_to','approach','interact','move_local',
+SEQUENCE_OPS = {'jump','air_move','act','look','go','walk','revisit','return_to','approach','interact','move_local',
                 'use_item','select_spell','select_enchanted','cast','strike','chain','wait_until',
                 'trigger','choose','edit','adjust','focus','fly','swim','target_info','rest','buy','travel','unlock','lock'}
 

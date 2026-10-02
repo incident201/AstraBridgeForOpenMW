@@ -656,9 +656,9 @@ class Session:
                         result = self.command(op, args)
                         time.sleep(.12)
                 else:
-                    timeout=100 if op in {"load", "new_game"} else 70 if op in {'fly','swim'} else 60 if op in {'act','look','focus','approach','move_local','walk','go','evade','track','lock','strike','cast','chain','interact','wait_until'} else 25
+                    timeout=100 if op in {"load", "new_game"} else 70 if op in {'fly','swim'} else 60 if op in {'jump','air_move','act','look','focus','approach','move_local','walk','go','evade','track','lock','strike','cast','chain','interact','wait_until'} else 25
                     result = self.command(op, args, timeout=timeout)
-                if op in {"act", "look", "trigger", "use_item", "select_spell", "select_enchanted", "load", "new_game", "stop",
+                if op in {"jump", "air_move", "act", "look", "trigger", "use_item", "select_spell", "select_enchanted", "load", "new_game", "stop",
                           "focus","approach","interact","wait_until","move_local","walk","go","fly","swim","evade","survey","fov","choose","edit","adjust","map","track","lock","unlock","strike","cast","chain","resetNPC"}:
                     if op in {'load','new_game'}:self.memory.branch(op)
                     if op in {'load','new_game'}:self.latest_observation = None

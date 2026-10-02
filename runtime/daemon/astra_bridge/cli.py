@@ -12,7 +12,7 @@ import time
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
-from .protocol import BridgeError, action_timeout
+from .protocol import BridgeError, action_timeout, AIR_DIRECTIONS
 from .session import Session
 from .environment import identity
 from .information import SECTIONS
@@ -156,6 +156,13 @@ def build_parser():
     p = commands.add_parser('resetNPC', help='Emergency RA/ResetActors recovery of displaced actors in active cells')
     p.add_argument('--reason', required=True, help='Observed malfunction requiring this last-resort recovery')
     p = commands.add_parser("act"); p.add_argument("json", help='e.g. {"move":1,"seconds":0.4}')
+    for name in ('jump','air-move'):
+        p=commands.add_parser(name,description='One normal jump, or steering during a jump/fall. Stops on landing.')
+        if name=='jump':p.add_argument('direction',choices=AIR_DIRECTIONS,nargs='?',default='none')
+        else:p.add_argument('direction',choices=AIR_DIRECTIONS)
+        p.add_argument('--run',action='store_true')
+        p.add_argument('--seconds',type=float,default=8 if name=='jump' else .5,
+                       help='Maximum simulation time; a short budget can leave the player airborne')
     p = commands.add_parser('look');p.add_argument('--heading',dest='heading_deg',type=float);p.add_argument('--pitch',dest='pitch_deg',type=float)
     p = commands.add_parser("chain"); p.add_argument("json", help='{"actions":[{"op":"strike"},{"op":"strike"}],"max_seconds":12}')
     p=commands.add_parser('sequence');p.add_argument('json')
@@ -163,7 +170,7 @@ def build_parser():
     p=commands.add_parser('buy');p.add_argument('name');p.add_argument('--quantity',type=int,default=1)
     p.add_argument('--max-total',type=int,required=True);p.add_argument('--instance');p.add_argument('--seconds',type=float,default=30)
     p=commands.add_parser('travel');p.add_argument('destination');p.add_argument('--max-cost',type=int);p.add_argument('--seconds',type=float,default=30)
-    p=commands.add_parser('wait-until');p.add_argument('condition',choices=['fatigue','animation','passage','ui','controls'])
+    p=commands.add_parser('wait-until');p.add_argument('condition',choices=['fatigue','animation','passage','ui','controls','landed'])
     p.add_argument('--control',choices=['controls','looking','jumping'],help='For condition controls (default: controls)')
     p.add_argument('--percent',type=float,default=100);p.add_argument('--ui-mode');p.add_argument('--seconds',type=float,default=30)
     p.add_argument('--bearing-deg',type=float,default=0);p.add_argument('--meters',type=float,default=1)

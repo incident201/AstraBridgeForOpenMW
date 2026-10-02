@@ -16,3 +16,13 @@ test('required safety limits and invalid options are rejected',()=>{
   assert.throws(()=>parseGame(catalog,['serve']),/Unknown/);
   assert.throws(()=>parseGame(catalog,['read','--all','--search','x']),/only one/);
 });
+
+test('aerial controls preserve direction, time budget and operation names',()=>{
+  assert.deepEqual(parseGame(catalog,['jump','forward-left','--run','--seconds','0.3']).args,
+    {direction:'forward-left',run:true,seconds:0.3});
+  const steering=parseGame(catalog,['air-move','back','--seconds','0.4']);
+  assert.equal(steering.op,'air_move');
+  assert.deepEqual(steering.args,{direction:'back',run:false,seconds:0.4});
+  assert.equal(parseGame(catalog,['wait-until','landed']).args.condition,'landed');
+  assert.throws(()=>parseGame(catalog,['jump','up']),/direction/);
+});

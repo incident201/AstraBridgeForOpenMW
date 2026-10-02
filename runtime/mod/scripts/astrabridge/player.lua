@@ -13,6 +13,7 @@ local Evasion = require('scripts.astrabridge.evasion')
 local Trajectory = require('scripts.astrabridge.trajectory')
 local EffectFacts=require('scripts.astrabridge.effect_facts')
 local Mobility=require('scripts.astrabridge.mobility')
+local Airborne=require('scripts.astrabridge.airborne')
 local MovementInput=require('scripts.astrabridge.movement_input')
 local Pursuit=require('scripts.astrabridge.pursuit')
 local Ballistics=require('scripts.astrabridge.ballistics')
@@ -42,7 +43,7 @@ local manualActive=false
 local uiMessages,seenMessages = P.array(),{}
 local seenNotifications={}
 local modalOpen=false
-local motorOperations={act=true,look=true,focus=true,approach=true,move_local=true,walk=true,go=true,
+local motorOperations={jump=true,air_move=true,act=true,look=true,focus=true,approach=true,move_local=true,walk=true,go=true,
     fly=true,swim=true,evade=true,track=true,lock=true,strike=true,cast=true,chain=true,interact=true,wait_until=true}
 local function lockState()
     if not targetLock then return {status='unlocked'} end
@@ -176,6 +177,7 @@ local function bodyState()
     body.jumping_enabled=Player.getControlSwitch(self,Player.CONTROL_SWITCH.Jumping)
     body.dead=A.isDead(self)
     for k,v in pairs(Mobility.state()) do body[k]=v end
+    for k,v in pairs(Airborne.state(body.on_ground,body.swimming,body.levitation)) do body[k]=v end
     if hasAnimation and animation.getActiveGroup then
         local ok,recovering=pcall(function()
             for _,part in ipairs({animation.BONE_GROUP.LowerBody,animation.BONE_GROUP.Torso,
@@ -415,6 +417,12 @@ local function pause(cmd, result, err)
         result.movement=Pursuit.report(pending.pursuit,result.reason)
         if pending.pursuit.nav then result.movement.navigation=require('scripts.astrabridge.navigation').report(pending.pursuit.nav) end
     end
+    if result and pending and pending.aerial then
+        if Space.key(self.cell)==pending.start.cell then
+            Airborne.update(pending.aerial,A.isOnGround(self),A.isSwimming(self),self.position.z,ownHealth())
+        end
+        result.aerial=Airborne.report(pending.aerial,Scene.unitsPerMeter)
+    end
     if result and pending and pending.start then
         result.motion=Scene.report(pending.start)
         result.body=bodyState()
@@ -435,7 +443,7 @@ local function pause(cmd, result, err)
     local finalAmmoRecord=pending and pending.ammoRecord
     local combatTail=pending and pending.finishedCombatResult~=nil
     pending = {cmd=cmd, phase='pausing', token=pauseSerial, result=result, error=err,expected=expected,
-        finalPose=finalPose,finalNavigator=finalNavigator,finalCombatBase=finalCombatBase,finalChainBase=finalChainBase,
+        finalAerial=pending and pending.aerial,finalPose=finalPose,finalNavigator=finalNavigator,finalCombatBase=finalCombatBase,finalChainBase=finalChainBase,
         combatTail=combatTail,finalAmmoRecord=finalAmmoRecord,pausePose=finalPose and Scene.pose() or nil}
     -- Optional synchronous main-thread adapter; the global event remains the
     -- acknowledgement/fallback and only our own pause tag is affected.
@@ -644,6 +652,13 @@ local function finish()
                 result.navigation.status='arrived';result.navigation.remaining_m=0;result.navigation.blocked_by=nil
             end
         end
+    end
+    if result and p.finalAerial then
+        if Space.key(self.cell)==p.finalPose.cell then
+            Airborne.update(p.finalAerial,A.isOnGround(self),A.isSwimming(self),self.position.z,ownHealth())
+        end
+        result.aerial=Airborne.report(p.finalAerial,Scene.unitsPerMeter)
+        if A.isDead(self) then result.reason='player_down';result.outcome='interrupted' end
     end
     if result and p.finalCombatBase then
         local now=resources(p.finalAmmoRecord)
@@ -1066,10 +1081,26 @@ local function dispatch(cmd)
         elseif op=='move_local' then routes={} end
         invalidate()
         core.sendGlobalEvent('AstraResume',{id=cmd.id})
-    elseif op == 'act' or op=='look' or op=='wait_until' then
+    elseif op == 'act' or op=='look' or op=='wait_until' or op=='jump' or op=='air_move' then
+        local aerialKind
+        if op=='jump' or op=='air_move' then
+            if I.UI.getMode() then pause(cmd,nil,'ui_open');return end
+            if not controlsAllowed() or not A.canMove(self) or A.isDead(self) then pause(cmd,nil,'action_unavailable');return end
+            if Mobility.has('Levitate') then pause(cmd,nil,'flight_requires_fly');return end
+            if A.isSwimming(self) then pause(cmd,nil,'swimming_requires_swim');return end
+            if op=='jump' and not A.isOnGround(self) then pause(cmd,nil,'jump_requires_ground');return end
+            if op=='air_move' and A.isOnGround(self) then pause(cmd,nil,'airborne_required');return end
+            -- Keep relative directions stable throughout the action.
+            if targetLock and targetLock.status~='down' then pause(cmd,nil,'locked_camera');return end
+            local direction=Airborne.directions[args.direction or 'none'];assert(direction)
+            aerialKind=op
+            args={move=direction[1],strafe=direction[2],run=args.run or false,
+                trigger=op=='jump' and 'Jump' or nil,seconds=P.actionSeconds(op,args)}
+        elseif op=='act' and args.trigger=='Jump' then aerialKind='act' end
         local waitCondition
         if op=='wait_until' then
             waitCondition=args
+            if args.condition=='landed' then aerialKind='landed' end
             args={seconds=P.actionSeconds(op,args)}
         end
         if op=='look' then
@@ -1117,6 +1148,7 @@ local function dispatch(cmd)
             turnYaw=args.yaw~=nil,turnPitch=args.pitch~=nil,
             yaw=start.yaw+math.rad(args.yaw or 0),pitch=args.pitch and math.max(-1.45,math.min(1.45,start.pitch+math.rad(args.pitch))) or start.pitch,expected=expected,
             requestedAttack=args.attack or false,waitCondition=waitCondition}
+        if aerialKind then pending.aerial=Airborne.begin(aerialKind,A.isOnGround(self),self.position.z,ownHealth()) end
         pending.requestedMove=args.move or 0;pending.requestedStrafe=args.strafe or 0
         core.sendGlobalEvent('AstraResume', {id=cmd.id})
     elseif op == 'trigger' then
@@ -1417,6 +1449,7 @@ local function conditionMet(c)
     if c.condition=='fatigue' then
         local f=A.stats.dynamic.fatigue(self)
         return f.current>=math.max(1,(f.base or f.current)+(f.modifier or 0))*(c.percent or 100)/100
+    elseif c.condition=='landed' then return A.isOnGround(self) and not A.isSwimming(self)
     elseif c.condition=='animation' then
         local b=bodyState();return not b.animation_busy and not b.recovering
     elseif c.condition=='ui' then return (I.UI.getMode() or 'Gameplay')==c.ui_mode
@@ -1432,6 +1465,7 @@ local function conditionMet(c)
     return false
 end
 local function onFrame(dt)
+    Airborne.sample(core.getSimulationTime(),self.position,Space.key(self.cell),Scene.unitsPerMeter)
     Trajectory.sample(false)
     if not manualActive then Scene.fov(desiredFov) end
     if ready and not pending and not manualActive and bus:get('control_mode')=='manual' then
@@ -1495,6 +1529,7 @@ local function onFrame(dt)
             end
         elseif pending.phase == 'running' then
             local p = pending
+            if p.aerial and Space.key(self.cell)==p.start.cell then Airborne.update(p.aerial,A.isOnGround(self),A.isSwimming(self),self.position.z,ownHealth()) end
             if not p.lastProgress or core.getRealTime()-p.lastProgress>=.5 then
                 p.lastProgress=core.getRealTime()
                 local progress={operation=p.cmd.op,elapsed=p.elapsed or 0,phase=p.phase}
@@ -1518,7 +1553,7 @@ local function onFrame(dt)
             elseif A.isDead and A.isDead(self) then
                 if p.combat then finishCombat(p,'player_down')
                 else pause(p.cmd,{paused=true,elapsed=p.elapsed,reason='player_down'}) end
-            elseif p.waitCondition and conditionMet(p.waitCondition) then pause(p.cmd,{paused=true,elapsed=p.elapsed,reason='condition_met'})
+            elseif p.waitCondition and not p.aerial and conditionMet(p.waitCondition) then pause(p.cmd,{paused=true,elapsed=p.elapsed,reason='condition_met'})
             elseif p.interactionSubmitted then
                 p.elapsed=p.elapsed+dt
                 if p.elapsed-p.interactionSubmitted>=.2 or I.UI.getMode() then pause(p.cmd,{paused=true,elapsed=p.elapsed,reason='completed'}) end
@@ -1526,7 +1561,7 @@ local function onFrame(dt)
             elseif I.UI.getMode() then pause(p.cmd,{paused=true,elapsed=p.elapsed,reason='ui_open'})
             elseif damage>.01 then pause(p.cmd,{paused=true,reason=A.isDead(self) and 'player_down' or 'player_hurt',damage_taken=math.floor(damage*100+.5)/100})
             elseif not controlsAllowed() and (p.kind=='approach' or p.kind=='move_local' or p.kind=='walk' or p.kind=='evade'
-                or active and ((active.move or 0)~=0 or (active.strafe or 0)~=0)) then
+                or p.aerial and p.aerial.kind~='landed' or active and ((active.move or 0)~=0 or (active.strafe or 0)~=0)) then
                 pause(p.cmd,{paused=true,reason='player_controls_disabled'})
             elseif p.navigator and p.navigator.waterWalking and not Mobility.has('WaterWalking') then pause(p.cmd,{paused=true,reason='water_walking_ended'})
             elseif p.navigator and p.navigator.mode=='air' and not Mobility.has('Levitate') and not A.isOnGround(self) and not A.isSwimming(self) then pause(p.cmd,{paused=true,reason='levitation_ended'})
@@ -1548,6 +1583,23 @@ local function onFrame(dt)
                     active.move=scale*(d.x*math.sin(y)+d.y*math.cos(y))/math.max(1,d:length())
                     active.strafe=scale*(d.x*math.cos(y)-d.y*math.sin(y))/math.max(1,d:length())
                     return
+                end
+                if p.aerial and p.aerial.kind~='act' then
+                    local reason=Airborne.reason(p.aerial,A.isOnGround(self),A.isSwimming(self),Mobility.has('Levitate'),p.elapsed,p.seconds)
+                    if (reason=='landed' or reason=='condition_met') and p.aerial.airborne_observed and not p.landingReason then
+                        -- Physics reports support one update before mechanics applies
+                        -- fall damage. Release input now, then let that update finish.
+                        p.landingReason=reason;p.landingTime=p.elapsed
+                        stopMovement();self.controls.jump=false;active.trigger=nil
+                    end
+                    if p.landingReason then
+                        if p.elapsed-p.landingTime<.05 then p.elapsed=p.elapsed+dt;return end
+                        reason=A.isOnGround(self) and not A.isSwimming(self) and p.landingReason or 'landing_unstable'
+                    end
+                    if reason then pause(p.cmd,{paused=true,reason=reason,elapsed=p.elapsed});return end
+                    if p.aerial.kind=='jump' and not Player.getControlSwitch(self,Player.CONTROL_SWITCH.Jumping) and not p.triggered then
+                        pause(p.cmd,{paused=true,reason='player_controls_disabled'});return
+                    end
                 end
                 local lockGoal
                 if targetLock and targetLock.status~='down' then
@@ -1803,6 +1855,7 @@ local function reset()
     epoch = (bus:get('epoch') or 0)+1
     Scene.reset(namespace())
     Trajectory.reset(namespace())
+    Airborne.reset()
     if Terrain then Terrain.reset(namespace()) end
     bus:set('epoch',epoch)
     bus:set('ready',false)

@@ -91,7 +91,7 @@ local function dispatch(cmd)
     else
         bus:set('response', nil)
         bus:set('request', cmd)
-        local motor=({interact=true,wait_until=true,fly=true,act=true,look=true,focus=true,approach=true,move_local=true,walk=true,go=true,evade=true,track=true,lock=true,strike=true,cast=true,chain=true})[cmd.op]
+        local motor=({jump=true,air_move=true,interact=true,wait_until=true,fly=true,act=true,look=true,focus=true,approach=true,move_local=true,walk=true,go=true,evade=true,track=true,lock=true,strike=true,cast=true,chain=true})[cmd.op]
         pending = {cmd=cmd, deadline=core.getRealTime()+P.actionTimeout(cmd.op,cmd.args,motor and 55 or 20)}
     end
 end

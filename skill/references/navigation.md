@@ -15,10 +15,13 @@ For places already visited, start with `atlas --query "NAME"` / `revisit`, or `r
 
 ## Pick an operation
 
-| Syntax, after `./astra` | Input / behavior |
+| Syntax, after `astrabridge game` | Input / behavior |
 |---|---|
 | `look --heading H --pitch P` | Set either or both absolute angles. H=0…360, P=−80…80. Finite normal player turn; consumes time. |
 | `act 'JSON'` | Direct movement/input for a caller-selected duration. Fields below. |
+| `jump [DIRECTION] [--run] [--seconds S]` | One normal jump; stops on landing or after S (default 8). Direction defaults to `none` for a vertical jump. |
+| `air-move DIRECTION [--run] [--seconds S]` | Steer while jumping or falling; stops on landing or after S (default 0.5). No jump impulse. |
+| `wait-until landed [--seconds S]` | Advance time without movement input until grounded (default budget 30 s). Preserves existing momentum. |
 | `survey` | Refresh bounded local walking-surface samples; returns an action plus observation with `terrain`. |
 | `ground` | Return `ground_targets`: visible walkable point candidates with refs, screen aim points, relative distances/heights and path status. |
 | `go POINT_REF --seconds S --run --under-fire` | Follow a path toward a passage/ground/waypoint/walk ref. S≥0.5, default 12; no fixed upper cap. Flags are optional. **Not an actor or door ref.** |
@@ -69,6 +72,77 @@ astrabridge game act '{"seconds":0.5}'
 ```
 
 The final example waits without input. Finite turns/settling can make actual elapsed time differ from the requested movement duration; use the reported `elapsed` and `motion`.
+
+## Jumping and falling
+
+Read `body.on_ground`, `body.swimming` and `body.air_state` before choosing an
+operation. These remain explicit in compact observations. `air_state` is
+`grounded`, `ascending`, `descending`, `airborne` (near the apex or without a
+reliable motion sample), `swimming`, or `levitating`. `vertical_speed_mps` is the
+observed change in the player's height per simulation second: positive up,
+negative down, zero when grounded. It can be absent just after loading or a
+position discontinuity. The last measured speed is retained while paused; it
+does not mean the player keeps moving between commands.
+
+`jump` and `air-move` accept `none`, `forward`, `back`, `left`, `right`,
+`forward-left`, `forward-right`, `back-left`, or `back-right`. Directions are
+relative to the current heading, which these helpers preserve. `--run` holds
+normal Run input. Release an active combat camera lock with `unlock` first.
+The helpers use ordinary movement, collision, fatigue and Acrobatics; they do
+not select a landing point or guarantee a distance. Inspect the screenshot to
+choose a visible landing area.
+
+```sh
+# One directional jump, continuously controlled until landing (up to 8 seconds).
+astrabridge game jump forward --run
+
+# For a jump that needs correction, first take a short step into the air.
+astrabridge game jump forward --run --seconds 0.3
+# Read the returned screenshot and body state before deciding how to steer.
+astrabridge game air-move right --run --seconds 0.3
+# Once satisfied with the trajectory, let it finish without new movement input.
+astrabridge game wait-until landed --seconds 8
+```
+
+`jump` requires ground support and enabled jumping. It releases crouch and
+sends exactly one Jump impulse. `jump_requires_ground` means no new jump was
+attempted; there is no double jump. `jump_not_started` means the impulse did
+not produce an observed takeoff (for example, movement was obstructed).
+`air-move` requires the player to be airborne; `airborne_required` means it
+started on the ground. Levitation uses `fly`, and swimming uses `swim`.
+
+A short `jump --seconds S` can return `reason: airborne`, `feedback.status:
+partial`: the jump started but has not finished. Read its state and continue
+with `air-move` or `wait-until landed`, rather than retrying `jump`. The world
+is paused at the end of each command even when the character is in midair.
+A short `air-move` reports `duration` when its input budget finishes; that does
+not imply landing. Both helpers release movement as soon as landing is
+observed, then allow a brief physics/mechanics update (about 0.05 s) with no
+movement input so landing damage is included. `landing_unstable` means support
+was lost again during that update; inspect the current body state. Entering water reports
+`entered_water`, with `landed:false`; switch to swimming controls if needed.
+UI prompts, death, location changes and `stop` still interrupt the action.
+
+The returned `action.aerial` contains `started_airborne`, `took_off`, `landed`,
+`peak_rise_m` above the action's initial height, and `damage_taken` observed
+during that action (including landing damage; it does not identify its cause).
+`action.motion` reports actual forward/sideways/vertical displacement, including
+the final pause. Check these and the final `body`; a completed input request
+alone is not proof of a successful jump. `wait-until landed` can succeed
+immediately if already grounded, in which case no new landing was observed.
+
+Ordinary falls are steerable too: after walking off an edge, use `air-move`
+without Jump. High Acrobatics improves air control. A moving jump carries its
+launch momentum: releasing input does not brake it, and opposite input may
+only reduce travel rather than reverse it. Turning the camera alone is not a
+reliable way to redirect that momentum. Use directional steering and inspect
+the observed result; no helper predicts unseen floor or guarantees a safe fall.
+
+Low-level `act` with `trigger:"Jump"` remains available and reports the same
+observed aerial evidence. `trigger Jump` is only a 0.1-second pulse wrapper;
+it often leaves the character airborne. Low-level `act` runs for its requested
+duration even after landing, and crouched jumping may produce no takeoff.
+Prefer the helpers when landing is the intended stopping point.
 
 ## Local walking surface: JSON first, SVG optional
 

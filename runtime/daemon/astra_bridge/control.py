@@ -124,7 +124,7 @@ class Control:
                                 exc.details.update(reason='player_controls_disabled',next_command='wait-until controls --seconds 10')
                             elif body.get('looking_enabled') is False and (op in {'look','focus','interact','approach','track'} or args.get('yaw') or args.get('pitch')):
                                 exc.details.update(reason='player_looking_disabled',next_command='wait-until controls --control looking --seconds 10')
-                            elif body.get('jumping_enabled') is False and args.get('trigger')=='Jump':
+                            elif body.get('jumping_enabled') is False and (op=='jump' or args.get('trigger')=='Jump' or op=='trigger' and args.get('name')=='Jump'):
                                 exc.details.update(reason='player_jumping_disabled',next_command='wait-until controls --control jumping --seconds 10')
                             elif body.get('animation_busy') or body.get('recovering'):
                                 exc.details['next_command']='wait-until animation --seconds 10'

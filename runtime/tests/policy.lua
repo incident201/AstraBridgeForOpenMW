@@ -10,7 +10,8 @@ local bus = {
     set=function(_,k,v) busData[k]=v end,
 }
 local controls = {}
-local object = {controls=controls, ATTACK_TYPE={NoAttack=0}, object={},cell={id='private',displayName='Room'}}
+local position=setmetatable({x=0,y=0,z=0},{__sub=function()return {x=0,y=0,z=0,length=function()return 0 end}end})
+local object = {position=position,controls=controls, ATTACK_TYPE={NoAttack=0}, object={},cell={id='private',displayName='Room'}}
 local item = {isValid=function()return true end,count=2, id='SECRET_REFERENCE', position={x=99}, type={}}
 item.type.record=function() return {name='Зелье',id='SECRET_RECORD',effects={'SECRET_EFFECT'}} end
 local bindings={}
@@ -19,7 +20,7 @@ local uiApi={}
 package.preload['openmw.ui']=function()return uiApi end
 package.preload['openmw.util']=function()return {} end
 package.preload['scripts.astrabridge.scene']=function() return {
-    identity=function()return {details_visible=false}end,
+    unitsPerMeter=70,identity=function()return {details_visible=false}end,
     reset=function()end,fov=function()end,pose=function()return {yaw=0,pitch=0,cell='private'}end,
     report=function()return {moved_m=0}end,angle=function(x)return x end,
     orientation=function()return {}end,observe=function()return {objects={}}end,

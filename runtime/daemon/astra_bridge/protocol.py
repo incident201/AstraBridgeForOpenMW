@@ -120,6 +120,8 @@ LEAF_KEYS.add('game_time_seconds')
 LEAF_KEYS.update({'movement_mode','center_bearing_deg'})
 LEAF_KEYS.update({'controls_enabled','looking_enabled','jumping_enabled'})
 LEAF_KEYS.update({'actor_kind','details_visible','name_source','memory_ref'})
+LEAF_KEYS.update({'air_state','vertical_speed_mps','started_airborne','took_off','landed','peak_rise_m'})
+DICT_KEYS.add('aerial')
 DICT_KEYS.add('dialogue')
 DICT_KEYS.add('document')
 ERRORS = {"save_unavailable", "stale_save_ref", "operation_failed", "invalid_arguments", "no_player",
@@ -137,6 +139,7 @@ ERRORS.update({'ui_element_offscreen', 'ui_scroll_unavailable'})
 ERRORS.add('movement_conflicts_with_target')
 ERRORS.update({'levitation_required','flight_requires_fly'})
 ERRORS.add('swimming_required')
+ERRORS.update({'jump_requires_ground','airborne_required','swimming_requires_swim'})
 ERRORS.update({'document_not_open', 'stale_document_ref'})
 
 
@@ -173,7 +176,9 @@ def number(value, low, high):
     return value
 
 
-ACTION_DEFAULTS = {'act':.25, 'track':1, 'go':12, 'walk':8, 'approach':30,
+AIR_DIRECTIONS = ('none','forward','back','left','right','forward-left','forward-right','back-left','back-right')
+
+ACTION_DEFAULTS = {'jump':8, 'air_move':.5, 'act':.25, 'track':1, 'go':12, 'walk':8, 'approach':30,
                    'interact':30, 'move_local':30, 'fly':10, 'evade':4, 'chain':12,
                    'wait_until':30, 'sequence':60, 'revisit':60, 'return_to':60}
 ACTION_DEFAULTS.update(rest=30,buy=30,travel=30,swim=30)
@@ -202,6 +207,7 @@ def validate(op: str, args: dict) -> None:
         "trigger": {"name"},
         "read": {"ref", "offset", "limit"}, "resetNPC": {"reason"},
         "act": {"seconds", "move", "strafe", "yaw", "pitch", "attack", "run", "sneak", "trigger", "target"},
+        "jump":{"direction","run","seconds"}, "air_move":{"direction","run","seconds"},
         "look":{"heading_deg","pitch_deg"},
         "ui":set(),"map":set(),"choose":{"ref"},"focus":{"ref","wait_ready"},"approach":{"ref","reach","run","under_fire","seconds"},"interact":{"ref","approach","run","seconds","under_fire","adjust_viewpoint"},
         "pick":{"x","y","radius","observation"},"target_info":{"ref"},
@@ -229,13 +235,17 @@ def validate(op: str, args: dict) -> None:
     if op=='interact' and 'approach' in args and type(args['approach']) is not bool:raise BridgeError('invalid_arguments')
     if op=='interact' and 'adjust_viewpoint' in args and type(args['adjust_viewpoint']) is not bool:raise BridgeError('invalid_arguments')
     if op=='wait_until':
-        if args.get('condition') not in {'fatigue','animation','passage','ui','controls'}:raise BridgeError('invalid_arguments')
+        if args.get('condition') not in {'fatigue','animation','passage','ui','controls','landed'}:raise BridgeError('invalid_arguments')
         if args.get('control','controls') not in {'controls','looking','jumping'}:raise BridgeError('invalid_arguments')
         if 'control' in args and args.get('condition')!='controls':raise BridgeError('invalid_arguments')
         number(args.get('percent',100),0,100)
         number(args.get('bearing_deg',0),-180,180)
         number(args.get('meters',1),.1,6)
         if args.get('condition')=='ui' and (not isinstance(args.get('ui_mode'),str) or not args['ui_mode']):raise BridgeError('invalid_arguments')
+    if op in {'jump','air_move'}:
+        if args.get('direction','none' if op=='jump' else None) not in AIR_DIRECTIONS:raise BridgeError('invalid_arguments')
+        if 'run' in args and type(args['run']) is not bool:raise BridgeError('invalid_arguments')
+        if 'seconds' in args:number(args['seconds'],.02,math.inf)
     if op=='look':
         if not args:raise BridgeError('invalid_arguments')
         if 'heading_deg' in args:number(args['heading_deg'],0,360)
