@@ -17,20 +17,93 @@ packaged release. Game files must be supplied by the user.
 | AppImage | Kernel FUSE access for mounted execution. The pinned static AppImage runtime bundles its userspace FUSE library. On systems without FUSE, use `APPIMAGE_EXTRACT_AND_RUN=1` and a writable temporary directory. |
 | Network | HTTPS access to GitHub Releases and GHCR for installation/explicit updates. Normal gameplay uses loopback HTTP/WebSocket and WebRTC TCP, ports 18770 and 18771. Only one default installation may be running on these ports at a time. |
 
-For Ubuntu 24.04, typical host packages are:
+### Container packages
+
+Install the host packages appropriate for your distribution; the application
+checks the actual tools and configuration, not whether one particular package
+manager reports a package name.
+
+| Capability | Debian / Ubuntu packages | Arch / CachyOS packages |
+| --- | --- | --- |
+| Container manager | `podman` **5+** | `podman` **5+** |
+| OCI runtime | `crun` | `crun` |
+| Default rootless networking (`pasta`) | `passt` | `passt` |
+| UID/GID mapping helpers | `uidmap` | `shadow` |
+| NVIDIA container integration, when exposing NVIDIA | `nvidia-container-toolkit` from NVIDIA's supported repository | `nvidia-container-toolkit` |
+
+Podman's package dependencies provide its monitor/network/configuration tools,
+such as conmon, Netavark and containers-common. Install the complete package with
+its dependencies. `slirp4netns` is an alternative only when Podman is configured
+to use it; installing it does not satisfy a configuration that selects `pasta`.
+`fuse-overlayfs` is an optional storage fallback, not a universal requirement.
+
+For Arch/CachyOS:
 
 ```sh
-sudo apt install podman crun uidmap passt fuse-overlayfs \
-  libgtk-3-0t64 libnss3 libnspr4 libdbus-1-3 libatk1.0-0t64 \
+sudo pacman -S --needed podman crun passt shadow
+# Add this when the runtime will expose an NVIDIA GPU:
+sudo pacman -S --needed nvidia-container-toolkit
+```
+
+For Debian/Ubuntu, use a supported repository providing **Podman 5 or newer**:
+
+```sh
+sudo apt install podman crun uidmap passt
+podman --version
+```
+
+Ubuntu 24.04's standard [Podman package](https://packages.ubuntu.com/en/noble/podman)
+is 4.9.x and does **not** meet this requirement. The image's Ubuntu 24.04 base is
+not a statement that the host's default Podman version is sufficient. Choose a
+supported host release/repository with Podman 5+; installing an older package
+will be reported as an unmet requirement. For NVIDIA on Debian/Ubuntu, follow
+[NVIDIA's package installation instructions](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+for `nvidia-container-toolkit` and its dependencies.
+
+### Desktop libraries and AppImage
+
+The AppImage includes Electron/Node and application code. The Linux system must
+provide glibc and the ordinary Desktop libraries: GLib/GObject/GIO, GTK 3,
+Pango/Cairo, NSS/NSPR, D-Bus, ATK/AT-SPI, CUPS, X11/XCB, XKB, DRM/GBM, udev,
+Expat, ALSA and their normal package dependencies. These are needed even for CLI
+mode because it uses the same Electron executable. GUI mode additionally needs
+a working host X11 or Wayland session.
+
+Typical Ubuntu 24.04 library packages (independent of the Podman version caveat):
+
+```sh
+sudo apt install libgtk-3-0t64 libnss3 libnspr4 libdbus-1-3 libatk1.0-0t64 \
   libatk-bridge2.0-0t64 libatspi2.0-0t64 libcups2t64 libx11-6 libxcb1 \
   libxcomposite1 libxdamage1 libxext6 libxfixes3 libxrandr2 libxkbcommon0 \
-  libdrm2 libgbm1 libasound2t64
+  libdrm2 libgbm1 libasound2t64 libudev1 libexpat1
 ```
+
+Typical Arch/CachyOS library packages:
+
+```sh
+sudo pacman -S --needed gtk3 nss nspr dbus at-spi2-core libcups libx11 libxcb \
+  libxcomposite libxdamage libxext libxfixes libxrandr libxkbcommon libdrm \
+  mesa alsa-lib systemd-libs expat
+```
+
+The launcher uses the system `ldd` utility to identify unresolved libraries and
+ABI version requirements before starting Electron. It prints the actual missing
+library names and, when available, uses KDialog or Zenity to display the message
+for a launch from the desktop. Those dialog utilities are optional. A failed
+ELF loader cannot reach the application's Setup screen.
+
+Mounted AppImage execution needs `/dev/fuse`; the pinned runtime includes its
+userspace FUSE library. If FUSE is unavailable, launch with
+`APPIMAGE_EXTRACT_AND_RUN=1` and a writable temporary directory. This occurs
+before the application launcher and its diagnostics can run.
+
+### Rootless configuration and permissions
 
 Package names differ by distribution. `podman info` must work as the same user
 who launches AstraBridge. Membership in a render/video group or an equivalent
 ACL must allow that user to access the selected render devices. Sign out and
-back in after changing group membership. The backend explicitly uses crun with
+back in after changing group membership. Mapping tools must retain their distribution-provided setuid bits or file
+capabilities; executable files alone are not sufficient. The backend explicitly uses crun with
 `--group-add keep-groups` to preserve this access inside the rootless container.
 See [Podman's device/group documentation](https://docs.podman.io/en/latest/markdown/podman-run.1.html).
 
@@ -41,6 +114,35 @@ and device policy using the distribution's Podman guidance. Diagnose denied
 access before changing policy; a successful host `glxinfo` alone does not prove
 container access.
 
+### GPU requirements by vendor
+
+| Rendering GPU | Required on the Linux host | Provided inside the AstraBridge image |
+| --- | --- | --- |
+| Intel | A compatible kernel driver (`i915` or `xe`), firmware and an accessible DRM render node. | Mesa OpenGL and Intel VAAPI userspace driver. |
+| AMD | A compatible kernel driver (normally `amdgpu`), firmware and an accessible DRM render node. | Mesa OpenGL and Mesa VAAPI drivers. |
+| NVIDIA | A working proprietary/open-kernel NVIDIA driver with matching userspace libraries, NVIDIA Container Toolkit and CDI device registration. | The graphics/encoding clients; vendor libraries are injected from the host through CDI. |
+| Hybrid Intel/AMD + NVIDIA | Requirements for both devices exposed to the runtime. User permissions must cover every passed render device. | Private compositor on Mesa where available, with NVIDIA offload for the selected game GPU. |
+
+The runtime normally exposes all detected render devices and NVIDIA CDI devices.
+Selecting Intel/AMD rendering on a hybrid laptop does not remove the need for
+CDI when NVIDIA is also exposed for rendering or encoding. Intel/AMD-only hosts
+do not need NVIDIA packages. `prime-run` is an optional convenience; GPU selection
+is also available in AstraBridge Settings.
+
+Install drivers/firmware using your distribution's hardware support packages.
+Host desktop Mesa/GL libraries serve the host application; the game's Mesa and
+VAAPI userspace libraries come from the image. Installing host VAAPI packages
+cannot repair a missing kernel render device or change the container's pinned
+encoder build. CUDA Toolkit, a host FFmpeg, Weston, XWayland, Python and OpenMW
+are not separate production host dependencies.
+
+All hardware-rendering paths must pass the runtime's real OpenGL probe (3.3+,
+correct requested vendor, no software renderer). The existence of a device node
+alone does not prove that the GPU supports the required GL context. Hardware
+encoding is optional and probed independently; GPU models and drivers differ
+in H.264 encoding support. Explicit software rendering is a diagnostic mode,
+not a promise of real-time 1080p60 performance.
+
 ### NVIDIA and hybrid graphics
 
 Install a supported host NVIDIA driver and **NVIDIA Container Toolkit with CDI**.
@@ -49,8 +151,18 @@ The pinned NVENC headers target Video Codec SDK 13.0.19 and require NVIDIA drive
 rendering support.
 The CDI specification must expose `nvidia.com/gpu=all` to Podman and supply the
 matching graphics, CUDA/NVENC and utility libraries. Verify the specification
-with `nvidia-ctk cdi list`; after a driver/device change, refresh it according to
-the toolkit's instructions. Do not combine a legacy NVIDIA OCI hook with CDI
+with `nvidia-ctk cdi list`; it must include `nvidia.com/gpu=all`. After a
+driver/device change, refresh CDI using your distribution's toolkit integration.
+Arch/CachyOS packages provide a pacman hook; other distributions may provide
+`nvidia-cdi-refresh` systemd units. A manual refresh is:
+
+```sh
+sudo mkdir -p /etc/cdi
+sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+nvidia-ctk cdi list
+```
+
+Do not combine a legacy NVIDIA OCI hook with CDI
 injection. See [NVIDIA's Podman/CDI guide](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/cdi-support.html).
 
 AstraBridge passes render nodes and NVIDIA CDI devices into its private display;
@@ -64,6 +176,34 @@ substitute for the private Weston/XWayland test. See [GPU selection](gpu-selecti
 Hardware H.264 support is optional. `auto` falls back to CPU if encoding probes
 fail. This guarantees an available codec, **not** enough CPU performance for
 1080p60 at all workloads.
+
+## Automatic checks and their limits
+
+Desktop checks host prerequisites when it opens and exposes the results in
+**Setup → System requirements**. Missing components are collected into one
+report with remediation guidance. **Check again** refreshes the report after
+manual installation/configuration. Neither the check nor the application installs
+host packages or changes host driver/security configuration automatically.
+
+On Linux the checks cover Podman version, crun, UID/GID mapping tools and ranges,
+namespace restrictions (including a diagnostic namespace probe where available),
+available networking helper, render-node permissions and
+kernel driver identity. NVIDIA devices additionally require a working
+`nvidia-smi`, `nvidia-ctk`, and a registered `nvidia.com/gpu=all` CDI device. An old
+NVENC driver is a recording warning because CPU encoding remains available.
+
+Before install, start or update, the backend repeats these checks and validates
+rootless Podman against the selected managed storage, including actual UID/GID
+mappings, the configured monitor/network backend and selected rootless network
+helper. Failures stop the operation before
+image downloads or container replacement. CLI operations return the same
+requirements report. Help and version remain usable without Podman.
+
+Host checks do not create a test container and do not certify every driver/image
+combination. The runtime's OpenGL and actual-frame encoding probes remain the
+final checks of hardware rendering/recording. Filesystem capacity, network access,
+display-session availability and host security policy must also meet the
+requirements above; a package-presence check cannot guarantee those conditions.
 
 ## Capacity planning
 

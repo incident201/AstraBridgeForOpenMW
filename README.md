@@ -6,7 +6,14 @@ your own Morrowind installation; game files are not included in the image.
 
 ## Requirements
 
-- Linux x86_64: rootless Podman, a GPU driver and access to the GPU render device.
+- Linux x86_64: **Podman 5+**, **crun**, **passt** (`pasta`), and configured
+  rootless user namespaces with `newuidmap`/`newgidmap` and subordinate UID/GID ranges.
+- Intel/AMD graphics on Linux: a working kernel GPU driver, firmware and user
+  access to `/dev/dri/renderD*`.
+- NVIDIA graphics on Linux (including hybrid laptops): a working NVIDIA driver
+  **and NVIDIA Container Toolkit with a valid CDI specification**. The driver or
+  `prime-run` alone is insufficient. NVENC requires driver 570+.
+- Linux Desktop: the system libraries listed in [system requirements](docs/system-requirements.md#desktop-libraries-and-appimage), plus FUSE access or AppImage extraction mode.
 - Windows x86_64: WSL Containers (`wslc`), with GPU access.
 - An existing Morrowind installation; extra disk space if choosing a managed copy.
 
@@ -18,6 +25,11 @@ See [system requirements](docs/system-requirements.md) for host dependencies and
 Open the matching AstraBridge Linux AppImage. On Windows, extract the portable
 ZIP and run `astrabridge.exe`; keep the extracted files together. Electron and
 the application's dependencies are included in the package.
+Desktop checks host prerequisites automatically on opening. **Setup → System
+requirements** lists missing components and configuration problems with remedies.
+Install packages yourself, then select **Check again**. Installation and runtime
+start/update repeat the checks before proceeding.
+
 In **Setup**, choose your game folder, managed storage, game encoding and an
 optional recordings directory. By default AstraBridge mounts the game folder
 read-only without copying. **Copy into managed storage** creates an independent

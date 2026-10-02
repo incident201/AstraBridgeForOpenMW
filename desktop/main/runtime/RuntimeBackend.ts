@@ -11,9 +11,11 @@ export interface RuntimeSpec {
   gpuDevices?:string[];
 }
 export interface RuntimeInspection {exists:boolean; running:boolean; id?:string; image?:string; status?:string}
+export interface PrerequisiteCheck {id:string; title:string; status:'ok'|'warning'|'error'; detail:string; remedy?:string}
+export interface PrerequisiteReport {available:boolean; version:string; message?:string; checks?:PrerequisiteCheck[]}
 export interface RuntimeBackend {
   readonly kind:'podman'|'wsl';
-  check():Promise<{available:boolean; version:string; message?:string}>;
+  check(gpuDevices?:string[]):Promise<PrerequisiteReport>;
   pull(image:string):Promise<string>;
   createVolume(name:string):Promise<void>;
   create(spec:RuntimeSpec):Promise<void>;

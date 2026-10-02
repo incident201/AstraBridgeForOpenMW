@@ -54,7 +54,16 @@ export class Core {
   backend(config:Pick<Installation,'backend'|'storageDirectory'>):RuntimeBackend {
     return config.backend==='wsl'?new WslContainerBackend(undefined,this.progress):new PodmanBackend(config.storageDirectory,undefined,this.progress);
   }
-  async prerequisites(storage:string){return this.backend({backend:process.platform==='win32'?'wsl':'podman',storageDirectory:resolve(storage)}).check();}
+  async prerequisites(storage?:string){
+    const config=await this.load();
+    return this.backend({backend:config?.backend??(process.platform==='win32'?'wsl':'podman'),
+      storageDirectory:storage?resolve(storage):config?.storageDirectory??''}).check(config?.gpuDevices);
+  }
+  private async requirePrerequisites(backend:RuntimeBackend,gpuDevices?:string[]){
+    const report=await backend.check(gpuDevices);
+    if(!report.available)throw Object.assign(new Error('System requirements are not met.\n'+report.message),
+      {details:{error:'prerequisites_missing',message:report.message,prerequisites:report}});
+  }
   async configured(){const config=await this.load();if(!config)throw new Error('AstraBridge is not installed. Open Setup or run astrabridge install.');return config;}
   async fetch(path:string,init:RequestInit={},config?:Installation):Promise<Response>{
     config??=await this.configured();
@@ -85,7 +94,8 @@ export class Core {
   async ensureDaemon(config?:Installation){
     config??=await this.configured();
     if(config.transaction)throw new Error('Recover the interrupted runtime update in Setup before starting');
-    const backend=this.backend(config);const state=await backend.inspect(config.name);
+    const backend=this.backend(config);await this.requirePrerequisites(backend,config.gpuDevices);
+    const state=await backend.inspect(config.name);
     if(!state.exists)throw new Error('Managed container is missing. Reinstall or explicitly update runtime.');
     if(!state.running)await backend.start(config.name);
     await this.ready(config);return config;
@@ -93,8 +103,10 @@ export class Core {
   async status(){
     const config=await this.load();const release=await this.release();
     if(!config)return {installed:false,release};
-    const container=await this.backend(config).inspect(config.name);
-    let runtime=null,error=null;
+    let container,error:string|null=null;
+    try{container=await this.backend(config).inspect(config.name);}
+    catch(e){container={exists:false,running:false};error=String(e);}
+    let runtime=null;
     if(container.running){try{runtime=await this.api('/v1/runtime/status','GET',undefined,config);}catch(e){error=String(e);}}
     return {installed:config.installed,phase:config.phase,backend:config.backend,container,runtime,error,release,
       currentDigest:config.digest,currentVersion:config.version,previousRuntime:config.previous??null,updatePending:Boolean(config.transaction),cleanupPending:Boolean(config.cleanupPending),updateRequired:Boolean(release.digest&&release.digest!==config.digest),
@@ -116,9 +128,9 @@ export class Core {
       recordingsDirectory:resolve(options.recordings??join(options.storage,'recordings')),gameMode,
       ...(options.repository?{repository:resolve(options.repository),buildDirectory:join(resolve(options.storage),'build')}:{}) ,
       ...(gameMode==='mount'?{gameDirectory:game}:{})};
+    const backend=this.backend(config);await this.requirePrerequisites(backend,config.gpuDevices);
     await mkdir(config.recordingsDirectory,{recursive:true,mode:0o700});
     if(config.buildDirectory)await mkdir(config.buildDirectory,{recursive:true});
-    const backend=this.backend(config);const check=await backend.check();if(!check.available)throw new Error(check.message);
     config.phase='pulling';await this.save(config);this.progress?.('Pulling runtime image…\n');
     const digest=await backend.pull(release.image);
     if(release.digest&&digest!==release.digest)throw new Error('Pulled image does not match the Desktop release digest');
@@ -156,7 +168,7 @@ export class Core {
     }
     delete config.agentToken;await this.save(config);return this.status();
   }
-  async restart(gpu?:string){await this.stop();return this.start(gpu);}
+  async restart(gpu?:string){const config=await this.configured();await this.requirePrerequisites(this.backend(config),config.gpuDevices);await this.stop();return this.start(gpu);}
   async removeContainer(){return this.exclusive(async()=>{
     const config=await this.configured();const backend=this.backend(config);
     if(config.transaction)throw new Error('Recover the interrupted update before removing its container');
@@ -200,6 +212,7 @@ export class Core {
   }
   async update(){return this.exclusive(async()=>{
     const config=await this.configured();const backend=this.backend(config);const release=await this.release();
+    await this.requirePrerequisites(backend,config.gpuDevices);
     // Persisted transactions always recover the old version before another attempt.
     if(config.transaction)return this.recover(config);
     const parts=(value:string|undefined)=>value?.match(/^(\d+)\.(\d+)\.(\d+)/)?.slice(1).map(Number);

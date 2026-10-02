@@ -24,3 +24,17 @@ test('AppImage launcher separates an injected Electron flag from GUI and CLI arg
   assert.deepEqual(run(['--no-sandbox',...args]).args,[cli,...args]);
  }finally{await rm(directory,{recursive:true,force:true});}
 });
+
+test('AppImage identifies missing Electron libraries before attempting GUI or CLI startup',{skip:process.platform!=='linux'},async()=>{
+ const directory=await mkdtemp(join(tmpdir(),'astra missing libs '));
+ try{
+  const binary=join(directory,'astrabridge-desktop');
+  await writeFile(binary,'#!/bin/sh\necho should-not-start\n',{mode:0o755});
+  await writeFile(join(directory,'ldd'),'#!/bin/sh\necho "libnss3.so => not found"\necho "libgtk-3.so.0 => not found"\n',{mode:0o755});
+  await afterPack({electronPlatformName:'linux',appOutDir:directory});
+  for(const args of [[],['version']]){
+   assert.throws(()=>execFileSync(binary,args,{encoding:'utf8',stdio:'pipe',env:{PATH:directory+':'+process.env.PATH}}),
+    (error:any)=>error.status===1&&error.stderr.includes('libnss3.so')&&error.stderr.includes('libgtk-3.so.0')&&!error.stdout.includes('should-not-start'));
+  }
+ }finally{await rm(directory,{recursive:true,force:true});}
+});

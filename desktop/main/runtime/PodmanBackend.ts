@@ -1,12 +1,13 @@
 import {mkdir,readdir,access} from 'node:fs/promises';
 import {join} from 'node:path';
-import {tmpdir} from 'node:os';
+import {constants} from 'node:fs';
 import {Readable} from 'node:stream';
+import {checkLinuxHost,prerequisiteReport,hostAccess,type HostAccess} from './LinuxPrerequisites';
 import {checked,resourceName,run,type Runner,type Progress,type RuntimeBackend,type RuntimeSpec,type RuntimeInspection} from './RuntimeBackend';
 
 export class PodmanBackend implements RuntimeBackend {
   readonly kind='podman' as const;
-  constructor(readonly storage:string,private runner:Runner=run,private progress?:Progress){}
+  constructor(readonly storage:string,private runner:Runner=run,private progress?:Progress,private host:HostAccess=hostAccess){}
   private async args(){
     const graph=join(this.storage,'containers');
     const state=join(this.storage,'run','podman');
@@ -16,18 +17,28 @@ export class PodmanBackend implements RuntimeBackend {
   private async command(args:string[],input?:Readable,timeout=120_000){
     return this.runner('podman',[...await this.args(),...args],{input,timeout,progress:args.includes('pull')?this.progress:undefined});
   }
-  async check(){
-    try {
-      if(process.platform!=='linux')throw new Error('Podman backend requires Linux');
-      const version=checked(await this.runner('podman',['--version']));
-      const major=version.match(/(?:version\s+)?(\d+)\.\d+/)?.[1];
-      if(!major||Number(major)<5)throw new Error('Podman 5 or newer is required');
-      const info=JSON.parse(checked(await this.command(['info','--format','json'])));
-      checked(await this.runner('crun',['--version']));
-      if(process.arch!=='x64')throw new Error('AstraBridge requires Linux x86_64');
-      if(!info.host?.security?.rootless)throw new Error('This installation requires rootless Podman');
-      return {available:true,version};
-    }catch(error){return {available:false,version:'',message:String(error)};}
+  async check(gpuDevices?:string[]){
+    const report=await checkLinuxHost(this.runner,this.host,gpuDevices),checks=report.checks!;
+    // Startup checks need no storage selection. The actual managed store is
+    // validated before install/start/update, before downloading an image.
+    if(this.storage&&!checks.some(c=>c.status==='error'&&['user','podman','crun','newuidmap','newgidmap','subuid','subgid','namespaces','namespace-probe'].includes(c.id))){
+      try{
+        const info=JSON.parse(checked(await this.command(['info','--format','json'],undefined,20_000)));
+        if(!info.host?.security?.rootless)throw new Error('Podman is not operating rootlessly.');
+        for(const key of ['uidmap','gidmap'])if(!info.host.idMappings?.[key]?.some((m:any)=>m.container_id>0&&m.size>0))
+          throw new Error('Podman has no usable subordinate UID/GID mappings. Check newuidmap/newgidmap permissions and your configured ranges.');
+        for(const [title,path,packageName] of [
+          ['Container monitor',info.host.conmon?.path,'conmon'],
+          ['Container network backend',info.host.networkBackendInfo?.path,info.host.networkBackend??'netavark'],
+        ])if(!path||!await this.host.accessible(path,constants.X_OK))
+          checks.push({id:packageName,title,status:'error',detail:`${packageName} is missing or not executable in Podman's configuration.`,remedy:`Install/repair the ${packageName} package and Podman configuration.`});
+        checks.push({id:'podman-storage',title:'Rootless Podman storage',status:'ok',detail:'Managed storage and user mappings are usable.'});
+        const network=info.host.rootlessNetworkCmd;
+        if(network&&['pasta','slirp4netns'].includes(network)&&!info.host[network]?.executable)
+          checks.push({id:'configured-network',title:'Configured network helper',status:'error',detail:`Podman selects ${network}, but its executable is unavailable.`,remedy:`Install ${network==='pasta'?'passt':'slirp4netns'} or correct Podman rootless networking configuration.`});
+      }catch(error){checks.push({id:'podman-storage',title:'Rootless Podman storage',status:'error',detail:String(error),remedy:'Check the managed storage location and rootless Podman configuration. See docs/system-requirements.md.'});}
+    }
+    return prerequisiteReport(checks,report.version);
   }
   async pull(image:string){
     if(image.startsWith('localhost/')){

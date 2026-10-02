@@ -14,9 +14,10 @@ async function fixture(){
   previous:{image:'localhost/runtime:older@'+digest('c'),digest:digest('c'),version:'0.9.0',snapshot:'update-previous',created:1}};
  const release={version:'2.0.0',image:'localhost/runtime:new',digest:digest('b'),runtime_api:2,game_api:1};
  await writeFile(configFile,JSON.stringify(old));await writeFile(join(directory,'release.json'),JSON.stringify(release));
- const state={exists:true,running:true,game:false,image:old.image,data:'saved progress',failReady:false,failBackup:false,failCleanup:false};
+ const state={exists:true,running:true,game:false,image:old.image,data:'saved progress',failReady:false,failBackup:false,failCleanup:false,failCheck:false};
  const backups=new Map([['update-previous','earlier progress']]);const calls:string[]=[];
  const backend={
+  check:async()=>({available:!state.failCheck,version:"test",message:state.failCheck?"Install nvidia-container-toolkit":undefined}),
   inspect:async()=>({exists:state.exists,running:state.running,image:state.image}),
   pull:async()=>{calls.push('pull');assert.ok(state.exists,'Old container must exist during download');return release.digest;},
   start:async()=>{calls.push('start');state.running=true;},stop:async()=>{calls.push('stop');state.running=false;state.game=false;},
@@ -85,5 +86,14 @@ test('an older Desktop cannot implicitly downgrade saved data',async()=>{
  const f=await fixture();try{
   await writeFile(f.configFile,JSON.stringify({...f.old,version:'3.0.0'}));
   await assert.rejects(()=>f.core.update(),/older than/);assert.deepEqual(f.calls,[]);assert.equal(f.state.data,'saved progress');
+ }finally{await f.close();}
+});
+
+test('missing prerequisites block start and update before downloads, stop or replacement',async()=>{
+ const f=await fixture();try{
+  f.state.failCheck=true;
+  for(const action of [()=>f.core.start(),()=>f.core.update(),()=>f.core.restart()])
+   await assert.rejects(action,(error:any)=>error.details?.error==='prerequisites_missing'&&/nvidia-container-toolkit/.test(error.message));
+  assert.deepEqual(f.calls,[]);assert.equal(f.state.running,true);assert.equal(f.state.data,'saved progress');
  }finally{await f.close();}
 });

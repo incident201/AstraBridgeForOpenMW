@@ -3,7 +3,12 @@
 Desktop and its CLI mode share Application Core, connection configuration and
 the same API client. Gameplay commands are grouped under `astrabridge game`.
 Their options come from the Python command catalog, exported into the Desktop
-package during its build.
+package during its build. Host lifecycle commands also validate prerequisites
+before install/start/update. A failed check returns `error: prerequisites_missing`,
+a readable `message`, and `prerequisites` containing `available`, `version` and
+`checks` (`id`, `title`, `status`, `detail`, optional `remedy`). This is an
+Application Core result; it does not require a running daemon. Desktop presents
+the same report in **Setup → System requirements**.
 
 The Windows backend reads WSLC's structured inspection results. Container
 existence does not depend on the language of Windows diagnostic messages;

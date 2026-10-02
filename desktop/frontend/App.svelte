@@ -1,11 +1,14 @@
 <script lang="ts">
   import {onMount} from 'svelte';
   import Icon from './Icon.svelte';
+  import Prerequisites from './Prerequisites.svelte';
+  import type {PrerequisiteReport} from '../main/runtime/RuntimeBackend';
   import AtlasMap from './AtlasMap.svelte';
   import {ReplayViewer,type ReplayInfo} from './replay';
   import {Viewer,artifact,pointer} from './viewer';
   const pages=[['play','Play'],['atlas','Atlas'],['recordings','Recordings'],['profiles','Profiles'],['settings','Settings'],['diagnostics','Diagnostics'],['setup','Setup']];
   let page='play',state:any={installed:false},runtime:any={},busy=false,error='',notice='',progress='';
+  let prerequisites:PrerequisiteReport|null=null,checkingPrerequisites=false,requirementsOpen=false;
   let game='',storage='',recordingsDirectory='',encoding='win1251',dataRelative='Data Files',development=false;
   let gameMode:'mount'|'copy'='mount';
   let setupStep='game',installedSection='runtime',settingsSection='data',diagnosticSection='logs';
@@ -31,6 +34,16 @@
   }
   $: if(owner!=='manual'&&typeof document!=='undefined'&&document.pointerLockElement)void document.exitPointerLock();
 
+  async function checkPrerequisites(startup=false){
+    if(checkingPrerequisites)return;
+    checkingPrerequisites=true;
+    try{
+      prerequisites=await window.astra.invoke('prerequisites',{...(storage?{storage}:{})});
+      if(startup&&prerequisites&&!prerequisites.available&&!state.installed){page='setup';requirementsOpen=true;}
+    }catch(e){prerequisites={available:false,version:'',message:(e as Error).message};}
+    finally{checkingPrerequisites=false;}
+  }
+  function showRequirements(){requirementsOpen=true;void navigate('setup');}
   async function refresh(){
     try{state=await window.astra.invoke('status');if(state.runtime)runtime=state.runtime;else runtime={};}
     catch(e){error=(e as Error).message;}
@@ -167,7 +180,7 @@
   const displayValue=(value:any):string=>value==null?'Not available':typeof value==='boolean'?(value?'Yes':'No'):typeof value==='object'?Object.entries(value).map(([key,item])=>key.replaceAll('_',' ')+': '+displayValue(item)).join(' · '):String(value);
 
   onMount(()=>{
-    void refresh();const timer=setInterval(()=>void refresh(),2500);
+    void refresh().then(()=>checkPrerequisites(true));const timer=setInterval(()=>void refresh(),2500);
     const replayTimer=setInterval(()=>void pollReplay(),1000);
     const unsubscribe=window.astra.subscribe(message=>{
       if(message.type==='viewer.fullscreen')setViewerFullscreen(message.enabled);
@@ -229,6 +242,7 @@
       </div>
     </header>
     {#if state.installed&&(state.updatePending||state.updateRequired)&&page!=='setup'}<div class="banner" role="status"><span>{state.updatePending?'A runtime update was interrupted. Open Setup to recover your previous runtime.':'This Desktop needs its matching runtime. Open Setup to update; your saved data will be kept.'}</span><button class="banner-action" on:click={()=>navigate('setup')}>Open setup</button></div>{/if}
+    {#if prerequisites&&!prerequisites.available&&page!=='setup'&&!fullscreen}<div class="banner error" role="status"><span>Required system components are missing or need configuration.</span><button class="banner-action" on:click={showRequirements}>Review requirements</button></div>{/if}
     {#if error&&!fullscreen}<div role="alert" class="banner error">{error}<button on:click={()=>error=''} aria-label="Dismiss error">×</button></div>{/if}
     {#if notice&&!fullscreen}<div role="status" class="banner">{notice}<button on:click={()=>notice=''} aria-label="Dismiss notification">×</button></div>{/if}
     {#if busy}<div class="working" role="status">Working…</div>{/if}
@@ -304,8 +318,11 @@
         </div>
       </div>
     {:else if page==='setup'}
-      <section class="card setup-card"><h2>{state.installed?'Your installation':'Install AstraBridge runtime'}</h2>
-        {#if state.installed}
+      <section class="card setup-card">
+        <div class="section-heading"><h2>{state.installed?'Your installation':'Install AstraBridge runtime'}</h2><button on:click={()=>{requirementsOpen=!requirementsOpen;if(requirementsOpen)void checkPrerequisites();}}>{requirementsOpen?'Back to setup':'System requirements'}</button></div>
+        {#if requirementsOpen}
+          <Prerequisites report={prerequisites} checking={checkingPrerequisites} recheck={()=>checkPrerequisites()}/>
+        {:else if state.installed}
           <div class="tabs" aria-label="Installation sections"><button class:active={installedSection==='runtime'} on:click={()=>installedSection='runtime'}>Runtime</button><button class:active={installedSection==='storage'} on:click={()=>installedSection='storage'}>Storage and skill</button></div>
           {#if installedSection==='runtime'}
             <p>Desktop {state.release?.version} · Runtime {state.currentVersion??'installed'}</p>
@@ -342,7 +359,7 @@
           </div>
           <div class="card-footer toolbar">
             {#if setupStep==='game'}<button class="primary" disabled={!game||busy} on:click={()=>setupStep='storage'}>Next: Storage</button>
-            {:else}<button disabled={!storage||busy} on:click={()=>task(async()=>{const result=await window.astra.invoke('prerequisites',{storage});if(!result.available)throw new Error(result.message);return result;},'Container runtime is available.')}>Check prerequisites</button><button class="primary" disabled={!game||!storage||busy} on:click={install}>Install</button>{/if}
+            {:else}<button disabled={busy||checkingPrerequisites} on:click={()=>{requirementsOpen=true;void checkPrerequisites();}}>Check prerequisites</button><button class="primary" disabled={!game||!storage||busy||checkingPrerequisites||prerequisites?.available===false} on:click={install}>Install</button>{/if}
           </div>
         {/if}
       </section>

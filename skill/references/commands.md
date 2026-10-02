@@ -14,7 +14,10 @@ using `profile.id` from that export. This checks the active profile without
 switching it; a mismatch is a host setup issue. The connection response includes
 `profile`, and application `status` reports it under `runtime.profile`.
 The application manages the runtime; do not start an internal daemon or enter
-the container during gameplay.
+the container during gameplay. A startup error `prerequisites_missing` includes
+`prerequisites.checks` with missing host components and remedies. Report it to
+the host user, who can use **Setup → System requirements**; gameplay commands
+cannot fix a missing container runtime, GPU driver or CDI configuration.
 
 All saves, Atlas, object recognition, notes and action receipts belong to the
 active profile. New profiles begin with empty memory; an explicit Desktop

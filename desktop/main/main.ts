@@ -29,9 +29,12 @@ async function connectEvents(){
 function allowedFrame(url:string){return url.startsWith('astra://app/');}
 const closing=new CloseRequest(async()=>{
   if(core.managementBusy)throw new Error('Wait for the install, update or container operation to finish before closing');
-  const config=await core.load();return Boolean(config&&(await core.backend(config).inspect(config.name)).running);
+  const config=await core.load();if(!config)return false;
+  // Missing host tools make runtime state unknown. Still allow Keep running
+  // to close Desktop without attempting any container operation.
+  try{return (await core.backend(config).inspect(config.name)).running;}catch{return true;}
 },async()=>{
-  const options={type:'question' as const,title:'Close AstraBridge?',message:'The runtime will keep running after this window closes.',
+  const options={type:'question' as const,title:'Close AstraBridge?',message:'Closing this window does not stop the runtime.',
     detail:'Keep running leaves the container, connected agent and recording session active. Manual control is released when the window closes. Stop runtime stops the game and finishes the current recording before closing; it does not create a game save.',
     buttons:['Cancel','Keep running','Stop runtime'],defaultId:1,cancelId:0,noLink:true};
   const result=window?await dialog.showMessageBox(window,options):await dialog.showMessageBox(options);
@@ -69,7 +72,7 @@ app.whenReady().then(async()=>{
     if(!event.senderFrame||!allowedFrame(event.senderFrame.url))throw new Error('Invalid sender');
     try{
       if(operation==='status'){const result=await core.status();if(result.container?.running)await connectEvents();return result;}
-      if(operation==='prerequisites')return core.prerequisites(String(args.storage));
+      if(operation==='prerequisites')return core.prerequisites(typeof args.storage==='string'?args.storage:undefined);
       if(operation==='install')return core.install(args);
       if(['start','stop','restart','update'].includes(operation)){
         const result=await core[operation as 'start'|'stop'|'restart'|'update']();await connectEvents();return result;
