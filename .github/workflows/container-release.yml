@@ -74,7 +74,6 @@ jobs:
       contents: read
       packages: write
     env:
-      WORK: ${{ runner.temp }}/astra-work
       IMAGE: ghcr.io/incident201/astrabridge-runtime:${{ inputs.version }}
       RELEASE_VERSION: ${{ inputs.version }}
       PYTHONDONTWRITEBYTECODE: '1'
@@ -92,6 +91,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Select runner workspace
+        run: echo "WORK=$RUNNER_TEMP/astra-work" >> "$GITHUB_ENV"
       - name: Free space for native builds
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
@@ -197,6 +198,7 @@ jobs:
           python -m pip install -r runtime/requirements.txt
           cd desktop
           npm ci
+          npm run build
           npm run check
           npm test
       - name: Package Linux

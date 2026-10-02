@@ -7,7 +7,7 @@ import {resolve} from 'node:path';
 await mkdir('resources',{recursive:true});
 const version=JSON.parse(await readFile('../VERSION.json','utf8'));
 await cp('../skill','resources/skill',{recursive:true});
-const python=process.env.ASTRA_BUILD_PYTHON??'python3';
+const python=process.env.ASTRA_BUILD_PYTHON??(process.platform==='win32'?'python':'python3');
 const catalog=execFileSync(python,['-B','-m','astra_daemon.commands'],{env:{...process.env,PYTHONPATH:resolve('../runtime/daemon')},encoding:'utf8'});
 await writeFile('resources/game-commands.json',catalog);
 try{await access('resources/release.json');}catch{

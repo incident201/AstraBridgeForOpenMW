@@ -28,6 +28,6 @@ jobs:
         working-directory: desktop
         run: |
           npm ci
+          npm run build
           npm run check
           npm test
-          npm run build
