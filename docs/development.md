@@ -157,11 +157,37 @@ local SVG and Runtime API JSON response for a representative retained map.
 
 ## Release workflow
 
-Releases are started manually with a version. CI checks source/CLI/runtime tests,
-builds the cached native engine and pinned FFmpeg, builds/tests the OCI runtime,
-packages Linux AppImage and Windows portable ZIP, and creates a draft release. Desktop
-metadata records the pushed OCI digest. Hardware-specific tests run separately;
-they are not prerequisites for CPU-only CI builds.
+`.github/workflows/container-release.yml` builds and publishes a matching OCI
+runtime, Linux AppImage and Windows portable ZIP. Release builds are manual;
+pushes only run source checks. The registered `draft-release.yml` workflow calls
+this pipeline from the selected branch, so the container release line can be
+published without changing the default branch's legacy release workflow:
+
+```sh
+gh workflow run draft-release.yml --ref release/0.3.0-rc1 \
+  -f version=v0.3.0-rc1 -f prerelease=true -f publish=false
+```
+
+Versions support SemVer prerelease identifiers. The `prerelease` input must match
+the version suffix. All jobs use the exact prepared tag; publication pushes the
+tag only and does not update a source branch. CI runs source/CLI/runtime checks,
+reuses the native build, ccache and builder-image cache, builds pinned FFmpeg and
+the runtime, and verifies CPU recording before pushing the image to GHCR.
+Desktop embeds that image's registry digest. Each platform's packaged CLI is
+checked before its artifact is uploaded. Hardware tests run separately from the
+ordinary CPU-only release build.
+
+By default the result is a draft with its prerelease flag already set. Select
+`publish=true` to publish after CI verifies anonymous access to the exact GHCR
+manifest. On the first package publication, set the package's visibility to
+**Public** in GitHub's package settings; repository permissions do not imply
+public package visibility. The repository's `GITHUB_TOKEN` publishes images;
+users do not need a token to pull the public runtime. A draft can be promoted
+after checking it with `python3 packaging/check_registry.py release.json`.
+
+Release assets include `release.json`, `SHA256SUMS`, both platform packages and
+the corresponding source archive. Version-specific English notes live in
+`packaging/notes/<tag>.md`, with a generic fallback for other versions.
 
 Keep implementation details in `docs/` and public gameplay usage in the skill.
 Update the engine/mod inventories with the corresponding changes. Preserve the

@@ -29,6 +29,9 @@ ENV CCACHE_DIR=/work/cache/ccache PYTHONDONTWRITEBYTECODE=1
 WORKDIR /src
 
 FROM base AS runtime
+LABEL org.opencontainers.image.source="https://github.com/incident201/AstraBridgeForOpenMW" \
+      org.opencontainers.image.description="AstraBridge container runtime for modified OpenMW" \
+      org.opencontainers.image.licenses="GPL-3.0-or-later"
 COPY stage/ /opt/astrabridge/
 RUN dpkg-query -W '-f=${Package}=${Version}\n' > /opt/astrabridge/runtime-packages.txt \
     && python3 -c "import json,hashlib; from pathlib import Path; p=Path('/opt/astrabridge/runtime-manifest.json'); m=json.loads(p.read_text()); m['packages_sha256']=hashlib.sha256(p.with_name('runtime-packages.txt').read_bytes()).hexdigest(); p.write_text(json.dumps(m,indent=2)+'\n')"

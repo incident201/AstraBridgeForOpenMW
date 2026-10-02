@@ -109,9 +109,11 @@ def main():
         receipt.write_text(json.dumps({'inputs':inputs,'files':engine_files(prefix)},indent=2)+'\n')
     inside('python3','/src/packaging/build_ffmpeg.py')
     inside('python3','/src/packaging/stage_runtime.py')
-    run(*runner,'build',*proxy,'--target','runtime','-t',args.image,'-f',recipe,work/'image')
-    digest=output(*runner,'image','inspect',args.image,'--format','{{.Digest}}')
     version=json.loads((ROOT/'VERSION.json').read_text())
+    run(*runner,'build',*proxy,'--target','runtime','--label',f'org.opencontainers.image.revision={commit}',
+        '--label',f'org.opencontainers.image.version={version["project_version"]}',
+        '-t',args.image,'-f',recipe,work/'image')
+    digest=output(*runner,'image','inspect',args.image,'--format','{{.Digest}}')
     release={'version':version['project_version'],'image':args.image,'digest':digest,'runtime_api':1,'game_api':1,
              'git_commit':commit,'git_tag':tag.stdout.strip() if tag.returncode==0 and not dirty else None,
              'development':dirty or tag.returncode!=0}
