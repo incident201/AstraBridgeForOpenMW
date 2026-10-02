@@ -132,6 +132,29 @@ This exercises both viewer qualities, concurrent recording, disconnect/reconnect
 and a thinking pause. GL acceleration is established by an actual renderer probe;
 encoder acceleration requires successful real-frame encoding.
 
+## Visual checks
+
+For an offline visual/layout check, start the frontend with `npm exec vite` from
+`desktop`, then run in another terminal in the same directory. Playwright's
+Chromium browser must be installed (`npm exec playwright install chromium`).
+
+```sh
+ASTRA_UI_URL=http://127.0.0.1:5173 ASTRA_TEST_OUTPUT=/path/to/ui-results \
+  node tests/play-layout.mjs
+```
+
+This uses disposable API and media fixtures, without accessing a game installation.
+It captures multiple viewport sizes, control states, menus and fullscreen errors,
+and checks that the preview retains most of the window height. An optional
+`ASTRA_TEST_FRAME=/path/to/frame.png` supplies a local gameplay image for the
+preview. Screenshots and geometry reports belong outside the source tree.
+
+Run `node tests/screens-layout.mjs` with the same URL/output settings for Atlas,
+recordings, profiles, settings, diagnostics and setup. It uses sample data, checks
+bounded panels and verifies that map details and recording metadata do not shrink
+their viewers. `ASTRA_TEST_ATLAS` and `ASTRA_TEST_ATLAS_DATA` can supply a matching
+local SVG and Runtime API JSON response for a representative retained map.
+
 ## Release workflow
 
 Releases are started manually with a version. CI checks source/CLI/runtime tests,

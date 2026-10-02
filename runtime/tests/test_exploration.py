@@ -76,6 +76,38 @@ def test_markers_expire_and_map_escapes_labels(tmp_path):
     obs['trajectory']['world_position']=[1,2,3]
     with pytest.raises(BridgeError):check_result({'trajectory':obs['trajectory']})
 
+def test_desktop_map_keeps_geometry_without_the_agent_observation_panel(tmp_path):
+    import xml.etree.ElementTree as ET
+    atlas=ExplorationAtlas(tmp_path/'atlas.json')
+    for i,(forward,sideways) in enumerate(((0,0),(4,0),(4,4))):
+        obs=observation([sample(i+1,forward=forward,sideways=sideways)])
+        atlas.ingest(obs);atlas.annotate(obs)
+    desktop=atlas.present(tmp_path/'desktop.svg',map_only=True)
+    normal=atlas.present(tmp_path/'agent.svg')
+    assert desktop['nodes']==normal['nodes']
+    assert 'map_markers' not in normal and 'map_bounds' not in normal
+    assert {m['ref'] for m in desktop['map_markers']}=={n['ref'] for n in desktop['nodes']}
+    bounds=desktop['map_bounds']
+    for marker in desktop['map_markers']:
+        assert bounds['left']<=marker['x']<=bounds['right']
+        assert bounds['top']<=marker['y']<=bounds['bottom']
+    assert bounds['left']<=.5<=bounds['right']
+    root=ET.parse(tmp_path/'desktop.svg').getroot()
+    assert root.attrib['viewBox']=='20 50 680 645'
+    assert 'Visited observations' not in (tmp_path/'desktop.svg').read_text()
+    assert 'Visited observations' in (tmp_path/'agent.svg').read_text()
+
+
+def test_desktop_wide_area_keeps_distance_grid_bounded(tmp_path):
+    import xml.etree.ElementTree as ET
+    atlas=ExplorationAtlas(tmp_path/'atlas.json')
+    obs=observation([sample(1)]);atlas.ingest(obs);atlas.annotate(obs)
+    atlas.present(tmp_path/'wide.svg',radius=500,map_only=True)
+    root=ET.parse(tmp_path/'wide.svg').getroot()
+    rings=[e for e in root.iter('{http://www.w3.org/2000/svg}circle') if e.attrib.get('stroke')=='#253545']
+    assert len(rings)<=7
+
+
 def test_effect_explanations_do_not_expose_ids_or_random_rolls():
     e={'name':'Health effect','description':'Reduces health','health_effect':'damage','harmful':True}
     check_result({'effects':[e]})

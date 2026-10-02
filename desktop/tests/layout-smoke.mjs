@@ -25,7 +25,7 @@ async function fit(page,name){
  for(const b of layout.controls)assert.ok(b.top>=0&&b.bottom<=layout.height,name+' control outside viewport');
  for(const offset of layout.icons)assert.ok(offset<=1,name+' icon not vertically centered: '+offset);
  for(const [height,scroll] of layout.forms)assert.ok(scroll<=height+1,name+' form needs vertical scrolling');
- if(layout.video){assert.equal(layout.video.fit,'contain');assert.ok(layout.video.height>=100&&layout.video.top>=0&&layout.video.bottom<=layout.height);}
+ if(layout.video){assert.equal(layout.video.fit,'contain');assert.ok(layout.video.height>=layout.height*.68&&layout.video.top>=0&&layout.video.bottom<=layout.height,'Game preview must retain most of the window height');}
  await page.screenshot({path:join(output,name+'.png')});
 }
 try{

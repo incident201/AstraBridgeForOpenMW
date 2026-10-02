@@ -32,6 +32,7 @@ try{
   await page.waitForFunction(()=>{const v=document.querySelector('video');return v?.videoWidth===1280&&v.currentTime>1;},{},{timeout:90000});
   report.viewer720=await page.locator('video[aria-label="Live Morrowind game"]').evaluate(v=>({width:v.videoWidth,height:v.videoHeight,time:v.currentTime,tracks:v.srcObject.getTracks().map(t=>({kind:t.kind,state:t.readyState,muted:t.muted}))}));
   await page.screenshot({path:join(output,'play.png')});
+  await page.getByLabel('Viewer options',{exact:true}).click();
   await page.getByLabel('Viewer quality').selectOption('1080p60');
   await page.waitForFunction(()=>document.querySelector('video')?.videoWidth===1920,{},{timeout:90000});
   report.viewer1080=await page.locator('video[aria-label="Live Morrowind game"]').evaluate(v=>({width:v.videoWidth,height:v.videoHeight}));

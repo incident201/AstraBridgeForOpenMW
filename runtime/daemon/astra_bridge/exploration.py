@@ -446,7 +446,7 @@ class ExplorationAtlas(AtlasRoutes):
         return {'supported':True,'segment':s['ref'],'current_node':s.get('current_node'),
                 'persistent':s.get('persistent',False),'loop_detected':s.get('loop_detected',False)}
 
-    def present(self, path: Path | None, radius=35, archived=False, page=0, limit=20, level=None):
+    def present(self, path: Path | None, radius=35, archived=False, page=0, limit=20, level=None, *, map_only=False):
         s = self.current()
         if not s or 'pose' not in s:
             return {'supported': False}
@@ -475,7 +475,7 @@ class ExplorationAtlas(AtlasRoutes):
             for row in rows:
                 row['can_revisit'] = False
                 row['revisit_source'] = 'different_space'
-        if path: self.render(path, radius, nodes, rows)
+        if path: self.render(path, radius, nodes, rows, map_only=map_only)
         result = {'supported': True, 'segment': self.segment, 'source': 'travelled_path_and_observed_probes',
                   'location': s['location'], 'radius_m': radius, 'nodes': rows,
                   'persistent': s.get('persistent', False), 'spaces': self.catalog(), 'archived':archived,
@@ -483,6 +483,17 @@ class ExplorationAtlas(AtlasRoutes):
                   'recorded_points': len(s['points']), 'current_node': s.get('current_node')}
         result.update(levels=levels,page=page,limit=limit,total=total,has_more=(page+1)*limit<total,
                       loop_detected=s.get('loop_detected',False),transitions=self.transitions())
+        if map_only:
+            scale=650/(radius*2)
+            result['map_markers']=[{'ref':n['ref'],'label':n['label'],
+                'x':(340+(n['p'][0]-pose[0])*scale)/680,
+                'y':(320-(n['p'][1]-pose[1])*scale)/645} for n in nodes]
+            points=[(340/680,320/645)]+[(m['x'],m['y']) for m in result['map_markers']]
+            points.extend(((340+(row['p'][0]-pose[0])*scale)/680,
+                           (320-(row['p'][1]-pose[1])*scale)/645) for row in s['points'])
+            visible=[(x,y) for x,y in points if 0<=x<=1 and 0<=y<=1]
+            result['map_bounds']={'left':min(x for x,y in visible),'right':max(x for x,y in visible),
+                                  'top':min(y for x,y in visible),'bottom':max(y for x,y in visible)}
         self.persist()
         if s.get('restored_from_save'): result['restored_from_save'] = s['restored_from_save']
         if path: result['svg'] = str(path)
@@ -499,20 +510,30 @@ class ExplorationAtlas(AtlasRoutes):
         local = self.path.parent / 'screenshots' / Path(value).name
         return str(local) if local.exists() else value
 
-    def render(self, path, radius, nodes, public):
+    def render(self, path, radius, nodes, public, *, map_only=False):
         s = self.current(); pose = s['pose']; scale = 650/(radius*2)
         def point(p): return 360+(p[0]-pose[0])*scale, 370-(p[1]-pose[1])*scale
         def xy(p):
             x, y = point(p); return f'{x:.1f},{y:.1f}'
-        svg = ['<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="740" viewBox="0 0 1100 740">',
+        opening=('<svg xmlns="http://www.w3.org/2000/svg" width="680" height="645" viewBox="20 50 680 645">'
+                 if map_only else '<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="740" viewBox="0 0 1100 740">')
+        svg = [opening,
                '<rect width="1100" height="740" fill="#101923"/>',
                '<defs><clipPath id="map"><rect x="20" y="50" width="680" height="645"/></clipPath></defs>',
                '<g font-family="DejaVu Sans,sans-serif" font-size="13" fill="#d6e3ed">',
                f'<text x="20" y="28">Travel memory · {escape(s["location"])} · North is up</text>',
                '<g clip-path="url(#map)">']
-        for metres in range(5, int(radius)+1, 5):
+        ring_step=max(5,5*math.ceil(radius/35)) if map_only else 5
+        label_boxes=[]
+        for metres in range(ring_step, int(radius)+1, ring_step):
             svg.append(f'<circle cx="360" cy="370" r="{metres*scale:.1f}" fill="none" stroke="#253545"/>')
             svg.append(f'<text x="365" y="{370-metres*scale+14:.1f}" fill="#657c8d">{metres} m</text>')
+            if map_only:
+                baseline=370-metres*scale+14
+                label_boxes.append((363,baseline-14,367+len(str(metres)+' m')*8,baseline+3))
+        if map_only:
+            for node in nodes:
+                nx,ny=point(node['p']);label_boxes.append((nx-7,ny-7,nx+7,ny+7))
         for n in nodes:
             for ray in n['probes']:
                 if abs(ray['a'][2]-pose[2]) > 1.5: continue
@@ -531,12 +552,26 @@ class ExplorationAtlas(AtlasRoutes):
             fill = '#101923' if other_floor else color
             label = n['label'] + (f" ({row['height_change_m']:+.1f}m)" if other_floor else '')
             svg.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="5" fill="{fill}" stroke="{color}"/>')
-            svg.append(f'<text x="{x+7:.1f}" y="{y-6:.1f}" fill="{color}">{escape(label)}</text>')
+            tx,ty=x+7,y-6
+            if map_only:
+                width=len(label)*8
+                for dx,dy in ((9,-7),(9,19),(-width-9,-7),(-width-9,19),(9,-23),(-width-9,-23)):
+                    candidate=(x+dx,y+dy-13,x+dx+width,y+dy+3)
+                    if not any(candidate[0]<b[2] and candidate[2]>b[0] and candidate[1]<b[3] and candidate[3]>b[1] for b in label_boxes):
+                        tx,ty=x+dx,y+dy;break
+                label_boxes.append((tx,ty-13,tx+width,ty+3))
+            halo=' stroke="#101923" stroke-width="3" paint-order="stroke" stroke-linejoin="round"' if map_only else ''
+            svg.append(f'<text x="{tx:.1f}" y="{ty:.1f}" fill="{color}"{halo}>{escape(label)}</text>')
             for option in row['untraversed_directions']:
                 angle = math.radians(option['heading_deg']); length = min(2, option['meters'])*scale
                 ox, oy = point(n.get('option_origin', n['p']))
                 svg.append(f'<path d="M {ox:.1f},{oy:.1f} l {math.sin(angle)*length:.1f},{-math.cos(angle)*length:.1f}" stroke="#ffc777" stroke-dasharray="3 3"/>')
-        svg.extend(['</g>', f'<g transform="translate(360 370) rotate({s["heading"]:.2f})"><path d="M 0,-14 L -8,9 L 0,5 L 8,9 Z" fill="white" stroke="#101923"/></g>',
+        svg.extend(['</g>', f'<g transform="translate(360 370) rotate({s["heading"]:.2f})"><path d="M 0,-14 L -8,9 L 0,5 L 8,9 Z" fill="white" stroke="#101923"/></g>'])
+        if map_only:
+            svg.append('</g></svg>')
+            path.write_text('\n'.join(svg),encoding='utf-8')
+            return
+        svg.extend([
                     '<text x="710" y="55">Visited observations</text>'])
         for i, row in enumerate(public[:16]):
             y = 83+i*35

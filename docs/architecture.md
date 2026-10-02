@@ -109,6 +109,22 @@ Exported gameplay skills include the selected profile ID. `agent connect
 profile. Updates snapshot the profile catalog and every profile, including
 screenshots referenced by retained notes. Removing a container preserves them.
 
+## Atlas viewer
+
+Desktop reads retained travel data through the Runtime API. Its map contains the
+same recorded paths, observed directions and visited points as travel memory;
+it does not fill in unexplored terrain. The Desktop SVG omits the agent diagram's
+embedded observation list because the interactive sidebar supplies those details.
+
+The map keeps its height when selecting a point or viewing transitions. Its first
+view and **Fit** frame the known route and current position with padding. Scroll
+or use **+ / −** to zoom, and drag to pan. Keyboard users can focus the map and
+use **+ / −**, arrow keys and **0** (Fit). Click a point or choose it from the
+sidebar; **Locate on map** centres and highlights it. **Expand map** hides the
+sidebar. **Area** selects the extent of retained data to request, while zoom only
+changes its display. Transitions list known doors and their destination locations.
+Changing the area/location refreshes the SVG even when its artifact ID is reused.
+
 ## Ownership and pause behavior
 
 There is one input owner: idle, manual or agent. The daemon enforces this rule;
@@ -129,6 +145,17 @@ Desktop's Fullscreen button expands the viewer through the native window mode.
 Use `Exit fullscreen` to return; the controls reappear when moving the pointer.
 Escape is not assigned to exiting the viewer, so it retains its game behavior
 and the browser's normal pointer-lock release behavior.
+
+The **Play** screen gives the remaining window space to the game, preserving its
+aspect ratio without page scrolling. Recording and fullscreen controls sit above
+the picture; playback, the recording timeline, audio and manual input sit below.
+**Capture mouse** enables relative camera movement during manual control.
+**Viewer options** contains stream quality and disconnect; **Session** contains
+runtime start/stop/restart, skill export and ending an agent session. These menus
+overlay the viewer instead of reducing its size. Errors remain visible inside
+fullscreen. The active profile links to profile management; GPU and FPS appear in
+the compact footer. At narrow window widths, the navigation uses labeled icons
+with hover titles.
 
 The gameplay CLI and live viewer are independent. A user may watch an agent
 without obtaining input ownership.

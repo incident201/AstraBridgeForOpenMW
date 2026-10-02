@@ -2,8 +2,15 @@
   export let name:string;
   export let size=22;
   const paths:Record<string,string[]>={
+    chevron:['m8 10 4 4 4-4'],
+    more:['M5 12h.01M12 12h.01M19 12h.01'],
+    mouse:['M5 8a7 7 0 0 1 14 0v8a7 7 0 0 1-14 0Z','M12 2v6'],
+    help:['M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2-3 4','M12 17h.01','M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0'],
     profiles:['M4 21v-2a6 6 0 0 1 12 0v2','M10 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8','M18 4a4 4 0 0 1 0 7M20 21v-2a6 6 0 0 0-2-4.5'],
     plus:['M12 5v14M5 12h14'],
+    minus:['M5 12h14'],
+    close:['m6 6 12 12M18 6 6 18'],
+    panel:['M3 4h18v16H3Z','M15 4v16'],
     copy:['M8 8h13v13H8Z','M16 8V3H3v13h5'],
     pause:['M8 5v14M16 5v14'],
     play:['M6 4.5 18 12 6 19.5Z'],

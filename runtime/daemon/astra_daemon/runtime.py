@@ -278,7 +278,7 @@ class Runtime:
                 else:
                     path=self.root/'runtime/screenshots/atlas-desktop.svg'
                     result=atlas.present(path,number(args.get('radius_m',35),.1,100_000),
-                        archived=offline or target!=active,page=page,limit=limit,level=args.get('level'))
+                        archived=offline or target!=active,page=page,limit=limit,level=args.get('level'),map_only=True)
                     result['spaces']=spaces;result['historical']=offline or target!=active
                 self.atlas_cache=self.project(result)
                 return self.atlas_cache

@@ -73,6 +73,16 @@ Server events include `status`, `input.owner` and `error`. Status updates carry
 action progress and separate game/capture/viewer metrics. Disconnection releases
 manual input; it does not end an explicitly connected agent session.
 
+## Atlas map data
+
+Atlas map responses include a map-only SVG and `map_markers` (`ref`, `label`,
+normalized `x`/`y`) for the returned visited nodes. `map_bounds` gives normalized
+`left`/`right`/`top`/`bottom` bounds of retained visible path samples, nodes and the
+current position. Desktop uses them for selection and fitting the view. These are
+coordinates within the rendered SVG, derived from retained travel memory. They
+do not expose unvisited geometry. The gameplay API's agent map presentation is
+unchanged.
+
 ## Host artifacts and recordings
 
 Runtime `status` includes `profile` with its ID and display name. Engine start
