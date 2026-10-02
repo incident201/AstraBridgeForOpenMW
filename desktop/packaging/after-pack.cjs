@@ -7,6 +7,13 @@ module.exports=async context=>{
     const script=`#!/bin/sh
 set -eu
 astra_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+# AppRun may prepend this Electron flag when user namespaces are unavailable.
+# Keep it for GUI startup; it is not an AstraBridge CLI command.
+astra_no_sandbox=0
+if [ "\${1-}" = --no-sandbox ]; then
+  astra_no_sandbox=1
+  shift
+fi
 if [ "$#" -gt 0 ]; then
   export ELECTRON_RUN_AS_NODE=1
   export ASTRA_RESOURCES="$astra_dir/resources/astra"
@@ -14,6 +21,9 @@ if [ "$#" -gt 0 ]; then
   exec "$astra_dir/astrabridge-bin" "$astra_dir/resources/app.asar/out/cli.cjs" "$@"
 fi
 unset ELECTRON_RUN_AS_NODE
+if [ "$astra_no_sandbox" = 1 ]; then
+  exec "$astra_dir/astrabridge-bin" --no-sandbox
+fi
 exec "$astra_dir/astrabridge-bin" "$@"
 `;
     await fs.writeFile(path.join(directory,'astrabridge-desktop'),script,{mode:0o755});

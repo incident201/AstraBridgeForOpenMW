@@ -86,7 +86,8 @@ and `ASTRA_DESKTOP_DATA` select development resources, a test installation and
 isolated Electron user data. They do not expose private game files to the renderer.
 
 The Linux launcher runs commands through Electron's bundled Node mode without
-creating a GUI. Windows packages include the console launcher in
+creating a GUI. It separates AppRun's optional `--no-sandbox` Electron argument
+from CLI commands and preserves it for GUI startup. Windows packages include the console launcher in
 `desktop/packaging/launcher.cpp`; it uses the same compiled CLI/Application Core.
 `package:windows` produces a portable ZIP containing that launcher, Electron and
 the application's resources. Windows packaging does not use an installer or
