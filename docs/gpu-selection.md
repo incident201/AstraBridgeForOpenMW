@@ -38,7 +38,9 @@ GPU when the environment changes.
 ## How rendering is selected
 
 - Intel/AMD Mesa devices use `DRI_PRIME=pci-…`, constructed from the selected
-  PCI identity. See [Mesa's device-selection variables](https://docs.mesa3d.org/envvars.html#dri-prime).
+  PCI identity, and `__GLX_VENDOR_LIBRARY_NAME=mesa`. Selecting the GLX vendor
+  prevents a NVIDIA-backed XWayland server from overriding the Mesa request.
+  See [Mesa's device-selection variables](https://docs.mesa3d.org/envvars.html#dri-prime).
 - Linux NVIDIA uses `__NV_PRIME_RENDER_OFFLOAD=1` and
   `__GLX_VENDOR_LIBRARY_NAME=nvidia` in the private display's OpenGL client
   environment. Driver/library access comes from CDI, not the image. See
@@ -56,6 +58,16 @@ The renderer probe is an observation of the working GL context; an environment
 variable alone is not evidence of acceleration. Changing the render choice
 requires restarting OpenMW. The private compositor can use a different device
 from the OpenMW client.
+
+On hybrid Linux systems, the private Weston/XWayland session uses an accessible
+Intel/AMD Mesa device when available. OpenMW can then use that device or NVIDIA
+PRIME offload. This avoids importing Mesa client buffers into a NVIDIA compositor.
+The runtime also locates the NVIDIA GBM module supplied by CDI: its directory can
+differ between the host distribution and the container image. Vendor drivers
+remain supplied by the host. No host compositor or desktop GPU settings are
+changed. Shader caches are writable within the active profile's runtime storage.
+The GL probe rejects a renderer from the wrong vendor for an explicit selection,
+in addition to rejecting software rendering.
 
 ## How encoding is selected
 

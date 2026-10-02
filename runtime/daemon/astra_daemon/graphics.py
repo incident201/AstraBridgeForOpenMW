@@ -8,7 +8,7 @@ import subprocess
 import time
 
 from astra_bridge.protocol import BridgeError
-from astra_bridge.gpu import resolve_gpu
+from astra_bridge.gpu import inventory, resolve_gpu
 
 
 def application_environment(base, gpu='auto'):
@@ -27,7 +27,28 @@ def application_environment(base, gpu='auto'):
     elif nvidia:
         env.update(__NV_PRIME_RENDER_OFFLOAD='1',__GLX_VENDOR_LIBRARY_NAME='nvidia',__VK_LAYER_NV_optimus='NVIDIA_only')
     elif row:
+        env['__GLX_VENDOR_LIBRARY_NAME']='mesa'
         env['DRI_PRIME']='pci-'+row['pci'].replace(':','_').replace('.','_')
+    return env
+
+
+def compositor_environment(base, *, software=False):
+    """Keep hybrid XWayland on Mesa; NVIDIA clients can still use PRIME."""
+    env=application_environment(base,'auto')
+    if env.get('ASTRA_GPU_BACKEND')=='wsl' or software:return env
+    mesa=next((row for row in inventory() if row['vendor'] in ('intel','amd') and row['accessible']),None)
+    vendor=Path('/usr/share/glvnd/egl_vendor.d/50_mesa.json')
+    if mesa and vendor.is_file():
+        # Let Mesa enumerate a compatible EGL device. DRI_PRIME here could
+        # render on a different device than Weston advertises to XWayland.
+        env['__EGL_VENDOR_LIBRARY_FILENAMES']=str(vendor)
+        return env
+    # CDI preserves the host's library layout. Arch's GBM module directory is
+    # different from Ubuntu's compiled-in search path inside our image.
+    for directory in ('/usr/lib/x86_64-linux-gnu/gbm','/usr/lib64/gbm','/usr/lib/gbm'):
+        if (Path(directory)/'nvidia-drm_gbm.so').is_file():
+            env['GBM_BACKENDS_PATH']=directory
+            break
     return env
 
 
@@ -59,6 +80,9 @@ class Graphics:
         self.environment['XDG_RUNTIME_DIR']=str(directory)
         self.environment['WAYLAND_DISPLAY']='astra-wayland'
         self.environment['SDL_AUDIODRIVER']='dummy'
+        cache=self.storage/'runtime/graphics-cache'
+        cache.mkdir(parents=True,exist_ok=True)
+        self.environment['XDG_CACHE_HOME']=str(cache)
         if software:self.environment['LIBGL_ALWAYS_SOFTWARE']='1'
         else:self.environment.pop('LIBGL_ALWAYS_SOFTWARE',None)
         log=self.storage/'logs/weston.log'
@@ -67,7 +91,8 @@ class Graphics:
                  '--width=1920','--height=1080','--idle-time=0','--socket=astra-wayland',
                  '--config='+str(self.installation/'runtime/graphics/weston.ini'),
                  '--modules='+str(self.installation/'runtime/graphics/virtual-seat.so')]
-        self.process=subprocess.Popen(command,env=self.environment,stdout=self.log,stderr=subprocess.STDOUT,start_new_session=True)
+        self.process=subprocess.Popen(command,env=compositor_environment(self.environment,software=software),
+                                      stdout=self.log,stderr=subprocess.STDOUT,start_new_session=True)
         deadline=time.monotonic()+20
         while time.monotonic()<deadline:
             if self.process.poll() is not None:
@@ -96,7 +121,9 @@ class Graphics:
                    'display':self.environment['DISPLAY'],'backend':'weston-headless-xwayland','probe':result.stdout}
         if not software and not accelerated:raise BridgeError('hardware_gl_required',renderer=renderer)
         selected=resolve_gpu(gpu) if gpu.startswith('pci:') else None
-        if (gpu=='nvidia' or selected and selected['vendor']=='nvidia') and 'nvidia' not in renderer.lower():
+        vendor=selected['vendor'] if selected else 'nvidia' if gpu=='nvidia' else None
+        names={'nvidia':('nvidia',),'amd':('amd','radeon','ati '),'intel':('intel',)}
+        if vendor in names and not any(name in renderer.lower() for name in names[vendor]):
             raise BridgeError('requested_gpu_not_selected',requested=gpu,renderer=renderer)
         if selected:self.info['selected_device']=selected
         return True

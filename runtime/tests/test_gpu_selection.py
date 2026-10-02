@@ -52,11 +52,55 @@ def test_rendering_selection_clears_previous_gpu_env_and_preserves_driver_paths(
               'MESA_D3D12_DEFAULT_ADAPTER_NAME':'stale'}
     env=application_environment(original,card()['id'])
     assert env['DRI_PRIME']=='pci-0000_02_00_0' and env['LD_LIBRARY_PATH']=='/injected/driver'
-    assert '__GLX_VENDOR_LIBRARY_NAME' not in env and 'MESA_D3D12_DEFAULT_ADAPTER_NAME' not in env
+    assert env['__GLX_VENDOR_LIBRARY_NAME']=='mesa' and 'MESA_D3D12_DEFAULT_ADAPTER_NAME' not in env
     env=application_environment(env,'nvidia')
     assert env['__NV_PRIME_RENDER_OFFLOAD']=='1' and 'DRI_PRIME' not in env
     env=application_environment(env,'auto')
     assert '__NV_PRIME_RENDER_OFFLOAD' not in env
+
+
+def test_hybrid_compositor_uses_mesa_without_restricting_nvidia_client(monkeypatch):
+    import astra_daemon.graphics as graphics
+    monkeypatch.setattr(graphics,'inventory',lambda:[{**card('amd'),'accessible':True}])
+    monkeypatch.setattr(graphics.Path,'is_file',lambda p:str(p) in {
+        '/usr/lib/gbm/nvidia-drm_gbm.so','/usr/share/glvnd/egl_vendor.d/50_mesa.json'})
+    base={'LD_LIBRARY_PATH':'/injected/driver','__GLX_VENDOR_LIBRARY_NAME':'nvidia'}
+    display=graphics.compositor_environment(base)
+    assert 'GBM_BACKENDS_PATH' not in display
+    assert 'DRI_PRIME' not in display
+    assert display['__EGL_VENDOR_LIBRARY_FILENAMES'].endswith('50_mesa.json')
+    client=graphics.application_environment(base,'nvidia')
+    assert client['__GLX_VENDOR_LIBRARY_NAME']=='nvidia'
+    assert '__EGL_VENDOR_LIBRARY_FILENAMES' not in client
+    assert display['LD_LIBRARY_PATH']==client['LD_LIBRARY_PATH']=='/injected/driver'
+
+
+def test_nvidia_only_compositor_finds_cdi_gbm_without_forcing_mesa(monkeypatch):
+    import astra_daemon.graphics as graphics
+    monkeypatch.setattr(graphics,'inventory',lambda:[{**card('nvidia'),'accessible':True}])
+    monkeypatch.setattr(graphics.Path,'is_file',lambda p:str(p)=='/usr/lib64/gbm/nvidia-drm_gbm.so')
+    env=graphics.compositor_environment({})
+    assert env['GBM_BACKENDS_PATH']=='/usr/lib64/gbm'
+    assert '__EGL_VENDOR_LIBRARY_FILENAMES' not in env
+
+
+@pytest.mark.parametrize('extra',[{'ASTRA_GPU_BACKEND':'wsl'}, {'LIBGL_ALWAYS_SOFTWARE':'1'}])
+def test_wsl_and_software_do_not_use_linux_device_selection(monkeypatch,extra):
+    import astra_daemon.graphics as graphics
+    def unexpected():raise AssertionError('Linux inventory must not be used')
+    monkeypatch.setattr(graphics,'inventory',unexpected)
+    env=graphics.compositor_environment(extra,software='LIBGL_ALWAYS_SOFTWARE' in extra)
+    assert 'GBM_BACKENDS_PATH' not in env and '__EGL_VENDOR_LIBRARY_FILENAMES' not in env
+
+
+def test_amd_selection_rejects_successful_nvidia_context(monkeypatch,tmp_path):
+    import astra_daemon.graphics as graphics
+    monkeypatch.setattr(graphics,'resolve_gpu',lambda _:card('amd'))
+    monkeypatch.setattr(graphics.subprocess,'run',lambda *a,**kw:subprocess.CompletedProcess(a,0,
+        'OpenGL renderer string: NVIDIA Test\nOpenGL core profile version string: 4.6 NVIDIA\n',''))
+    display=graphics.Graphics(tmp_path,tmp_path);display.environment['DISPLAY']=':1'
+    with pytest.raises(BridgeError,match='requested_gpu_not_selected'):
+        display.probe(False,card()['id'])
 
 
 def test_inventory_merges_drm_and_nvidia_by_pci_not_number(monkeypatch,tmp_path):
