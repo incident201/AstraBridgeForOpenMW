@@ -59,6 +59,17 @@ def download(descriptor,path):
         finally:temporary.unlink(missing_ok=True)
 
 
+def save_builder_cache(run, runner, cache, builder):
+    # Podman's archive transport refuses to overwrite a restored archive.
+    # Retain the previous cache until a fresh export has completed successfully.
+    temporary=cache.with_suffix('.partial.tar')
+    temporary.unlink(missing_ok=True)
+    try:
+        run(*runner,'save','-o',temporary,builder)
+        temporary.replace(cache)
+    finally:temporary.unlink(missing_ok=True)
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--work',type=Path,required=True)
@@ -80,7 +91,7 @@ def main():
     exists=subprocess.run([*runner,'image','exists',builder],env=env).returncode==0
     if not exists:run(*runner,'build',*proxy,'--target','builder','-t',builder,'-f',recipe,ROOT)
     else:print('Reusing pinned local builder image',flush=True)
-    if args.cache_builder:run(*runner,'save','-o',cache,builder)
+    if args.cache_builder:save_builder_cache(run,runner,cache,builder)
     builder_id=output(*runner,'image','inspect',builder,'--format','{{.Id}}')
     versions=json.loads((ROOT/'runtime/container/versions.json').read_text())
     for key,name in {'ffmpeg':'ffmpeg-9.0.2.tar.xz','mediamtx':'mediamtx_v1.21.1_linux_amd64.tar.gz',
