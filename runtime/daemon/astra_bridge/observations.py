@@ -5,7 +5,7 @@ import re
 
 def compact(observation, before=None, target_ref=None):
     keys = ('observation','state','paused','location','ui_mode','orientation','stats','body',
-            'target_lock','messages','events','screenshot','local_map','screen')
+            'target_lock','messages','events','screenshot','local_map','screen','working_memory')
     result = {k: observation[k] for k in keys if k in observation}
     scene = observation.get('scene', {})
     objects = scene.get('objects', [])

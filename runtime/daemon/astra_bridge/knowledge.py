@@ -16,6 +16,10 @@ class Knowledge:
             CREATE TABLE IF NOT EXISTS evidence (ref TEXT PRIMARY KEY, kind TEXT, title TEXT, text TEXT, created REAL);
             CREATE TABLE IF NOT EXISTS notes (ref TEXT PRIMARY KEY, kind TEXT, text TEXT, status TEXT, evidence TEXT, created REAL);
             CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY, payload TEXT, created REAL);
+            CREATE TABLE IF NOT EXISTS working_checkpoints (
+                profile TEXT PRIMARY KEY, payload TEXT NOT NULL, branch TEXT NOT NULL,
+                revision INTEGER NOT NULL, updated REAL NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS recognized_objects (
                 profile TEXT NOT NULL, object_key TEXT NOT NULL, name TEXT NOT NULL,
                 kind TEXT NOT NULL, actor_kind TEXT, first_seen REAL NOT NULL, last_seen REAL NOT NULL,
@@ -136,7 +140,86 @@ class Knowledge:
         if row[3]:result['actor_kind']=row[3]
         return result
 
-    def call(self, args, profile=None):
+    def checkpoint_hint(self, profile, branch):
+        row=self.db.execute('SELECT revision,branch FROM working_checkpoints WHERE profile=?',(profile,)).fetchone()
+        if not row:return {'available':False}
+        return {'available':True,'revision':row[0],'needs_revalidation':row[1]!=branch}
+
+    def _checkpoint_references(self, payload, profile, place_lookup, *, strict):
+        """Project only already-public memory; never geometry or transient handles."""
+        result={}
+        for field in ('evidence_refs','note_refs','object_refs','place_refs'):
+            rows=[]
+            for ref in payload.get(field,[]):
+                try:
+                    if field=='evidence_refs':
+                        row=self.db.execute('SELECT kind,title,text FROM evidence WHERE ref=?',(ref,)).fetchone()
+                        if not row:raise BridgeError('unknown_evidence')
+                        item={'ref':ref,'kind':row[0],'title':row[1][:160],'excerpt':row[2][:160],'characters':len(row[2])}
+                    elif field=='note_refs':
+                        row=self.db.execute('SELECT kind,text,status,object_ref FROM notes WHERE ref=?',(ref,)).fetchone()
+                        if not row:raise BridgeError('unknown_note')
+                        if row[3]:self._object(row[3],profile)
+                        item={'ref':ref,'kind':row[0],'excerpt':row[1][:160],'status':row[2],'characters':len(row[1])}
+                        if row[3]:item['object_ref']=row[3]
+                    elif field=='object_refs':
+                        item=self._object(ref,profile)
+                        if 'name' in item:item['name']=item['name'][:160]
+                    else:
+                        if place_lookup is None:raise BridgeError('unknown_place_memory')
+                        item=place_lookup(ref)
+                except BridgeError:
+                    if strict:raise
+                    item={'ref':ref,'unavailable':True}
+                rows.append(item)
+            result[{'evidence_refs':'evidence','note_refs':'notes','object_refs':'objects','place_refs':'places'}[field]]=rows
+        return result
+
+    def working_state(self, args, profile, branch, branch_reason=None, place_lookup=None):
+        action=args.get('action')
+        fields={'action','checkpoint'} if action=='checkpoint' else {'action'}
+        if args.keys()-fields or not profile or not branch:raise BridgeError('invalid_arguments')
+        if action=='checkpoint':
+            payload=args.get('checkpoint')
+            allowed={'goal','next_step','status','evidence_refs','note_refs','object_refs','place_refs','failed_attempts'}
+            if not isinstance(payload,dict) or payload.keys()-allowed:raise BridgeError('invalid_checkpoint')
+            payload={**payload,'status':payload.get('status','open')}
+            if not isinstance(payload['status'],str) or payload['status'] not in {'open','done','abandoned'}:raise BridgeError('invalid_checkpoint')
+            for field in ('goal','next_step'):
+                value=payload.get(field)
+                if not isinstance(value,str) or len(value)>2000 or '\x00' in value:raise BridgeError('invalid_checkpoint')
+                if (field=='goal' or payload['status']=='open') and not value.strip():raise BridgeError('invalid_checkpoint')
+            for field,prefix in [('evidence_refs',('evidence_',)),('note_refs',('note_',)),
+                                 ('object_refs',('object_',)),('place_refs',('node_','place_'))]:
+                values=payload.setdefault(field,[])
+                if (not isinstance(values,list) or len(values)>8
+                    or any(not isinstance(v,str) or not v.startswith(prefix) or len(v)>200 or '\x00' in v for v in values)
+                    or len(set(values))!=len(values)):raise BridgeError('invalid_checkpoint_reference')
+            failures=payload.setdefault('failed_attempts',[])
+            if (not isinstance(failures,list) or len(failures)>8
+                or any(not isinstance(v,str) or not v.strip() or len(v)>600 or '\x00' in v for v in failures)):
+                raise BridgeError('invalid_checkpoint')
+            serialized=json.dumps(payload,ensure_ascii=False,separators=(',',':'))
+            if len(serialized.encode('utf-8'))>8192:raise BridgeError('checkpoint_too_large')
+            with self.db:
+                self._checkpoint_references(payload,profile,place_lookup,strict=True)
+                self.db.execute('''INSERT INTO working_checkpoints VALUES (?,?,?,1,?)
+                    ON CONFLICT(profile) DO UPDATE SET payload=excluded.payload,branch=excluded.branch,
+                    revision=working_checkpoints.revision+1,updated=excluded.updated''',
+                    (profile,serialized,branch,time.time()))
+            return {'working_memory':self.checkpoint_hint(profile,branch),'source':'agent_checkpoint'}
+        row=self.db.execute('SELECT payload,branch,revision,updated FROM working_checkpoints WHERE profile=?',(profile,)).fetchone()
+        if not row:return {'working_memory':{'available':False},'checkpoint':None,'source':'agent_checkpoint'}
+        payload=json.loads(row[0]);hint=self.checkpoint_hint(profile,branch)
+        result={'working_memory':hint,'checkpoint':payload,'source':'agent_checkpoint',
+                'branch':branch,'checkpoint_branch':row[1],'updated':row[3],
+                'references':self._checkpoint_references(payload,profile,place_lookup,strict=False)}
+        if hint['needs_revalidation']:result['revalidation_reason']=branch_reason or 'continuation_changed'
+        return result
+
+    def call(self, args, profile=None, *, branch=None, branch_reason=None, place_lookup=None):
+        if args.get('action') in ('checkpoint','brief'):
+            return self.working_state(args,profile,branch,branch_reason,place_lookup)
         if args.keys()-{'action','kind','text','ref','status','evidence','quote','query','page','limit','offset','object_ref'}:raise BridgeError('invalid_arguments')
         action=args.get('action','list')
         object_ref=args.get('object_ref')

@@ -346,6 +346,24 @@ class Session:
         for travel in getattr(self,'travel_updates',[]):self._ingest_travel(travel)
         self.travel_updates=[]
 
+    def working_memory_hint(self):
+        with self.lock:
+            return self.knowledge.checkpoint_hint(self.atlas.profile,self.memory.data['branch'])
+
+    def _checkpoint_place(self, ref):
+        if ref.startswith('node_'):
+            graph,node=self.atlas.find_node(ref)
+            if not node or node['ref']!=ref:raise BridgeError('unknown_place_memory')
+            return {'ref':ref,'kind':'atlas_node','label':str(node.get('name',node.get('label','')))[:160],
+                    'location':str(node.get('location',graph.get('location','')))[:160],'historical':True}
+        place=next((p for p in self.memory.data['places'] if p['ref']==ref),None)
+        if not place:raise BridgeError('unknown_place_memory')
+        if place.get('atlas_node'):
+            if not self.atlas.find_node(place['atlas_node'])[1]:raise BridgeError('unknown_place_memory')
+        elif place['branch']!=self.memory.data['branch']:raise BridgeError('unknown_place_memory')
+        return {'ref':ref,'kind':'place_note','label':place['label'][:160],
+                'location':str(place.get('location',''))[:160],'excerpt':str(place.get('note',''))[:160],'historical':True}
+
     def observe(self, *, capture=True, maps=False, passive=False):
         capture = capture and not getattr(self,'batch_depth',0)
         result = self.command("observe", _passive=passive)
@@ -356,6 +374,7 @@ class Session:
         self.observation_id += 1
         path = self.runtime / "screenshots" / f"{self.session_id[:8]}-{self.observation_id:06}.png"
         result['observation'] = self.observation_id
+        result['working_memory'] = self.working_memory_hint()
         if capture:
             size = self.display.capture(path)
             result.update({"screenshot": str(path), "screen": size,
@@ -463,7 +482,10 @@ class Session:
         with self.lock:
             started = time.monotonic()
             if op=='details':return information.details(self,args)
-            if op=='knowledge':return self.knowledge.call(args, self.atlas.profile)
+            if op=='knowledge':
+                if args.get('action')=='checkpoint':self.memory.persist()
+                return self.knowledge.call(args,self.atlas.profile,branch=self.memory.data['branch'],
+                    branch_reason=self.memory.data.get('branch_reason'),place_lookup=self._checkpoint_place)
             if op=='autosave':return self.autosave.configure(args)
             if op=='ui':return information.query_ui(self,args)
             if op=='inspect' and args.get('view') in {'journal','conversations'} and ('query' in args or 'limit' in args):return information.inspect_text(self,args)

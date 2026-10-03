@@ -26,3 +26,12 @@ test('aerial controls preserve direction, time budget and operation names',()=>{
   assert.equal(parseGame(catalog,['wait-until','landed']).args.condition,'landed');
   assert.throws(()=>parseGame(catalog,['jump','up']),/direction/);
 });
+
+test('knowledge checkpoint JSON remains nested and brief has no payload',()=>{
+  const state={goal:'Find the house',next_step:'Inspect the remaining doors',evidence_refs:[]};
+  assert.deepEqual(parseGame(catalog,['knowledge','checkpoint',JSON.stringify(state)]).args,
+    {action:'checkpoint',checkpoint:state});
+  assert.deepEqual(parseGame(catalog,['knowledge','brief']).args,{action:'brief'});
+  assert.deepEqual(parseGame(catalog,['knowledge','update','--ref','note_1','--status','done']).args,
+    {action:'update',ref:'note_1',status:'done'});
+});

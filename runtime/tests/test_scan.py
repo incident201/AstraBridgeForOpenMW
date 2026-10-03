@@ -54,3 +54,17 @@ def test_scan_stops_on_modal_even_when_ui_mode_and_action_reason_look_normal():
     driver=ScanDriver();driver.current['ui']={'modal':True}
     with pytest.raises(BridgeError,match='ui_open'):driver.scan()
     assert not driver.calls
+
+
+def test_scan_final_image_is_shared_only_when_that_view_was_completed():
+    for interrupted in (False,True):
+        driver=ScanDriver(interrupt=interrupted)
+        frames=[]
+        def observe():
+            result=copy.deepcopy(driver.current)
+            result['screenshot']=f'frame-{len(frames)}.png';frames.append(result)
+            return result
+        driver.observe=observe
+        result=driver.scan()
+        same=result['final']['screenshot']==result['views'][-1]['observation']['screenshot']
+        assert same is not interrupted

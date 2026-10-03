@@ -139,7 +139,8 @@ class Runtime:
             self.transition=True
             try:
                 await asyncio.to_thread(self._mode,'agent')
-                result={**self.owner.acquire_agent(name),'profile':self.profiles.public()}
+                hint=await asyncio.to_thread(self.session.working_memory_hint)
+                result={**self.owner.acquire_agent(name),'profile':self.profiles.public(),'working_memory':hint}
                 self._history('agent_connected',name=name)
                 return result
             finally:self.transition=False

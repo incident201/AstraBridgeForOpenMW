@@ -68,54 +68,7 @@ are current. Historical observations can retain what was read at the time;
 `scan` and `--full` enforce the same inspection rule. Inventory and opened UI
 continue to report the information available in those interfaces.
 
-### Notes about one object
-
-Every safely matched visible instance has a `memory_ref`, even before you know its
-name. Copy that value to attach notes, tasks or conversation reminders to that
-particular NPC, creature, door or item. In these commands replace `OBJECT_REF` and
-`NOTE_REF` with actual returned handles:
-
-```sh
-astrabridge game knowledge add --kind note --object-ref OBJECT_REF --text "Door on the left of the stairs; inspect later"
-astrabridge game knowledge add --kind conversation --object-ref OBJECT_REF --text "Ask about the missing ring"
-astrabridge game knowledge list --object-ref OBJECT_REF
-astrabridge game knowledge update --ref NOTE_REF --status done
-astrabridge game knowledge objects --query "Fargoth"
-astrabridge game knowledge objects --object-ref OBJECT_REF
-```
-
-The catalog contains only previously encountered instances in the active atlas
-profile. It reports remembered names/types and note counts; it supplies no current
-position, visibility or lock state. The same note remains attached when a new
-observation gives the object a different `visible_…` ref. Two similarly named
-objects have separate memory refs and notes. When the object is visible again,
-match its `memory_ref` in the new observation and use that row's `ref` for actions.
-
-Notes are agent-written observations or hypotheses; adding a name in note text
-does not teach the bridge that name. Use `--kind fact` only with the existing
-observed-evidence/quote requirements below. Object notes follow the atlas profile
-across older saves and restarts, and remain readable while the object is out of sight.
-
-## Persistent tasks and evidence
-
-Memory lives in `runtime/agent-memory.sqlite3`, separate from the spatial atlas. Use the public commands:
-
-```sh
-astrabridge game knowledge add --kind task --text "Current objective and next step"
-astrabridge game knowledge add --kind conversation --text "Unfinished conversation and what to ask next"
-astrabridge game knowledge list --status open --query "TEXT"
-astrabridge game knowledge update --ref NOTE_REF --status done
-astrabridge game knowledge evidence --query "TEXT"
-astrabridge game knowledge evidence --ref EVIDENCE_REF --offset 0 --limit 4000
-astrabridge game knowledge add --kind fact --text "My summary" --evidence EVIDENCE_REF --quote "Exact supporting passage"
-astrabridge game knowledge events --page 0 --limit 20
-```
-
-`evidence_ref` identifies text already returned by dialogue, journal inspection or reading an opened document. It remains readable after the menu closes or the controller restarts. Fact summaries require a real evidence ref and an exact nonempty quote from it. They remain agent-written summaries; the quote supports review rather than certifying every inference. Tasks/conversation notes are explicitly agent notes. Status can be `open`, `done` or `abandoned`.
-
-New inventory quantities, journal changes and effect start/end events are preserved separately from transient messages. An `event_id` can be found again through `knowledge events`. Repeated observations do not recreate the same change. Loading an earlier save resets change comparisons: old memory remains historical and is not proof of current ownership or quest state. Notes and evidence are not automatically injected into observations; query them on resume and when needed. Previously recognized instance names are supplied automatically as described above.
-
-## Recover a command result
+### Recover a command result
 
 Choose an ID before submitting an important mutation:
 
@@ -130,3 +83,27 @@ Every ordinary command also returns an automatically generated `request_id`. `st
 Use `action-result REQUEST_ID --section action` or `--section feedback` to read only that part. `--page` and `--limit` page action steps and observation lists; `--query` filters observation rows. The full receipt remains available with `--full`.
 
 Receipts live in `runtime/action-results.sqlite3`. Status is `submitted`, `completed`, `rejected`, or `unknown`. A controller restart converts unfinished receipts to `unknown`. Reusing the same ID and arguments returns the saved receipt under `response` and **never executes the action again**; using it with different arguments is rejected. `completed` means the command returned, not necessarily that the gameplay objective succeeded: check its action/feedback. `unknown` means the mutation might have happened. Observe/stop/recover before deciding on a fresh action; do not retry consumables on assumption.
+
+## Choose text or an image
+
+| Situation | Preferred information |
+|---|---|
+| New area, locating a passage, unclear obstruction or landing | Current screenshot plus structured observation |
+| Reading dialogue, journal or an opened book | `ui`, `inspect journal`, `read`; view an image only if layout or ambiguity matters |
+| Health, fatigue, stats, equipment or active effects | `status --player` / the relevant `inspect` view |
+| Expanding the latest response | `details SECTION`, without taking another frame |
+| Revisiting a `scan` angle | Its saved image and view index, without turning again |
+
+Actions normally return a new observation already. Do not issue another `observe`
+just to obtain the screenshot that is already present. For a successful `scan`,
+`final.screenshot` is the same image as the last (fourth) returned view; there is
+no need to open it twice. For an interrupted scan, `final` can be a new frame
+showing a popup or other changed state: inspect the actual paths/result.
+
+A stored image remains historical even if it looks unchanged. Only a current
+observation supplies fresh handles and pixel coordinates. Runtime cache pruning
+does not remove images an external model harness has already placed in its
+conversation. Choosing not to open unnecessary images reduces repeated visual
+input; this release does not deduplicate the model's history automatically.
+
+For working-task recovery, durable notes and evidence, see [memory.md](memory.md).

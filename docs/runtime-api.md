@@ -66,6 +66,37 @@ normal UI callbacks and action validation. Runtime management does not become
 an alternate gameplay knowledge API; the skill still restricts gameplay agents
 to their intended public operations and observed information.
 
+## Working-task memory
+
+The Game API accepts `knowledge` with `action: checkpoint` and a nested
+`checkpoint` JSON object, or `action: brief`. CLI equivalents are
+`astrabridge game knowledge checkpoint 'JSON'` and `astrabridge game knowledge brief`.
+The checkpoint contains agent-authored `goal`, `next_step`, optional
+`status` (`open`, `done`, `abandoned`), `evidence_refs`, `note_refs`, `object_refs`,
+`place_refs` and `failed_attempts`. It never derives quest answers or reads hidden
+engine state. Bounds and usage are in the [memory reference](../skill/references/memory.md#current-working-state).
+
+An additive `working_checkpoints` table in the existing knowledge database holds
+one current record per Atlas playthrough namespace, inside the active Desktop
+profile. Writes replace the payload atomically and increment a revision. References
+must resolve to already-public memory in the appropriate scope; transient handles
+are rejected. Brief reads are bounded, include short linked previews and do not
+advance simulation or capture images. Full evidence remains available through
+the existing knowledge commands.
+
+`agent connect` and observations include `working_memory`: `available`, and when
+present, `revision` and `needs_revalidation`. The full goal and notes are retrieved
+only on request. Compaction of model history and prompt caching remain the external
+agent's responsibility; AstraBridge does not call a model to summarize the task.
+
+Every successful public load creates a new continuation branch. An earlier
+checkpoint remains available but requires revalidation until the agent writes a
+new checkpoint. Reading does not acknowledge it; replaying a previous command
+receipt does not execute another write. Existing note statuses and evidence are
+preserved. A new game starts a fresh Atlas namespace, new Desktop profiles start
+empty, and explicit profile duplication copies the database into independent
+storage. No save-file parsing or engine patch is involved.
+
 ## WebSocket input
 
 The application sends `manual.acquire`, `manual.release`, or an `input` envelope

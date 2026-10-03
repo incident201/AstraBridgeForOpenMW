@@ -48,6 +48,8 @@ An object may be above the standing surface, such as a hatch. Approach checks re
 
 `scan` starts with a new observation. Each returned view includes its zero-based `view`, actual `heading_deg` and screenshot. Do not infer a view's angle from a previous observation or filename sequence. The final view is the current camera direction. Inspect omitted objects from one stored view with `action-result REQUEST_ID --view N --section scene`.
 
+For a successful `scan`, the last view and `final` share one screenshot; an interrupted scan can have a different final frame. See [image selection](information.md#choose-text-or-an-image).
+
 ### Direct `act` fields
 
 | JSON field | Range / default |
