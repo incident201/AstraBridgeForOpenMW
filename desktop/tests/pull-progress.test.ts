@@ -21,8 +21,8 @@ test('unknown size and failed downloads remain explicit',()=>{
 });
 test('terminal runner preserves argument boundaries and child exit status',{skip:process.platform!=='linux'},async()=>{
  const literal="spaces ; $(echo wrong) ' \"";
- const result=await run(process.execPath,['-e','console.log(process.stdout.isTTY,JSON.stringify(process.argv[1]));process.exit(7)',literal],{terminal:true});
- assert.equal(result.code,7);assert.ok(result.stdout.includes('true '+JSON.stringify(literal)));
+ const result=await run(process.execPath,['-e','process.stdout.write(JSON.stringify({tty:process.stdout.isTTY,arg:process.argv[1]}));process.exit(7)',literal],{terminal:true});
+ assert.equal(result.code,7);assert.deepEqual(JSON.parse(result.stdout.trim()),{tty:true,arg:literal});
 });
 
 test('terminal download timeout terminates its child',{skip:process.platform!=='linux'},async()=>{
