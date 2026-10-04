@@ -89,3 +89,14 @@ test('Desktop deletes offline recordings without starting a daemon and guards ac
   assert.equal((await core.recordings.list(root)).length,0);
  }finally{await rm(root,{recursive:true,force:true});}
 });
+
+
+test('a recording removed outside Desktop expires its artifact reference',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'recording-missing-'));
+ try{
+  const file=join(root,'clip.mp4');await writeFile(file,'video');
+  const recordings=new Recordings(),[row]=await recordings.list(root);
+  await rm(file);
+  assert.equal(await recordings.path(row.video.split('/').pop()!),null);
+ }finally{await rm(root,{recursive:true,force:true});}
+});

@@ -24,7 +24,9 @@ export class Recordings {
   }
   async path(id:string){
     const entry=this.files.get(id);if(!entry)return null;
-    const root=await realpath(entry.root),path=await realpath(entry.path);
+    let root:string,path:string;
+    try{root=await realpath(entry.root);path=await realpath(entry.path);}
+    catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT'){this.files.delete(id);return null;}throw error;}
     const rel=relative(root,path);
     if(rel==='..'||rel.startsWith('..'+sep)||!rel)throw new Error('Recording outside its folder');
     return path;
@@ -36,11 +38,14 @@ export class Recordings {
   async remove(root:string,id:string){
     const row=(await this.list(root)).find(row=>row.id===id);
     if(!row)throw new Error('Recording no longer exists. Refresh the list.');
-    const file=await this.path(row.video.split('/').pop()!);
+    const videoId=row.video.split('/').pop()!;
+    const registeredStem=this.files.get(videoId)!.path.slice(0,-4);
+    const file=await this.path(videoId);
     if(!file)throw new Error('Recording unavailable');
     const stem=file.slice(0,-4);
     // Only exact recorder-owned siblings; never wildcard-delete by prefix.
-    for(const suffix of ['.json','.context.json','.encoder.json','.events.jsonl','.ffmpeg.log','.finalize.log','.finalizing.mp4','.mp4']){
+    const suffixes=['.json','.context.json','.encoder.json','.events.jsonl','.ffmpeg.log','.finalize.log','.finalizing.mp4','.mp4'];
+    for(const suffix of suffixes){
       const target=stem+suffix;
       try{
         if(!(await lstat(target)).isFile())continue;
@@ -48,7 +53,8 @@ export class Recordings {
       }catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
     }
     this.timelines.delete(stem+'.events.jsonl');
-    for(const [key,entry] of this.files)if(entry.path===file||entry.path.startsWith(stem+'.'))this.files.delete(key);
+    const registeredPaths=new Set(suffixes.map(suffix=>registeredStem+suffix));
+    for(const [key,entry] of this.files)if(registeredPaths.has(entry.path))this.files.delete(key);
     return {deleted:true};
   }
   async list(root:string){
