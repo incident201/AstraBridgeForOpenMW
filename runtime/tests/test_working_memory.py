@@ -132,6 +132,7 @@ async def test_connect_returns_only_hint_and_observation_compaction_keeps_it(tmp
     r=Runtime(tmp_path/'installation',tmp_path/'state',tmp_path/'game')
     s=memory_session(r.root/'atlas');checkpoint(s)
     s.process=SimpleNamespace(poll=lambda:None);r.session=s
+    s.timeline=SimpleNamespace(agent=lambda connected:None)
     r._mode=lambda _:None
     result=await r.acquire_agent('Agent')
     assert result['working_memory']==s.working_memory_hint()

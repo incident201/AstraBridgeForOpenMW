@@ -12,7 +12,7 @@ from astra_bridge.protocol import BridgeError
 
 DEFAULTS = {
     'encoding':'win1251', 'data_relative':'Data Files', 'content':[], 'archives':[],
-    'delay_tribunal':True, 'difficulty':-100, 'best_attack':True,
+    'delay_tribunal':True, 'difficulty':0, 'best_attack':True,
     'recording_encoder':'auto', 'vaapi_device':None, 'viewer_quality':'720p30',
     'sound':True, 'graphics':'gpu', 'graphics_gpu':'auto', 'encoding_gpu':'auto', 'screenshot_keep':128,
 }

@@ -75,7 +75,9 @@ recording browsing and retained Atlas queries without launching OpenMW.
 The optional game import copies the selected directory without analyzing game records,
 detecting an edition/language, deduplicating content or rewriting its structure.
 Filesystem links escaping the imported tree are rejected. The user explicitly
-chooses the encoding and data subdirectory. `Morrowind.ini` supplies active
+chooses the game language. Desktop maps it to the supported text encoding and
+automatically locates `Data Files` (or a selected data folder). An advanced
+subfolder override supports custom layouts. `Morrowind.ini` supplies active
 content order and archives; these can be edited before starting the game.
 The existing Tribunal addon generator separately reads its effective script
 during runtime profile preparation.
@@ -101,12 +103,14 @@ the duplicate. The game installation and OCI image are shared.
 `/data/profiles/<id>`. Existing flat state is registered as **Default** without
 moving saves. Recordings use `<host recordings folder>/<profile id>`; the legacy
 Default retains its original top-level recording files. The recording browser
-and **Open folder** follow the selected profile. Switching clears in-memory
+can show all profiles or filter the selected profile; **Open folder** opens the
+host recording root. Both work without starting the runtime. Switching clears in-memory
 Atlas/artifact/replay caches and closes the previous session's databases.
 
-Exported gameplay skills include the selected profile ID. `agent connect
---profile ID` rejects a mismatch before game startup; it does not select another
-profile. Updates snapshot the profile catalog and every profile, including
+Exported gameplay skills identify the application and configuration, not a
+profile. `agent connect` uses the profile currently selected by the user.
+An optional `--profile ID` is a mismatch guard, not a switching command.
+Switching profiles does not require a new skill export. Updates snapshot the profile catalog and every profile, including
 screenshots referenced by retained notes. Removing a container preserves them.
 
 ## Atlas viewer
@@ -148,13 +152,13 @@ and the browser's normal pointer-lock release behavior.
 
 The **Play** screen gives the remaining window space to the game, preserving its
 aspect ratio without page scrolling. Recording and fullscreen controls sit above
-the picture; playback, the recording timeline, audio and manual input sit below.
-**Capture mouse** enables relative camera movement during manual control.
+the picture alongside audio, manual input and a stable FPS indicator. Only
+playback and the recording timeline remain below.
+The mouse capture button enables relative camera movement during manual control.
 **Viewer options** contains stream quality and disconnect; **Session** contains
 runtime start/stop/restart, skill export and ending an agent session. These menus
 overlay the viewer instead of reducing its size. Errors remain visible inside
-fullscreen. The active profile links to profile management; GPU and FPS appear in
-the compact footer. At narrow window widths, the navigation uses labeled icons
+fullscreen. The selected profile is shown as a noninteractive label. At narrow window widths, the navigation uses labeled icons
 with hover titles.
 
 The gameplay CLI and live viewer are independent. A user may watch an agent

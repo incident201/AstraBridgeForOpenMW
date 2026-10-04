@@ -59,6 +59,9 @@ class Runtime:
         media=session.display.media_stream if session else None
         return {'profile':self.profiles.public(),'running':self.running(),'owner':self.owner.public(),'transitioning':self.transition,
                 'active_action':session.control.status() if session else None,
+                'session':session.session_id if session else None,
+                'clocks':session.timeline.clocks() if session else None,
+                'timeline':session.timeline.recent() if session else [],
                 'recording':session.recorder.status() if session and session.recorder else None,
                 'viewer':self.live.status() if self.live else {'running':False},
                 'graphics':{k:v for k,v in self.graphics.info.items() if k!='probe'},
@@ -76,6 +79,7 @@ class Runtime:
         display=self.graphics.start(cfg['graphics']=='software',gpu or cfg['graphics_gpu'])
         if os.environ.get('ASTRA_GPU_BACKEND')=='wsl':os.environ['DISPLAY']=display
         session=Session(self.installation/'runtime',self.installation,display=display,sound=cfg['sound'],storage=self.root,recordings_dir=self.recordings_root)
+        session.desktop_profile=self.profiles.public()
         session.display.env.update(self.graphics.environment)
         self.session=session
         session.start()
@@ -104,6 +108,7 @@ class Runtime:
         if self.input:self.input.close();self.input=None
         if self.session:
             session=self.session
+            session.timeline.agent(False)
             session.control.interrupt()
             with session.control.owner,session.lock:
                 session.close()
@@ -141,6 +146,7 @@ class Runtime:
                 await asyncio.to_thread(self._mode,'agent')
                 hint=await asyncio.to_thread(self.session.working_memory_hint)
                 result={**self.owner.acquire_agent(name),'profile':self.profiles.public(),'working_memory':hint}
+                self.session.timeline.agent(True)
                 self._history('agent_connected',name=name)
                 return result
             finally:self.transition=False
@@ -151,6 +157,7 @@ class Runtime:
             self.transition=True
             try:
                 await asyncio.to_thread(self._mode,'idle')
+                if self.session:self.session.timeline.agent(False)
                 self._history('owner_disconnected',mode=self.owner.mode,by_user=admin)
                 self.owner.release()
             finally:self.transition=False
@@ -237,6 +244,7 @@ class Runtime:
         if not active and session and session.last_recording and session.last_recording.get('path'):
             self.replay.last=self.replay.identify(session.last_recording['path'])
         info=self.replay.info(active,key)
+        info['profile_subdirectory']=self.profiles.public()['recordings_subdirectory']
         if info['id'] and info['kind']=='file':info['url']=self.project(str(self.replay.paths[info['id']]))
         return info
 
@@ -299,6 +307,7 @@ class Runtime:
                     await asyncio.to_thread(observe)
                 except Exception as exc:self.last_error=str(exc)
             elif self.owner.mode!='idle' and not self.running():
+                if self.session:self.session.timeline.agent(False)
                 self.owner.release();self.last_error='game_exited'
             await asyncio.sleep(1)
 

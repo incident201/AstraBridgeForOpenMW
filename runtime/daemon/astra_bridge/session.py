@@ -93,6 +93,9 @@ class Session:
         self.autosave=Autosave(self.profile/'autosave.json')
         self.sequence_guard=None
         self.control = Control(self)
+        from .timeline import Timeline
+        self.timeline = Timeline(self)
+        self.desktop_profile = None
 
     def prepare(self):
         config = self.storage / 'profile/base' if getattr(self, 'storage', None) else self.installation / 'config'
@@ -224,6 +227,8 @@ class Session:
                         self.control.progress(check_result(result))
                         continue
                     if message.get("event") in {"simulation","camera_motion"} and type(message.get("active")) is bool:
+                        if message['event']=='simulation':
+                            self.timeline.simulation_tick(message.get('simulation_seconds'),message['active'])
                         if self.recorder:
                             self.recorder.set_active(message['event'], message["active"])
                         continue
@@ -446,6 +451,7 @@ class Session:
 
     def stop_recording(self):
         if self.recorder:
+            self.timeline.recording_clock(force=True)
             self.last_recording = self.recorder.stop()
             self.recorder = None
         return self.last_recording or {'recording': False}
@@ -572,10 +578,14 @@ class Session:
                         raise BridgeError('already_recording')
                     self.command('observe')  # start on a confirmed pause
                     self.recordings_dir.mkdir(parents=True, exist_ok=True)
-                    path = self.recordings_dir / (time.strftime('%Y%m%d-%H%M%S')+'-'+uuid.uuid4().hex[:6]+'.mp4')
+                    import re
+                    label=re.sub(r'[^\w-]+','-',(self.desktop_profile or {}).get('name','Default'),flags=re.UNICODE).strip('-')[:60] or 'Profile'
+                    path = self.recordings_dir / (label+'-'+time.strftime('%Y%m%d-%H%M%S')+'-'+uuid.uuid4().hex[:6]+'.mp4')
                     environment = identity(self.root)
                     atomic_json(path.with_suffix(".environment.json"), environment)
+                    atomic_json(path.with_suffix('.context.json'), {'session':self.session_id,'profile':self.desktop_profile,'clocks':self.timeline.clocks()})
                     self.recorder = Recorder(self.display,path, encoding_options=self.recording_settings)
+                    self.timeline.recording_started()
                     atomic_json(path.with_suffix('.environment.json'), {**environment, 'recording_encoder': self.recorder.encoding})
                     return self.recorder.status()
                 if op == 'record_stop':

@@ -1,4 +1,4 @@
-import {app,BrowserWindow,dialog,ipcMain,net,protocol,shell} from 'electron';
+import {app,BrowserWindow,dialog,ipcMain,net,protocol,shell,Menu} from 'electron';
 import {dirname,join,resolve,sep} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {pipeline} from 'node:stream/promises';
@@ -7,6 +7,12 @@ import {createWriteStream} from 'node:fs';
 import WebSocket from 'ws';
 import {Core} from './core';
 import {CloseRequest,type CloseChoice} from './close';
+import {localArtifact} from './local-artifact';
+
+app.setName('AstraBridge');
+app.commandLine.appendSwitch('autoplay-policy','no-user-gesture-required');
+app.setAppUserModelId('io.github.incident201.astrabridge');
+if(process.platform==='linux')app.commandLine.appendSwitch('class','astrabridge-desktop');
 
 if(process.env.ASTRA_DESKTOP_DATA)app.setPath('userData',process.env.ASTRA_DESKTOP_DATA);
 
@@ -18,6 +24,10 @@ let window:BrowserWindow|null=null,events:WebSocket|null=null,quitting=false,clo
 let viewerFullscreen=false,previousWindowFullscreen=false,viewerReview=false;
 const resources=process.env.ASTRA_RESOURCES??join(process.resourcesPath,'astra');
 const core=new Core(resources,undefined,text=>window?.webContents.send('astra:event',{type:'progress',data:text}));
+async function artifactResponse(path:string,headers:HeadersInit={}){
+  const local=await core.recordings.path(path.split('/').pop()!);
+  return local?localArtifact(local,new Headers(headers).get('range')):core.fetch(path,{headers});
+}
 
 async function connectEvents(){
   if(events&&events.readyState<=WebSocket.OPEN)return;
@@ -55,6 +65,7 @@ async function requestClose(){
 
 
 app.whenReady().then(async()=>{
+  Menu.setApplicationMenu(null);
   const frontend=join(__dirname,'frontend');
   protocol.handle('astra',request=>{
     const url=new URL(request.url);
@@ -66,7 +77,7 @@ app.whenReady().then(async()=>{
   });
   protocol.handle('astra-artifact',async request=>{
     const id=new URL(request.url).hostname;if(!/^[a-f0-9]{32}$/.test(id))return new Response('Not found',{status:404});
-    const range=request.headers.get('range');return core.fetch('/v1/artifacts/'+id,{headers:range?{Range:range}:{}});
+    const range=request.headers.get('range');return artifactResponse('/v1/artifacts/'+id,range?{Range:range}:{});
   });
   ipcMain.handle('astra:invoke',async(event,operation:string,args:any={})=>{
     if(!event.senderFrame||!allowedFrame(event.senderFrame.url))throw new Error('Invalid sender');
@@ -125,7 +136,7 @@ app.whenReady().then(async()=>{
       }
       if(operation==='stop-game')return core.api('/v1/runtime/engine/stop','POST',{});
       if(operation==='agent-end')return core.api('/v1/runtime/agent/end','POST',{});
-      if(operation==='recordings'){await core.ensureDaemon();return core.api('/v1/runtime/recordings');}
+      if(operation==='recordings')return core.recordings.list((await core.configured()).recordingsDirectory);
       if(operation==='open-recordings-folder'){
         const directory=await core.recordingsFolder();const error=await shell.openPath(directory);if(error)throw new Error(error);return directory;
       }
@@ -136,7 +147,11 @@ app.whenReady().then(async()=>{
       if(operation==='atlas'){await core.ensureDaemon();return core.api('/v1/runtime/atlas?'+new URLSearchParams(args).toString());}
       if(operation==='environment')return core.api('/v1/runtime/environment');
       if(operation==='sessions')return core.api('/v1/runtime/sessions');
-      if(operation==='replay-info')return core.api('/v1/runtime/replay'+(args.id?'?id='+encodeURIComponent(args.id):''));
+      if(operation==='replay-info'){
+        const info=await core.api('/v1/runtime/replay'+(args.id?'?id='+encodeURIComponent(args.id):''));
+        return {...info,events:await core.recordings.replayEvents((await core.configured()).recordingsDirectory,info.name,info.profile_subdirectory)};
+      }
+      if(operation==='recording-timeline')return core.recordings.timeline(args.path,args.time);
       if(operation==='replay-index'){
         if(!/^[a-f0-9]{32}$/.test(args.id)||! /^[a-f0-9]+-[a-f0-9]+$/.test(args.generation))throw new Error('Invalid replay request');
         return core.api(`/v1/runtime/replay/${args.id}/${args.generation}/index?`+new URLSearchParams(args.after===undefined?{time:String(args.time)}:{after:String(args.after)}));
@@ -154,12 +169,12 @@ app.whenReady().then(async()=>{
         if(!/^\/v1\/artifacts\/[a-f0-9]{32}$/.test(args.path))throw new Error('Invalid artifact');
         const choice=await dialog.showSaveDialog(window!,{defaultPath:String(args.name??'recording.mp4')});
         if(choice.canceled||!choice.filePath)return null;
-        const response=await core.fetch(args.path);if(!response.ok||!response.body)throw new Error('Artifact unavailable');
+        const response=await artifactResponse(args.path);if(!response.ok||!response.body)throw new Error('Artifact unavailable');
         await pipeline(Readable.fromWeb(response.body as any),createWriteStream(choice.filePath));return choice.filePath;
       }
       if(operation==='artifact-json'){
         if(!/^\/v1\/artifacts\/[a-f0-9]{32}$/.test(args.path))throw new Error('Invalid artifact');
-        const response=await core.fetch(args.path);if(!response.ok)throw new Error('Artifact unavailable');return response.json();
+        const response=await artifactResponse(args.path);if(!response.ok)throw new Error('Artifact unavailable');return response.json();
       }
       throw new Error('Unknown application operation');
     }catch(error){throw new Error((error as Error).message);}
@@ -170,7 +185,7 @@ app.whenReady().then(async()=>{
     if(event.senderFrame&&allowedFrame(event.senderFrame.url)&&events?.readyState===WebSocket.OPEN)
       events.send(JSON.stringify(message));
   });
-  window=new BrowserWindow({width:1320,height:900,minWidth:960,minHeight:680,title:'AstraBridge',backgroundColor:'#0c1320',
+  window=new BrowserWindow({width:1320,height:900,minWidth:960,minHeight:680,title:'AstraBridge',backgroundColor:'#0c1320',icon:join(resources,'icon.png'),autoHideMenuBar:true,
     webPreferences:{preload:join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
   window.on('close',event=>{if(!closeApproved){event.preventDefault();void requestClose();}});
   window.on('leave-full-screen',()=>{

@@ -19,7 +19,7 @@ def test_profile_uses_selected_paths_and_available_explicit_content(tmp_path):
     assert f'data="{store.game / "Data Files"}"' in text and 'content=Morrowind.esm' in text
     assert 'Tribunal' not in text and 'fallback-archive=Morrowind.bsa' in text
     settings=(store.root/'profile/settings.cfg').read_text()
-    assert 'difficulty = -100' in settings and 'best attack = true' in settings
+    assert 'difficulty = 0' in settings and 'best attack = true' in settings
 
 
 def test_missing_explicit_assets_prevent_start_instead_of_changing_load_order(tmp_path):

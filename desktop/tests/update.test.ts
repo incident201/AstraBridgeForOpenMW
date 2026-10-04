@@ -97,3 +97,11 @@ test('missing prerequisites block start and update before downloads, stop or rep
   assert.deepEqual(f.calls,[]);assert.equal(f.state.running,true);assert.equal(f.state.data,'saved progress');
  }finally{await f.close();}
 });
+
+test('concurrent management queries share one daemon start',async()=>{
+ const f=await fixture();try{
+  f.state.running=false;f.core.release=async()=>({...f.release,runtime_api:1});
+  await Promise.all([f.core.ensureDaemon(),f.core.ensureDaemon(),f.core.ensureDaemon()]);
+  assert.equal(f.calls.filter(c=>c==='start').length,1);
+ }finally{await f.close();}
+});

@@ -12,7 +12,7 @@ public environment information, not game-state data.
 
 ## Start or resume
 
-1. Run `astrabridge status`. If `updateRequired` or `updatePending` is true, or the managed container is missing, ask the host user to finish setup/update/recovery first. Otherwise run `astrabridge agent connect --profile PROFILE_ID`, substituting `profile.id` from the exported `installation.json`. Connecting verifies the selected profile before starting the game and reserves control across subsequent CLI calls. If already connected with this configuration, check that `runtime.profile.id` matches the export before continuing; do not end another owner's session to take over. No host display or manual container commands are needed.
+1. Run `astrabridge status`. If `updateRequired` or `updatePending` is true, or the managed container is missing, ask the host user to finish setup/update/recovery first. Otherwise run `astrabridge agent connect`. The connection uses the currently selected Desktop profile and reserves control across subsequent CLI calls. Check the returned profile to identify this playthrough. If already connected, use that connection; do not end another owner's session to take over. No host display or manual container commands are needed.
 2. When resuming context, first check `status` and any outstanding `action-result`; once idle, use `knowledge brief` as described in [memory](memory.md#resume-after-context-loss). Run `astrabridge game observe` and open the returned local `screenshot` with the image-viewing tool. A path in JSON is not itself an image presented to the model.
 3. Follow the user's choice of continuing, loading, or starting a new game. Use `saves` to obtain a fresh save handle before `load`; do not load an arbitrary latest slot or a developer fixture.
 4. Use `status --player` for a fast character summary. It does not open menus, capture an image, or invalidate item/spell handles.
@@ -32,20 +32,21 @@ independently of the viewer. Use their returned screenshots and current handles
 for decisions, not a past frame displayed in Desktop.
 
 Each Desktop profile has separate saves, Atlas, recognized objects, notes and
-session history. `--profile` verifies the active profile; it never switches it.
-On `profile_mismatch`, ask the host user to select the intended profile or export
-its skill. Profile management requires the game to be stopped. A newly created
-profile has no inherited game knowledge. **Duplicate profile** deliberately
+session history. Profile management requires the game to be stopped. A newly
+created profile has no inherited game knowledge. **Duplicate profile** deliberately
 copies existing saves and memory once; subsequent changes are independent.
-Use only the active profile's memory and the user's intended playthrough; do
-not import knowledge from another profile. If an older export has no `profile`
-field, request a fresh export before connecting. Renaming a profile keeps its ID.
+Use only the active profile's memory and the user's intended playthrough. After
+reconnecting to a different profile, discard old handles and assumptions and
+read that profile's `knowledge brief`. Switching or renaming profiles needs no
+skill re-export. Ignore a legacy `profile` field in an older `installation.json`;
+it is not a connection requirement. An explicit application `--profile ID` is
+an optional mismatch guard, not a profile switch.
 
 After an authorized runtime update/restart/recreation, connect again, observe and
 refresh all transient handles. Saves, Atlas and knowledge survive a container
 replacement. After changing Desktop versions, the host user should export the
 matching gameplay skill again: the exported `installation.json` points to the
-chosen AppImage/EXE, configuration and profile. If that executable is missing or its
+chosen AppImage/EXE, configuration. If that executable is missing or its
 runtime version does not match, request a fresh export instead of guessing a
 binary, editing the configuration, entering a container or applying an update as
 a gameplay workaround.

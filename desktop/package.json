@@ -1,6 +1,6 @@
 {
   "name": "astrabridge",
-  "version": "0.3.0-rc5",
+  "version": "0.3.0-rc6",
   "private": true,
   "description": "AstraBridge Desktop and CLI for OpenMW",
   "author": "AstraBridge contributors",
@@ -52,18 +52,27 @@
     "linux": {
       "target": "AppImage",
       "category": "Game",
-      "artifactName": "AstraBridge-${version}-linux-x86_64.AppImage"
+      "artifactName": "AstraBridge-${version}-linux-x86_64.AppImage",
+      "icon": "assets/icon.png",
+      "desktop": {
+        "entry": {
+          "StartupWMClass": "astrabridge-desktop"
+        }
+      },
+      "syncDesktopName": true
     },
     "appImage": {
       "artifactName": "AstraBridge-${version}-linux-x86_64.AppImage"
     },
     "win": {
       "target": "zip",
-      "artifactName": "AstraBridge-${version}-windows-x86_64.zip"
+      "artifactName": "AstraBridge-${version}-windows-x86_64.zip",
+      "icon": "assets/icon.png"
     },
     "afterPack": "packaging/after-pack.cjs",
     "toolsets": {
       "appimage": "1.0.3"
     }
-  }
+  },
+  "desktopName": "astrabridge-desktop.desktop"
 }

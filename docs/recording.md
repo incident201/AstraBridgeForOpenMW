@@ -105,3 +105,29 @@ from the original file. No second encode, full recording copy or growing video
 buffer in application memory is required. The reader recognizes atomic faststart
 replacement at finalization and switches to range-based file playback. A paused
 picture stays paused until the user resumes or seeks.
+
+## Viewing and spectator overlays
+
+Desktop connects the live viewer automatically when the game starts. Tab changes
+keep the WebRTC connection alive; explicit disconnect stays off until reconnect.
+Viewer preferences can show compact commentary, recent actions and session clocks.
+These are presentation overlays and are not baked into benchmark MP4 frames.
+During replay, overlays come from that recording's event sidecar at the playback
+position. Seeking restores the corresponding messages, action state and clocks;
+pausing freezes them. **Live** returns to current session events. The same history
+is available in the saved recording player with the container stopped. A recording
+without a timeline shows no historical overlay. Timeline controls affect viewing only.
+
+Finalized recordings are browsed, played and exported directly from the host
+recordings folder, even with a stopped or removed container. The list supports
+all profiles or the selected profile. New filenames include the profile name;
+`.context.json` preserves its original ID/name. `.events.jsonl` keeps comments
+and action start/result events with session clocks and exact recording positions
+on the engine media sample clock. Export it with **Export timeline** for later
+synchronization. Legacy recordings remain readable without these sidecars.
+
+Recording start seeds the history with the comments/actions already visible.
+Periodic clock samples follow the engine media clock; complete JSONL records are
+indexed incrementally, independently of MP4 capture/finalization. Thinking pauses
+have no video duration, so events during such a pause share a recording position.
+All those messages belong to that same frame; their wall timestamps retain order.

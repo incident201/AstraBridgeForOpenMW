@@ -30,7 +30,7 @@ requirements** lists missing components and configuration problems with remedies
 Install packages yourself, then select **Check again**. Installation and runtime
 start/update repeat the checks before proceeding.
 
-In **Setup**, choose your game folder, managed storage, game encoding and an
+In **Setup**, choose your game folder, managed storage, game language and an
 optional recordings directory. By default AstraBridge mounts the game folder
 read-only without copying. **Copy into managed storage** creates an independent
 copy instead. Active content/archive order is imported from `Morrowind.ini`.

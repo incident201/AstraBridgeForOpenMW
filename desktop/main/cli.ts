@@ -59,7 +59,11 @@ async function main(){
     else if(action==='set')result=await core.api('/v1/runtime/config','PATCH',JSON.parse(argv.join(' ')));
     else throw new Error('Use config show or config set JSON');
   }else if(command==='gpus'){await core.ensureDaemon();result=await core.api('/v1/runtime/gpus');}
-  else if(command==='recordings'){result={directory:await core.recordingsFolder(),items:await core.api('/v1/runtime/recordings')};}
+  else if(command==='recordings'){
+    const directory=await core.recordingsFolder(),items=await core.recordings.list(directory);
+    for(const row of items)for(const key of ['video','metadata','encoder','diagnostics','events'])if(row[key])row[key]=await core.recordings.path(row[key].split('/').pop());
+    result={directory,items};
+  }
   else if(command==='logs')result=await core.logs(take('--name'));
   else if(command==='skill'&&argv.shift()==='export'){
     if(!argv[0])throw new Error('Provide a skill destination directory');

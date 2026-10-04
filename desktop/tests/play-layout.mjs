@@ -6,12 +6,15 @@ import assert from 'node:assert/strict';
 const output=process.env.ASTRA_TEST_OUTPUT;
 if(!output)throw Error('Set ASTRA_TEST_OUTPUT to a directory outside the source tree');
 await mkdir(output,{recursive:true});
-const browser=await chromium.launch({headless:true});const results=[],errors=[];
+const browser=await chromium.launch({headless:true,args:['--autoplay-policy=no-user-gesture-required']});const results=[],errors=[];
 const page=await browser.newPage();page.on('pageerror',e=>errors.push(String(e)));
 if(process.env.ASTRA_TEST_FRAME)await page.route('**/fixture-frame.png',async route=>route.fulfill({contentType:'image/png',body:await readFile(process.env.ASTRA_TEST_FRAME)}));
 await page.addInitScript(({hasFrame})=>{
  const handlers=[];let recording=false;
  const runtime={running:true,owner:{mode:'agent',name:'Gameplay agent'},profile:{id:'default',name:'Vvardenfell',active:true},active_action:{operation:'approach',phase:'Moving to target'},graphics:{hardware_accelerated:true,renderer:'NVIDIA GeForce RTX 3060 Laptop GPU / PCIe / SSE2'},game_fps:60,capture_fps:60,recording:null,viewer:{running:true}};
+ runtime.clocks={wall_seconds:754,game_seconds:121,wall_active:true,game_active:false};
+ runtime.timeline=[{id:'c1',kind:'comment',wall_seconds:731,text:'The door is locked. I will check the route around the building.'},{id:'c2',kind:'comment',wall_seconds:752,text:'Following the coast to the next landmark.'},{id:'a1',kind:'action',action_id:'one',operation:'inspect',state:'finished',wall_seconds:749},{id:'a2',kind:'action',action_id:'two',operation:'approach',state:'active',wall_seconds:753}];
+ localStorage.setItem('overlayActions','true');
  const state={installed:true,release:{version:'0.3.0-dev'},backend:'podman',container:{running:true,exists:true},runtime};
  const emit=()=>handlers.forEach(fn=>fn({type:'status',data:structuredClone(runtime)}));
  window.fixture={state,runtime,calls:[],emit,set:(patch)=>{Object.assign(runtime,patch);emit();}};
@@ -21,6 +24,7 @@ await page.addInitScript(({hasFrame})=>{
  },invoke:async(op,args)=>{
   window.fixture.calls.push({op,args});
   if(op==='status')return structuredClone(state);
+  if(op==='prerequisites')return {available:true};
   if(op==='replay-info')return window.fixture.replay??{id:null,ready:false,active:recording,duration:0};
   if(op==='viewer-fullscreen')return {enabled:args.enabled};
   if(op==='record'){if(window.fixture.failRecord)throw Error('Recording could not start. Check the output folder permissions.');recording=args.action==='start';runtime.recording=recording?{recording:true,duration:125,encoder:'h264_nvenc'}:null;emit();}
@@ -36,7 +40,7 @@ await page.addInitScript(({hasFrame})=>{
   async setRemoteDescription(){
    const canvas=document.createElement('canvas');canvas.width=1920;canvas.height=1080;const ctx=canvas.getContext('2d');
    let img=null;if(hasFrame){img=new Image();img.src='/fixture-frame.png';await img.decode();}
-   const draw=()=>{if(img)ctx.drawImage(img,0,0);else {ctx.fillStyle='#182927';ctx.fillRect(0,0,1920,1080);ctx.fillStyle='#c5cfb5';ctx.font='32px sans-serif';ctx.fillText('Morrowind · preview fixture',60,90);} };
+   const draw=()=>{if(img)ctx.drawImage(img,0,0,canvas.width,canvas.height);else {ctx.fillStyle='#182927';ctx.fillRect(0,0,1920,1080);ctx.fillStyle='#c5cfb5';ctx.font='32px sans-serif';ctx.fillText('Morrowind · preview fixture',60,90);} };
    draw();this.timer=setInterval(draw,100);this.stream=canvas.captureStream(10);this.ontrack?.({track:this.stream.getVideoTracks()[0]});
   }
   close(){clearInterval(this.timer);this.stream?.getTracks().forEach(t=>t.stop());}
@@ -63,11 +67,25 @@ async function shot(name){
 }
 try{
  await page.goto(process.env.ASTRA_UI_URL??'http://127.0.0.1:4178');
- await page.getByRole('button',{name:'Open viewer',exact:true}).click();
  await page.waitForFunction(()=>document.querySelector('video')?.currentTime>0);
  for(const [width,height] of [[1920,1080],[1440,900],[1320,900],[1280,720],[960,680]]){
   await page.setViewportSize({width,height});await shot(`agent-${width}x${height}`);
  }
+ const liveStarts=await page.evaluate(()=>window.fixture.calls.filter(x=>x.op==='live-start').length);
+ const videoHandle=await page.locator('video[aria-label="Live Morrowind game"]').elementHandle();
+ await page.getByRole('navigation').getByRole('button',{name:'Atlas',exact:true}).click();
+ await page.getByRole('heading',{name:'Atlas',level:1,exact:true}).waitFor();
+ assert.equal(await page.evaluate(()=>window.fixture.calls.filter(x=>x.op==='live-stop').length),0,'Navigation must not close the viewer');
+ await page.getByRole('navigation').getByRole('button',{name:'Play',exact:true}).click();
+ assert.ok(await videoHandle.evaluate(e=>e===document.querySelector('video[aria-label="Live Morrowind game"]')),'The media element must survive tab changes');
+ assert.equal(await page.evaluate(()=>window.fixture.calls.filter(x=>x.op==='live-start').length),liveStarts);
+ const beforeOverlay=await page.locator('.video-wrap').boundingBox();
+ await page.getByLabel('Viewer options',{exact:true}).click();
+ for(const label of ['Commentary overlay','Action history overlay','Session clocks'])await page.getByLabel(label,{exact:true}).uncheck();
+ assert.deepEqual(await page.locator('.video-wrap').boundingBox(),beforeOverlay,'Overlays must not shrink or reposition the game');
+ await shot('overlays-off-960');
+ for(const label of ['Commentary overlay','Action history overlay','Session clocks'])await page.getByLabel(label,{exact:true}).check();
+ await page.keyboard.press('Escape');
  await page.evaluate(()=>window.fixture.set({owner:{mode:'idle'},active_action:null}));await shot('idle-960');
  await page.getByRole('button',{name:'Take manual control',exact:true}).click();await shot('manual-960');
  await page.getByRole('button',{name:'Release control',exact:true}).click();
@@ -82,11 +100,15 @@ try{
  await page.getByLabel('Viewer options',{exact:true}).click();await shot('viewer-options-960');
  await page.getByLabel('Viewer quality').selectOption('1080p60');
  assert.equal(await page.locator('.viewer-options[open]').count(),0);
- await page.getByLabel('Viewer help',{exact:true}).click();await shot('help-960');
- await page.keyboard.press('Escape');
+
  await page.getByRole('button',{name:'Fullscreen',exact:true}).click();
  await page.waitForFunction(()=>document.querySelector('.viewer-panel')?.classList.contains('viewer-fullscreen'));
  await page.keyboard.press('Escape');assert.ok(await page.locator('.viewer-fullscreen').count(),'Escape exited fullscreen');
+ await page.waitForFunction(()=>getComputedStyle(document.querySelector('.viewer-panel > .section-heading')).opacity==='0');
+ for(const label of ['Session overlay','Recent agent actions','Agent commentary'])assert.ok(await page.getByLabel(label,{exact:true}).isVisible(),label+' disappeared with fullscreen controls');
+ assert.ok(await page.locator('.overlay-clocks').isVisible());
+ await shot('fullscreen-overlays-controls-hidden');
+
  await page.mouse.move(30,30);await shot('fullscreen-960');
  await page.getByRole('button',{name:'Take manual control',exact:true}).click();
  await page.getByLabel('Live Morrowind game',{exact:true}).focus();await page.keyboard.press('Escape');
@@ -101,6 +123,7 @@ try{
  await page.getByRole('button',{name:'Dismiss error'}).click();
  await page.getByRole('button',{name:'Exit fullscreen',exact:true}).click();
  await page.getByLabel('Viewer options',{exact:true}).click();await page.getByRole('button',{name:'Disconnect viewer',exact:true}).click();
+ await page.waitForTimeout(2800);assert.equal(await page.locator('.live-button.active').count(),0,'Explicit disconnect must stay off after status refresh');
  await shot('disconnected-960');assert.equal(await page.locator('.live-button.active').count(),0);
  await page.evaluate(()=>window.fixture.set({running:false}));await shot('stopped-960');
  await page.evaluate(()=>window.fixture.set({running:true,owner:{mode:'agent',name:'A long named gameplay agent'},profile:{id:'default',name:'A very long profile name for an independent playthrough of Morrowind'},active_action:{operation:'follow_a_distant_moving_target',phase:'Moving'}}));

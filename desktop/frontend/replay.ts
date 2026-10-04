@@ -1,6 +1,6 @@
 import {artifact} from './viewer';
 
-export interface ReplayInfo {id:string|null;name?:string;active:boolean;ready:boolean;kind?:'fragmented'|'file';generation?:string;duration:number;offset?:number;mime?:string;url?:string;error?:string|null}
+export interface ReplayInfo {id:string|null;name?:string;events?:string;active:boolean;ready:boolean;kind?:'fragmented'|'file';generation?:string;duration:number;offset?:number;mime?:string;url?:string;error?:string|null}
 interface Segment {index:number;start:number;end:number}
 const current=(video:HTMLVideoElement,info:ReplayInfo)=>Math.max(0,video.currentTime-(info.offset??0));
 
@@ -39,11 +39,16 @@ export class ReplayViewer {
     for(let i=0;i<this.video.buffered.length;i++)if(time>=this.video.buffered.start(i)&&time<this.video.buffered.end(i)-.015)return true;
     return false;
   }
+  private async seekFrame(time:number){
+    if(Math.abs(this.video.currentTime-time)<.001&&!this.video.seeking)return;
+    await this.event(this.video,'seeked',()=>this.video.currentTime=time);
+  }
   async seek(info:ReplayInfo,position:number,play=false){
     if(!info.ready||!info.id)throw new Error('Waiting for completed recording frames');
     const target=Math.max(0,Math.min(position,info.duration-.025))+(info.offset??0);
     if(!this.stopped&&info.id===this.info.id&&info.generation===this.info.generation&&!this.buffer?.updating&&(info.kind==='file'||this.contains(target))){
-      this.video.currentTime=target;if(play)await this.video.play();else this.video.pause();return;
+      if(!play)this.video.pause();
+      await this.seekFrame(target);if(play)await this.video.play();return;
     }
     this.close();this.stopped=false;this.info=info;this.changed(info);
     this.abort=new AbortController();const serial=this.serial;
@@ -67,7 +72,7 @@ export class ReplayViewer {
     // Audio/video buffered intersections can start a few samples after the GOP.
     const low=this.video.buffered.length?this.video.buffered.start(0):0;
     const high=this.video.buffered.length?this.video.buffered.end(this.video.buffered.length-1)-.015:target;
-    this.video.currentTime=info.kind==='file'?target:Math.max(low,Math.min(target,high));
+    await this.seekFrame(info.kind==='file'?target:Math.max(low,Math.min(target,high)));
     if(play)await this.video.play();else this.video.pause();
     this.schedule(serial);
   }

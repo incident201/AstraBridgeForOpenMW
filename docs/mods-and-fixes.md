@@ -9,7 +9,7 @@ they also affect how a playthrough behaves.
 |---|---|---|
 | Yet Another Idle Animation Fix (YAIAF) 1.1 | Third-party animation assets by Qlonever | Shipped in the Lua mod's data directory; additional animation sources enabled in the private profile. |
 | Dark Brotherhood / Tribunal delay | AstraBridge-generated script override | Enabled when `Tribunal.esm` is active, unless `delay_tribunal` is explicitly disabled. |
-| Testing defaults for combat | OpenMW settings chosen by AstraBridge | New profiles start with `difficulty = -100` and `best attack = true`; users may change both. |
+| Combat defaults | OpenMW settings chosen by AstraBridge | New profiles start with `difficulty = 0` and `best attack = true`; users may change both. |
 | Synchronous physics at action boundaries | OpenMW setting applied by AstraBridge | `async num threads = 0` in the runtime profile. |
 | Idle-camera stabilization | AstraBridge Lua policy using OpenMW camera interfaces | Disables automatic vanity/standing-preview behavior during controlled play. |
 | Jump and fall controls | AstraBridge Lua adapter using normal actor controls | One jump impulse, directional air steering, observed flight state and stopping on landing; ordinary game physics and skill effects remain in force. |
@@ -148,20 +148,19 @@ and [profile diagnostics tests](../runtime/tests/test_diagnostics.py).
 
 ## Runtime settings and control fixes
 
-### Combat defaults chosen for testing
+### Combat defaults
 
 [Profile preparation](../runtime/daemon/astra_daemon/storage.py) seeds a new
 managed runtime profile with the following settings:
 
 ```ini
 [Game]
-difficulty = -100
+difficulty = 0
 best attack = true
 ```
 
-These are deliberate changes to the game's default settings, chosen for
-convenience during testing. `difficulty = -100` lowers combat difficulty, and
-`best attack = true` enables automatic selection of the weapon's best melee
+Difficulty starts at the standard neutral value, `0`. `best attack = true` is
+a deliberate convenience setting retained for testing; it enables automatic selection of the weapon's best melee
 attack type (chop, slash or thrust). The bundled OpenMW defaults are
 `difficulty = 0` and `best attack = false`.
 

@@ -32,3 +32,24 @@ Video and audio share the engine's sample clock; speaker latency does not alter 
 Keep the private engine render resolution stable during recording. Resizing Desktop or entering its Fullscreen view does not resize that render surface. `video_window_resized` requires a new recording. Matching native engine hooks are required. Screenshots use completed frames and are resized before PNG encoding, so no full-size screenshot files accumulate. All public pixel inputs, `rect` and `aim_point` use screenshot coordinates; `screen.render_width/render_height` describe the separate game/video dimensions. Existing screenshot retention applies.
 
 Recording is fragmented while active for crash recovery. Normal stop prepares the upload file; if finalization fails, the original capture is preserved and the error is reported. Do not claim a recording succeeded without checking its final status. No automatic upload or file-size limit is imposed.
+
+## Commentary and action timeline
+
+`astrabridge game comment "I will check the eastern door next."` publishes a
+spectator message while connected. It can be sent during an outstanding action;
+it does not take input ownership, observe, capture a screenshot or change pause
+state. Text must be nonempty and at most 4096 UTF-8 bytes. Keep comments brief
+and useful; do not send hidden reasoning or repeat every tool call. Action
+history is collected automatically. Ordinary messages in your external chat
+are not forwarded unless you also use this command.
+
+The response includes `session`, `wall_seconds` (agent-connected time),
+`game_seconds` (engine simulation time), and, during recording,
+`recording` / `recording_seconds` (position on its source-media timeline).
+Thinking pauses count toward wall time, not simulation time or paused media.
+The profile stores a session timeline; recordings receive `.events.jsonl`
+sidecars. Desktop can toggle commentary, action history and clock overlays.
+Overlays do not change the recorded video. During replay, Desktop displays the
+historical comments/actions and clocks at that recording position, not live events. Viewer replay does not change these
+live command timestamps. Commentary is presentation history, not task memory;
+use `knowledge checkpoint` or notes for information needed after context loss.

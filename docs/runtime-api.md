@@ -173,7 +173,9 @@ media through the application bridge and range-capable artifact protocol.
 Observation exports use a profile-specific host subdirectory. Recording artifacts
 carry `X-Astra-Artifact-Relative-Path`, relative to the configured host recording
 root, so the CLI can return files from the active profile's subfolder without
-copying videos. `astrabridge recordings` returns that profile's folder and list.
+copying videos. `astrabridge recordings` lists host recordings across profiles, with local paths
+and `profile_id` / `profile_name`, without starting a container. Desktop reads
+the same host folder and can filter by selected profile.
 
 Atlas is always served by the daemon. Viewing it does not issue a gameplay
 observe/pause command. Offline/stored positions are marked historical, and no
@@ -187,7 +189,43 @@ Application-level `astrabridge status` also reports `currentVersion`,
 `previousRuntime`, `updateRequired`, `updatePending` and `cleanupPending`.
 These describe host management, not game state. `astrabridge update` recovers an
 interrupted transaction before allowing another update attempt. The new Desktop
-exports its bundled skill with executable/configuration paths and the active
-profile's ID/name in `installation.json`;
+exports its bundled skill with executable/configuration paths in
+`installation.json`. It has no profile binding; agent connect uses the currently
+selected profile. Switching profiles does not require re-export;
 re-export it after changing application versions, especially when the AppImage
 filename changes. Existing exported copies are not rewritten automatically.
+
+## Spectator timeline
+
+Game command `comment` accepts `{ "text": "..." }` (1–4096 UTF-8 bytes).
+It requires agent ownership but can run alongside an active action. It does
+not call the engine or change input/pause state. No model-specific integration
+is required; external chat is not automatically collected.
+
+Runtime status/WS status includes `session`, `clocks` and a bounded `timeline`
+of recent comment and action events. Actions have `action_id`, `operation`,
+`state` (`active`, `finished`, `error`), and available result summary/feedback.
+Completion means the command returned; its summary may still report blocked
+movement. The Control entrypoint records short queries as well as long actions.
+
+Each event has Unix `time`, session-relative `wall_seconds` (only while the
+agent owns control), and `game_seconds` (accumulated engine simulation seconds).
+The Lua adapter reports simulation time and pause state on changes and every
+15 rendered frames. `game_active` uses world pause state, not recording/media
+activity: menu audio may continue while simulation is paused. Wall time resumes
+on reconnect in the same engine session. Both clocks reset with a new session.
+Events during recording also carry `recording` and `recording_seconds`, derived
+from MediaStream samples relative to the recorder's start sample.
+
+The selected profile stores `sessions/<session>.timeline.jsonl`. Each recording
+has `.context.json` (profile ID/name, session, start clocks) and `.events.jsonl`
+sidecars; its filename starts with the sanitized profile name. Renaming/deleting
+a profile does not rename/delete existing recordings. Desktop's **Export timeline**
+exports the event sidecar. Commentary is not inserted into Atlas or knowledge.
+
+Recording event streams also include a `snapshot` at position zero and periodic
+`clock` samples. These do not consume the live message/action history. Desktop
+indexes complete JSONL lines from the host recording folder and reconstructs
+comments, active/completed actions and interpolated clocks at the playback time.
+`replay` metadata includes `profile_subdirectory` so the host can associate the
+current MP4 with its sidecar. No future event is shown in a rewound view.

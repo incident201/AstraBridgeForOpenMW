@@ -1,5 +1,8 @@
 <script lang="ts">
-  import {onMount} from 'svelte';
+  import {onMount,tick} from 'svelte';
+  import RecordingOverlay from './RecordingOverlay.svelte';
+  import StreamOverlay from './StreamOverlay.svelte';
+  import GameLanguage from './GameLanguage.svelte';
   import Icon from './Icon.svelte';
   import Prerequisites from './Prerequisites.svelte';
   import type {PrerequisiteReport} from '../main/runtime/RuntimeBackend';
@@ -9,19 +12,28 @@
   const pages=[['play','Play'],['atlas','Atlas'],['recordings','Recordings'],['profiles','Profiles'],['settings','Settings'],['diagnostics','Diagnostics'],['setup','Setup']];
   let page='play',state:any={installed:false},runtime:any={},busy=false,error='',notice='',progress='';
   let prerequisites:PrerequisiteReport|null=null,checkingPrerequisites=false,requirementsOpen=false;
-  let game='',storage='',recordingsDirectory='',encoding='win1251',dataRelative='Data Files',development=false;
+  let game='',storage='',recordingsDirectory='',encoding='win1252',dataRelative='',development=false;
   let gameMode:'mount'|'copy'='mount';
   let setupStep='game',installedSection='runtime',settingsSection='data',diagnosticSection='logs';
-  let video:HTMLVideoElement,viewer=new Viewer(),watching=false,quality='720p30',muted=false;
+  let video:HTMLVideoElement,viewer=new Viewer(()=>{watching=false;nextViewerAttempt=Date.now()+1000;}),watching=false,quality='720p30',muted=false;
+  let viewerDisabled=false,connecting=false,viewerClosing=false,nextViewerAttempt=0,lastFps:number|null=null;
+  let showComments=true,showActions=false,showClocks=true,recordingsScope='all',preferencesReady=false;
   let fullscreen=false,fullscreenControls=true,fullscreenTimer:ReturnType<typeof setTimeout>,pointerCaptured=false;
   let replayVideo:HTMLVideoElement,replay:ReplayViewer|null=null,viewMode:'live'|'replay'|'still'='live';
   let replayInfo:ReplayInfo={id:null,ready:false,active:false,duration:0},replayPosition=0,replayPlaying=false,replayBusy=false,replayError='';
   let seekDraft=0,seeking=false,seekSerial=0,pollingReplay=false;
+  let stillOverlay:any=null,recordingPlaybackPosition=0,recordingFullscreen=false;
+  let recordingSurface:HTMLDivElement;
   let gpus:any[]=[];
   let configuration:any=null,content='',archives='',recordings:any[]=[],selectedRecording:any=null,metadata:any=null;
   let atlas:any={},space='',selectedNode:any=null,atlasSection='points',mapRadius=35,atlasPage=0,expandedMap=false,metadataOpen=false,logName='daemon.log',logs:any={names:[],text:''},environment:any={},history:any[]=[];
   let profiles:any[]=[],selectedProfile:any=null,profileForm='',profileName='',lastProfile='';
   let mapView:AtlasMap,mapRevision=0;
+  $: if(preferencesReady){localStorage.setItem('overlayComments',String(showComments));localStorage.setItem('overlayActions',String(showActions));localStorage.setItem('overlayClocks',String(showClocks));}
+  $: if(video&&runtime.running&&!viewerDisabled&&!watching&&!connecting&&!viewerClosing&&!busy)void autoWatch();
+  $: if(!runtime.running&&(watching||connecting)&&!viewerClosing&&!busy)void endWatch();
+  $: if(runtime.game_fps!=null)lastFps=Math.max(0,runtime.game_fps);
+  $: filteredRecordings=recordings.filter(row=>recordingsScope==='all'||row.profile_id===runtime.profile?.id);
   $: owner=runtime.owner?.mode??'idle';
   $: manual=owner==='manual';
   $: recording=Boolean(runtime.recording?.recording);
@@ -45,7 +57,7 @@
   }
   function showRequirements(){requirementsOpen=true;void navigate('setup');}
   async function refresh(){
-    try{state=await window.astra.invoke('status');if(state.runtime)runtime=state.runtime;else runtime={};}
+    try{state=await window.astra.invoke('status');if(state.runtime)runtime={...state.runtime,game_fps:state.runtime.game_fps??runtime.game_fps};else runtime={profile:state.profile??runtime.profile};}
     catch(e){error=(e as Error).message;}
   }
   async function task(action:()=>Promise<any>,message=''){
@@ -57,7 +69,7 @@
   }
   async function navigate(next:string){
     closeMenus();
-    if(page==='play'&&next!=='play')await endWatch();
+    if(page==='play'&&next!=='play'){releaseInput();if(viewMode!=='live')void goLive();}
     page=next;error='';
     if(next==='recordings')await loadRecordings();
     if(next==='atlas')await loadAtlas();
@@ -74,13 +86,30 @@
   });}
   async function choose(field:'game'|'storage'|'recordings'){const selected=await window.astra.invoke('choose-directory');if(selected){if(field==='game')game=selected;else if(field==='storage')storage=selected;else recordingsDirectory=selected;}}
   async function install(){
-    progress='';await task(async()=>{await window.astra.invoke('install',{game,storage,encoding,dataRelative,development,gameMode,recordings:recordingsDirectory||undefined});page='play';},'Installation ready. Start the game when you are ready.');
+    progress='';await task(async()=>{await window.astra.invoke('install',{game,storage,encoding,dataRelative:dataRelative||undefined,development,gameMode,recordings:recordingsDirectory||undefined});page='play';},'Installation ready. Start the game when you are ready.');
   }
-  async function watch(){await task(async()=>{await viewer.start(video,quality);watching=true;video.muted=muted||viewMode!=='live';});}
+  async function autoWatch(){
+    if(Date.now()<nextViewerAttempt)return;
+    await watch(false);
+  }
+  async function watch(explicit=true){
+    if(connecting)return;
+    if(explicit){viewerDisabled=false;localStorage.setItem('viewerDisabled','false');}
+    connecting=true;
+    try{await tick();await viewer.start(video,quality);watching=true;if(error.startsWith('Viewer: '))error='';}
+    catch(e){if((e as Error).name!=='AbortError')error='Viewer: '+(e as Error).message;nextViewerAttempt=Date.now()+5000;}
+    finally{connecting=false;}
+  }
+  async function disconnectViewer(){viewerDisabled=true;localStorage.setItem('viewerDisabled','true');await endWatch();}
   async function endWatch(){
-    seekSerial++;replay?.close();replay=null;viewMode='live';await window.astra.invoke('viewer-review',{enabled:false});
-    releaseInput();if(fullscreen){await window.astra.invoke('viewer-fullscreen',{enabled:false});setViewerFullscreen(false);}
-    await viewer.close();watching=false;
+    if(viewerClosing)return;viewerClosing=true;watching=false;
+    try{
+      seekSerial++;replay?.close();replay=null;viewMode='live';
+      releaseInput();
+      await window.astra.invoke('viewer-review',{enabled:false});
+      if(fullscreen){await window.astra.invoke('viewer-fullscreen',{enabled:false});setViewerFullscreen(false);}
+      await viewer.close();
+    }finally{viewerClosing=false;}
   }
   async function pollReplay(){
     if(pollingReplay||page!=='play'||!state.container?.running||viewMode==='replay')return;
@@ -94,7 +123,8 @@
   async function reviewMode(mode:'replay'|'still'){
     if(manual)window.astra.input({type:'input',event:{type:'release'}});
     if(document.pointerLockElement)void document.exitPointerLock();
-    viewMode=mode;video.muted=true;
+    if(mode==='still')stillOverlay=structuredClone({events:runtime.timeline??[],clocks:runtime.clocks});
+    viewMode=mode;
     await window.astra.invoke('viewer-review',{enabled:true});
   }
   async function seekReplay(position:number,play=false){
@@ -105,8 +135,7 @@
       if(serial!==seekSerial)return;
       replayInfo=info;replayPosition=position;
       replay??=new ReplayViewer(replayVideo,value=>replayInfo=value,message=>replayError=message);
-      replayVideo.muted=muted;
-      try{await replay.seek(info,position,play);}
+      try{await replay.seek(info,position,play);replayPosition=replay.position;}
       catch(original){
         if(serial!==seekSerial)return;
         const updated:ReplayInfo=await window.astra.invoke('replay-info',{id:info.id});
@@ -119,7 +148,7 @@
   async function goLive(){
     seekSerial++;replay?.close();replay=null;viewMode='live';replayError='';replayBusy=false;seeking=false;
     await window.astra.invoke('viewer-review',{enabled:false});
-    if(!watching)await watch();else {video.muted=muted;await video.play();}
+    if(!watching)await watch(true);else await video.play();
     await pollReplay();video.focus();
   }
   async function togglePlayback(){
@@ -133,7 +162,7 @@
     }catch(e){replayError=(e as Error).message;}
   }
   function replayTime(){if(viewMode==='replay'&&replay)replayPosition=replay.position;}
-  function changeMute(){muted=!muted;video.muted=muted||viewMode!=='live';if(replayVideo)replayVideo.muted=muted;}
+  function changeMute(){muted=!muted;}
   function formatTime(value:number){
     const seconds=Math.max(0,Number.isFinite(value)?value:0),minutes=Math.floor(seconds/60);
     return (minutes>=60?Math.floor(minutes/60)+':'+String(minutes%60).padStart(2,'0'):String(minutes))+':'+String(Math.floor(seconds%60)).padStart(2,'0');
@@ -153,9 +182,13 @@
     try{closeMenus();input({type:'release'});const result=await window.astra.invoke('viewer-fullscreen',{enabled:!fullscreen});setViewerFullscreen(result.enabled);video.focus();}
     catch(e){error=(e as Error).message;}
   }
-  async function changeQuality(){if(watching)await watch();}
+  async function changeQuality(){closeMenus();if(watching)await watch(false);}
   async function togglePointerCapture(){
     try{if(document.pointerLockElement===video)document.exitPointerLock();else {video.focus();await video.requestPointerLock();}}
+    catch(e){error=(e as Error).message;}
+  }
+  async function toggleRecordingFullscreen(){
+    try{if(document.fullscreenElement===recordingSurface)await document.exitFullscreen();else await recordingSurface.requestFullscreen();}
     catch(e){error=(e as Error).message;}
   }
   function releaseInput(){if(manual)window.astra.input({type:'manual.release'});if(document.pointerLockElement)void document.exitPointerLock();}
@@ -169,7 +202,7 @@
   function key(event:KeyboardEvent,down:boolean){if(!manual||viewMode!=='live'||event.repeat)return;event.preventDefault();input({type:'key',code:event.code,down});}
   function wheel(event:WheelEvent){if(!manual||viewMode!=='live')return;event.preventDefault();input({type:'wheel',steps:event.deltaY<0?1:-1});}
   async function loadRecordings(){await task(async()=>{recordings=await window.astra.invoke('recordings');if(!recordings.some(row=>row.id===selectedRecording?.id)){selectedRecording=null;metadata=null;metadataOpen=false;}});}
-  async function selectRecording(row:any){selectedRecording=row;metadata=null;metadataOpen=false;if(row.metadata)await task(async()=>{metadata=await window.astra.invoke('artifact-json',{path:row.metadata});});}
+  async function selectRecording(row:any){selectedRecording=row;recordingPlaybackPosition=0;metadata=null;metadataOpen=false;if(row.metadata)await task(async()=>{metadata=await window.astra.invoke('artifact-json',{path:row.metadata});});}
   async function loadAtlas(){await task(async()=>{atlas=await window.astra.invoke('atlas',{...(space?{space}:{}),radius_m:mapRadius,page:atlasPage,limit:100});mapRevision++;selectedNode=null;});}
   async function loadDiagnostics(){await task(async()=>{logs=await window.astra.invoke('logs',{name:logName});
     if(state.container?.running){environment=await window.astra.invoke('environment');history=await window.astra.invoke('sessions');}});}
@@ -180,15 +213,20 @@
   const displayValue=(value:any):string=>value==null?'Not available':typeof value==='boolean'?(value?'Yes':'No'):typeof value==='object'?Object.entries(value).map(([key,item])=>key.replaceAll('_',' ')+': '+displayValue(item)).join(' · '):String(value);
 
   onMount(()=>{
+    viewerDisabled=localStorage.getItem('viewerDisabled')==='true';
+    showComments=localStorage.getItem('overlayComments')!=='false';showActions=localStorage.getItem('overlayActions')==='true';showClocks=localStorage.getItem('overlayClocks')!=='false';
+    preferencesReady=true;
     void refresh().then(()=>checkPrerequisites(true));const timer=setInterval(()=>void refresh(),2500);
     const replayTimer=setInterval(()=>void pollReplay(),1000);
     const unsubscribe=window.astra.subscribe(message=>{
       if(message.type==='viewer.fullscreen')setViewerFullscreen(message.enabled);
-      if(message.type==='status')runtime=message.data;
+      if(message.type==='status')runtime={...message.data,game_fps:message.data.game_fps??runtime.game_fps};
       if(message.type==='input.owner')runtime={...runtime,owner:message.data};
       if(message.type==='error')error=message.error;
       if(message.type==='progress')progress=(progress+message.data).slice(-12000);
     });
+    const recordingFullscreenChanged=()=>recordingFullscreen=document.fullscreenElement===recordingSurface;
+    document.addEventListener('fullscreenchange',recordingFullscreenChanged);
     const pointerLockChanged=()=>{pointerCaptured=document.pointerLockElement===video;if(!document.pointerLockElement)revealFullscreenControls();};
     const outsideMenu=(event:MouseEvent)=>{
       const active=(event.target as Element)?.closest('details.dropdown');
@@ -205,7 +243,7 @@
     window.addEventListener('blur',releaseInput);
     return()=>{clearInterval(timer);clearInterval(replayTimer);replay?.close();clearTimeout(fullscreenTimer);unsubscribe();releaseInput();void viewer.close();
       document.removeEventListener('mousemove',revealFullscreenControls);document.removeEventListener('pointerlockchange',pointerLockChanged);window.removeEventListener('blur',releaseInput);
-      document.removeEventListener('click',outsideMenu);document.removeEventListener('keydown',menuEscape);};
+      document.removeEventListener('fullscreenchange',recordingFullscreenChanged);document.removeEventListener('click',outsideMenu);document.removeEventListener('keydown',menuEscape);};
   });
 </script>
 
@@ -223,10 +261,10 @@
   </aside>
   <main class:play-page={page==='play'} class:management-page={page!=='play'}>
     <header inert={fullscreen}><div class="page-title"><div><p class="eyebrow">ASTRABRIDGE</p><h1>{pages.find(([id])=>id===page)?.[1]}</h1></div>
-      {#if runtime.profile}<button class="profile-link" title={'Manage profile: '+runtime.profile.name} on:click={()=>navigate('profiles')}><Icon name="profiles" size={16}/><span>{runtime.profile.name}</span><Icon name="chevron" size={14}/></button>{/if}</div>
+      {#if runtime.profile}<span class="selected-profile" title={runtime.profile.name}><Icon name="profiles" size={16}/><span>Selected profile: <strong>{runtime.profile.name}</strong></span></span>{/if}</div>
       <div class="toolbar">
         {#if state.installed}
-          <span class="game-state"><span class="dot" class:online={runtime.running}></span>{runtime.running?'Game running':'Game stopped'}</span>
+          <span class="game-state"><span class="dot" class:online={runtime.running&&runtime.clocks?.game_active}></span>{!runtime.running?'Game stopped':runtime.clocks?.game_active?'Gameplay running':'Game paused'}</span>
           <details class="dropdown session-menu"><summary aria-label="Session options"><Icon name="more" size={19}/><span>Session</span></summary>
             <div class="menu-popover">
               <div class="menu-label">Runtime</div>
@@ -248,43 +286,54 @@
     {#if busy}<div class="working" role="status">Working…</div>{/if}
     {#if !state.installed&&page!=='setup'}<section class="empty"><h2>Set up your game</h2><p>Import your Morrowind installation and install the AstraBridge runtime.</p><button class="primary" on:click={()=>navigate('setup')}>Open setup</button></section>{/if}
 
-    {#if page==='play'&&state.installed}
-      <section class="viewer-panel" class:fullscreen-controls={fullscreenControls} class:viewer-fullscreen={fullscreen} aria-labelledby="live-view-title">
+    {#if state.installed}
+      <section class="viewer-panel" class:tab-hidden={page!=='play'} class:fullscreen-controls={fullscreenControls} class:viewer-fullscreen={fullscreen} aria-labelledby="live-view-title">
         {#if fullscreen&&error}<div class="viewer-alert error" role="alert"><span>{error}</span><button class="icon-button" on:click={()=>error=''} aria-label="Dismiss error">×</button></div>{/if}
         {#if fullscreen&&notice&&!error}<div class="viewer-alert" role="status"><span>{notice}</span><button class="icon-button" on:click={()=>notice=''} aria-label="Dismiss notification">×</button></div>{/if}
         <div class="section-heading">
           <div class="viewer-heading">
             <h2 id="live-view-title">{viewMode==='live'?(watching?'Live view':'Game view'):'Playback'}</h2>
             <span class="controller-state" class:agent={owner==='agent'} title={runtime.owner?.name??'No active controller'}><Icon name="control" size={16}/>{owner==='agent'?'Agent connected':manual?'Manual control':'No controller'}</span>
-            {#if runtime.active_action?.operation}<span class="action-state" title={runtime.active_action.operation+' · '+(runtime.active_action.phase??'')}><span class="action-dot"></span><span class="action-name">{runtime.active_action.operation}</span></span>{/if}
+
           </div>
           <div class="viewer-tools">
+            <span class="fps-counter" title="Rendered game frames per second">{runtime.running&&lastFps!==null?Math.round(lastFps):'—'} <span>fps</span></span>
+            <button class="icon-button" disabled={!watching&&viewMode!=='replay'} on:click={changeMute} aria-label={muted?'Unmute':'Mute'} title={muted?'Unmute':'Mute'}><Icon name={muted?'mute':'volume'} size={18}/></button>
+            {#if viewMode!=='live'}<span class="view-only">View only</span>
+            {:else if manual}<button class="manual-button" aria-label="Release control" on:click={releaseInput}><Icon name="cursor" size={17}/>Release</button><button class="icon-button" aria-label={pointerCaptured?'Release pointer':'Lock pointer for camera'} aria-pressed={pointerCaptured} title="Capture mouse; Escape releases it" on:click={togglePointerCapture}><Icon name="mouse" size={17}/></button>
+            {:else}<button class="manual-button" aria-label="Take manual control" disabled={!watching||owner==='agent'} title={owner==='agent'?'Agent owns input':'Control with keyboard and mouse'} on:click={()=>window.astra.input({type:'manual.acquire'})}><Icon name="cursor" size={17}/><span class="manual-label">Manual control</span></button>{/if}
             <button class="record-button" class:recording aria-label={recording?'Stop recording':'Start recording'} title={recording?'Stop recording':'Record at 1080p · 60 fps'} disabled={!runtime.running||busy} on:click={()=>task(()=>window.astra.invoke('record',{action:recording?'stop':'start'}))}><Icon name={recording?'stop':'record'} size={17}/>{#if recording}<span class="rec-label">REC</span>{/if}<span>{recording?formatTime(runtime.recording.duration):'Record'}</span></button>
             <details class="dropdown viewer-options"><summary class="icon-button" aria-label="Viewer options" title="Viewer options"><Icon name="settings" size={19}/></summary>
               <div class="menu-popover">
                 <label>Stream quality<select aria-label="Viewer quality" bind:value={quality} on:change={changeQuality} disabled={busy}><option value="720p30">720p · 30 fps</option><option value="1080p60">1080p · 60 fps</option></select></label>
                 <p>Recordings always use 1080p · 60 fps.</p>
                 <div class="menu-divider"></div>
-                {#if watching}<button on:click={()=>task(endWatch)}><Icon name="disconnect" size={17}/>Disconnect viewer</button><p>The game and recording keep running.</p>{/if}
+                <label class="checkbox"><input type="checkbox" bind:checked={showComments} on:change={()=>localStorage.setItem('overlayComments',String(showComments))}>Commentary overlay</label>
+                <label class="checkbox"><input type="checkbox" bind:checked={showActions} on:change={()=>localStorage.setItem('overlayActions',String(showActions))}>Action history overlay</label>
+                <label class="checkbox"><input type="checkbox" bind:checked={showClocks} on:change={()=>localStorage.setItem('overlayClocks',String(showClocks))}>Session clocks</label>
+                {#if watching}<button on:click={disconnectViewer}><Icon name="disconnect" size={17}/>Disconnect viewer</button><p>The game and recording keep running.</p>{/if}
               </div>
             </details>
             <button class="icon-button" disabled={!watching&&viewMode!=='replay'} on:click={toggleFullscreen} aria-label={fullscreen?'Exit fullscreen':'Fullscreen'} title={fullscreen?'Exit fullscreen':'Fullscreen'} aria-pressed={fullscreen}><Icon name={fullscreen?'minimize':'fullscreen'} size={20}/></button>
           </div>
         </div>
         <div class="video-wrap">
+          {#if watching&&viewMode==='live'}<StreamOverlay events={runtime.timeline??[]} clocks={runtime.clocks} {showComments} {showActions} {showClocks} active={runtime.active_action}/>
+          {:else if viewMode==='replay'&&!replayBusy}<RecordingOverlay eventsPath={replayInfo.events} position={replayPosition} {showComments} {showActions} {showClocks}/>
+          {:else if viewMode==='still'&&stillOverlay}<StreamOverlay events={stillOverlay.events} clocks={stillOverlay.clocks} {showComments} {showActions} {showClocks}/>{/if}
           <!-- The video is an intentional keyboard/mouse game surface. -->
           <!-- svelte-ignore a11y_media_has_caption a11y_no_noninteractive_tabindex a11y_no_noninteractive_element_interactions -->
-          <video class:concealed={viewMode==='replay'} bind:this={video} autoplay playsinline tabindex="0" aria-label="Live Morrowind game"
+          <video class:concealed={viewMode==='replay'} bind:this={video} muted={muted||viewMode!=='live'||page==='recordings'} autoplay playsinline tabindex="0" aria-label="Live Morrowind game"
             on:mousemove={mousemove} on:mousedown={e=>mousebutton(e,true)} on:mouseup={e=>mousebutton(e,false)}
             on:keydown={e=>key(e,true)} on:keyup={e=>key(e,false)} on:wheel|nonpassive={wheel} on:contextmenu|preventDefault={()=>{}}></video>
           <!-- svelte-ignore a11y_media_has_caption -->
-          <video class:concealed={viewMode!=='replay'} bind:this={replayVideo} playsinline aria-label="Recording replay"
+          <video class:concealed={viewMode!=='replay'} bind:this={replayVideo} muted={muted} playsinline aria-label="Recording replay"
             on:timeupdate={replayTime} on:seeked={replayTime} on:play={()=>replayPlaying=true} on:pause={()=>replayPlaying=false}></video>
           {#if viewMode!=='live'}<span class="replay-badge">{viewMode==='still'||!replayPlaying?'View paused':'Replay'}</span>{/if}
           {#if replayBusy}<div class="replay-loading" role="status">Loading recording…</div>{/if}
           {#if replayError}<div class="replay-error" role="alert">{replayError}</div>{/if}
-          {#if !watching&&viewMode==='live'}<div class="video-placeholder"><div class="placeholder-icon"><Icon name="monitor" size={32}/></div><h3>{runtime.running?'Your game is running':'Ready when you are'}</h3><p>{runtime.running?'Connect to watch or take control.':'Start Morrowind in your current profile.'}</p>
-            <div class="placeholder-actions">{#if runtime.running}<button class="primary" disabled={busy} on:click={watch}><Icon name="play" size={17}/>Open viewer</button>
+          {#if !watching&&viewMode==='live'}<div class="video-placeholder"><div class="placeholder-icon"><Icon name="monitor" size={32}/></div><h3>{runtime.running?'Your game is running':'Ready when you are'}</h3><p>{connecting?'Connecting viewer…':runtime.running?'Viewer disconnected.':'Start Morrowind in your current profile.'}</p>
+            <div class="placeholder-actions">{#if runtime.running}<button class="primary" disabled={busy} on:click={()=>watch(true)}><Icon name="play" size={17}/>Open viewer</button>
             {:else}<button class="primary" disabled={busy||!state.container?.exists||state.updateRequired||state.updatePending} on:click={()=>task(()=>window.astra.invoke('start'))}><Icon name="play" size={17}/>Start game</button>{/if}
             {#if replayAvailable}<button disabled={replayBusy} on:click={()=>seekReplay(0,true)}><Icon name="recordings" size={17}/>Review recording</button>{/if}</div>
           </div>{/if}
@@ -299,25 +348,11 @@
             <span class="timeline-time">{replayAvailable?formatTime(timelinePosition)+' / '+formatTime(replayInfo.duration):recording||replayInfo.active?'Preparing recording…':'Recording is off'}</span>
             <button class="live-button" class:active={watching&&viewMode==='live'} aria-label={watching?'Return to live':'Connect live view'} disabled={!watching&&!runtime.running} on:click={()=>void goLive().catch(e=>replayError=e.message)}><span class="live-dot"></span>{viewMode!=='live'?'Go live':watching?'Live':runtime.running?'Connect':'Offline'}</button>
           </div>
-          <div class="input-controls">
-            <button class="icon-button" disabled={!watching&&viewMode!=='replay'} on:click={changeMute} aria-label={muted?'Unmute':'Mute'} title={muted?'Unmute':'Mute'}><Icon name={muted?'mute':'volume'} size={18}/></button>
-            {#if viewMode!=='live'}<span class="view-only" title="Game input is disabled while reviewing. Gameplay and recording continue."><Icon name="lock" size={15}/>View only</span>
-            {:else if manual}<button class="manual-button" on:click={releaseInput}><Icon name="cursor" size={17}/>Release control</button><button class="camera-button" aria-label={pointerCaptured?'Release pointer':'Lock pointer for camera'} aria-pressed={pointerCaptured} title="Capture the mouse to look around. Escape releases it." on:click={togglePointerCapture}><Icon name="mouse" size={17}/>{pointerCaptured?'Release mouse':'Capture mouse'}</button>
-            {:else}<button class="manual-button" disabled={!watching||owner==='agent'} title={owner==='agent'?'End the agent session before taking manual control.':'Control the game with your keyboard and mouse'} on:click={()=>window.astra.input({type:'manual.acquire'})}><Icon name="cursor" size={17}/>{owner==='agent'?'Agent owns input':'Take manual control'}</button>{/if}
-          </div>
+
         </div>
       </section>
-      <div class="play-footer" inert={fullscreen}>
-        <span class="graphics-status" title={runtime.graphics?.renderer??'Private display'}><Icon name="monitor" size={14}/><span>{viewMode!=='live'?'Playback only · gameplay and recording continue':runtime.graphics?.renderer??'Private game display'}</span></span>
-        <div class="footer-tools">{#if runtime.running&&runtime.game_fps!=null}<span class="fps-counter">{Math.round(runtime.game_fps)} <span>fps</span></span>{/if}
-          <details class="dropdown help-menu"><summary aria-label="Viewer help" title="Viewer help"><Icon name="help" size={16}/></summary><div class="menu-popover">
-            <strong>Watching &amp; playing</strong><p>The timeline controls your view only. Gameplay and recording continue in the background.</p>
-            <p>Take manual control when no agent is connected. Lock the pointer to look around; Escape releases pointer lock. Escape may also open the in-game menu.</p>
-            <p>Leaving the window releases manual control. Use the fullscreen button to exit fullscreen.</p>
-          </div></details>
-        </div>
-      </div>
-    {:else if page==='setup'}
+    {/if}
+    {#if page==='setup'}
       <section class="card setup-card">
         <div class="section-heading"><h2>{state.installed?'Your installation':'Install AstraBridge runtime'}</h2><button on:click={()=>{requirementsOpen=!requirementsOpen;if(requirementsOpen)void checkPrerequisites();}}>{requirementsOpen?'Back to setup':'System requirements'}</button></div>
         {#if requirementsOpen}
@@ -347,8 +382,8 @@
             <label>Morrowind installation<div class="field-row"><input bind:value={game} placeholder="Choose your existing Morrowind folder"><button on:click={()=>choose('game')}><Icon name="folder" size={17}/>Browse</button></div></label>
             <label>Game data source<select bind:value={gameMode}><option value="mount">Use the host folder — no copying (default)</option><option value="copy">Copy into managed storage</option></select></label>
             <p class="hint">{gameMode==='mount'?'Host edits are visible to the runtime. Stop the game before editing the source folder.':'The managed copy is independent of later changes to the original folder.'}</p>
-            <div class="form-grid"><label>Data directory inside the game folder<input bind:value={dataRelative} placeholder="Data Files"></label>
-            <label>Game text encoding<select bind:value={encoding}><option value="win1251">Windows-1251 (Cyrillic)</option><option value="win1252">Windows-1252 (Western European)</option><option value="win1250">Windows-1250 (Central European)</option></select></label></div>
+            <GameLanguage bind:encoding/>
+            <details class="advanced-game"><summary>Advanced: custom game folder layout</summary><label>Data subfolder<input bind:value={dataRelative} placeholder="Detected automatically"></label><p class="hint">Normally detected as Data Files. Override only for a custom folder layout.</p></details>
             <p class="hint">Active plugins and archives are read from Morrowind.ini. If no INI is present, configure the content list in Settings before starting.</p>
           {:else}
             <label>Managed storage<div class="field-row"><input bind:value={storage} placeholder="Choose a storage location"><button on:click={()=>choose('storage')}><Icon name="folder" size={17}/>Browse</button></div></label>
@@ -368,7 +403,7 @@
         <div class="section-heading"><div><h2>Playthrough profiles</h2><p class="hint">Separate saves, Atlas, knowledge, notes and session history.</p></div><button disabled={runtime.running||busy} on:click={()=>profileEdit('create')}><Icon name="plus" size={18}/>New profile</button></div>
         {#if runtime.running}<div class="profile-lock"><span class="hint">Stop the game to create, switch, rename, copy or delete profiles. Save your progress first.</span><button disabled={busy} on:click={()=>task(()=>window.astra.invoke('stop-game'))}>Stop game</button></div>{/if}
         <div class="profile-grid">
-          <div class="scroll-region" aria-label="Profile list">{#each profiles as profile}<button class="node-row" class:selected={selectedProfile?.id===profile.id} on:click={()=>{selectedProfile=profile;profileForm='';}}><strong>{profile.name}</strong><span>{profile.active?'Active profile':'Available'} · {new Date(profile.created*1000).toLocaleDateString()}</span></button>{/each}</div>
+          <div class="scroll-region" aria-label="Profile list">{#each profiles as profile}<button class="node-row" class:selected={selectedProfile?.id===profile.id} class:current-profile={profile.active} on:click={()=>{selectedProfile=profile;profileForm='';}}><strong>{profile.name}{#if profile.active}<span class="profile-badge">Selected</span>{/if}</strong><span>{profile.active?'Active profile':'Available'} · {new Date(profile.created*1000).toLocaleDateString()}</span></button>{/each}</div>
           <div class="profile-detail">
             {#if profileForm}<h3>{profileForm==='create'?'New profile':profileForm==='duplicate'?'Copy profile':'Rename profile'}</h3>{#if profileForm!=='create'}<p class="hint">{selectedProfile?.name}</p>{/if}
             {:else if selectedProfile}<h3>{selectedProfile.name}</h3><p class="hint">{selectedProfile.active?'The game and agent use this profile.':'Switch to this profile before starting the game.'}</p>{/if}
@@ -376,13 +411,13 @@
               {#if profileForm}
                 <form on:submit|preventDefault={()=>changeProfile(profileForm)}>
                   <label>{profileForm==='duplicate'?'Copy name':profileForm==='rename'?'New name':'Profile name'}<input aria-label="Profile name" maxlength="80" bind:value={profileName} required disabled={runtime.running||busy}></label>
-                  <p class="hint">{profileForm==='duplicate'?'Copies saves, Atlas, knowledge, notes, settings and history. The copy is independent. Existing videos are kept with the original profile.':profileForm==='create'?'Starts with empty saves and memory, using your current game settings.':'The profile’s data and exported skill binding stay the same.'}</p>
+                  <p class="hint">{profileForm==='duplicate'?'Copies saves, Atlas, knowledge, notes, settings and history. The copy is independent. Existing videos are kept with the original profile.':profileForm==='create'?'Starts with empty saves and memory, using your current game settings.':'Saves and memory keep their identity.'}</p>
                   <div class="toolbar"><button class="primary" type="submit" disabled={runtime.running||busy||!profileName.trim()}>{profileForm==='duplicate'?'Create copy':profileForm==='rename'?'Save name':'Create profile'}</button><button type="button" disabled={busy} on:click={()=>profileForm=''}>Cancel</button></div>
                 </form>
               {:else if selectedProfile}
                 <fieldset class="profile-actions" disabled={runtime.running||busy}><button class="primary" disabled={selectedProfile.active} on:click={()=>changeProfile('switch')}>{selectedProfile.active?'Active profile':'Use this profile'}</button><button on:click={()=>profileEdit('rename')}>Rename</button><button on:click={()=>profileEdit('duplicate')}><Icon name="copy" size={18}/>Duplicate profile</button><button class="danger" on:click={()=>changeProfile('delete')}>Delete profile</button></fieldset>
                 <p class="hint">New profiles share no memories. Duplicate makes an independent copy at the time you choose.</p>
-                <p class="hint">Export a gameplay skill for the selected active profile before connecting an agent.</p>
+                <p class="hint">Agents connect to the selected profile. The same exported skill works across profiles.</p>
               {/if}
             </div>
           </div>
@@ -415,12 +450,17 @@
         {:else}<div class="empty section-empty"><Icon name="atlas" size={36}/><h3>No travelled map yet</h3><p>Routes and visited places appear here as you explore with this profile.</p><button on:click={()=>navigate('play')}>Go to Play</button></div>{/if}
       </section>
     {:else if page==='recordings'&&state.installed}
-      <section class="card recordings-card"><div class="section-heading"><h2>Saved recordings</h2><div class="toolbar"><button disabled={!runtime.running||busy} on:click={()=>task(()=>window.astra.invoke('record',{action:recording?'stop':'start'}))}><Icon name="record" size={18}/>{recording?'Stop recording':'Start recording'}</button><button on:click={()=>task(()=>window.astra.invoke('open-recordings-folder'))}><Icon name="folder" size={18}/>Open folder</button><button class="icon-button" aria-label="Refresh recordings" title="Refresh recordings" on:click={loadRecordings}><Icon name="restart" size={18}/></button></div></div>
+      <section class="card recordings-card"><div class="section-heading"><h2>Saved recordings</h2><select aria-label="Filter recordings" bind:value={recordingsScope} on:change={()=>{selectedRecording=null;metadata=null;metadataOpen=false;}}><option value="all">All profiles</option><option value="current">Selected profile</option></select><div class="toolbar"><button disabled={!runtime.running||busy} on:click={()=>task(()=>window.astra.invoke('record',{action:recording?'stop':'start'}))}><Icon name="record" size={18}/>{recording?'Stop recording':'Start recording'}</button><button on:click={()=>task(()=>window.astra.invoke('open-recordings-folder'))}><Icon name="folder" size={18}/>Open folder</button><button class="icon-button" aria-label="Refresh recordings" title="Refresh recordings" on:click={loadRecordings}><Icon name="restart" size={18}/></button></div></div>
         <p class="hint path-text" title={state.recordingsDirectory}>{state.recordingsDirectory}</p>
-        {#if recordings.length}<div class="recording-grid"><div class="scroll-region" aria-label="Recording list">{#each recordings as row}<button class="node-row" class:selected={selectedRecording?.id===row.id} on:click={()=>selectRecording(row)}><strong>{row.name}</strong><span>{new Date(row.created*1000).toLocaleString()} · {formatBytes(row.bytes)}</span></button>{/each}</div>
-        <div class="recording-preview">{#if selectedRecording}<!-- svelte-ignore a11y_media_has_caption --><video class="playback" src={artifact(selectedRecording.video)} controls></video>
+        {#if filteredRecordings.length}<div class="recording-grid"><div class="scroll-region" aria-label="Recording list">{#each filteredRecordings as row}<button class="node-row" class:selected={selectedRecording?.id===row.id} on:click={()=>selectRecording(row)}><strong>{row.name}</strong><span>{row.profile_name??'Default'} · {new Date(row.created*1000).toLocaleString()} · {formatBytes(row.bytes)}</span></button>{/each}</div>
+        <div class="recording-preview">{#if selectedRecording}<div class="recording-video" bind:this={recordingSurface}><button class="recording-expand icon-button" aria-label={recordingFullscreen?'Exit recording fullscreen':'Fullscreen recording'} title={recordingFullscreen?'Exit fullscreen':'Fullscreen'} on:click={toggleRecordingFullscreen}><Icon name={recordingFullscreen?'minimize':'fullscreen'} size={18}/></button><!-- svelte-ignore a11y_media_has_caption --><video class="playback" src={artifact(selectedRecording.video)} controls controlslist="nofullscreen" on:timeupdate={e=>recordingPlaybackPosition=e.currentTarget.currentTime} on:seeked={e=>recordingPlaybackPosition=e.currentTarget.currentTime}></video>
+          <RecordingOverlay eventsPath={selectedRecording.events} position={recordingPlaybackPosition} {showComments} {showActions} {showClocks}/></div>
           <div class="toolbar recording-actions"><button on:click={()=>task(()=>window.astra.invoke('export-artifact',{path:selectedRecording.video,name:selectedRecording.name}),'Recording exported.')}><Icon name="export" size={18}/>Export MP4</button>
-          {#if metadata}<button aria-expanded={metadataOpen} on:click={()=>metadataOpen=!metadataOpen}>Recording metadata</button>{/if}</div>
+          {#if selectedRecording.events}<button on:click={()=>task(()=>window.astra.invoke('export-artifact',{path:selectedRecording.events,name:selectedRecording.name.replace(/\.mp4$/,'.events.jsonl')}),'Timeline exported.')}>Export timeline</button>{/if}
+          {#if metadata}<button aria-expanded={metadataOpen} on:click={()=>metadataOpen=!metadataOpen}>Recording metadata</button>{/if}
+          {#if selectedRecording.events}<details class="dropdown recording-overlay-options"><summary class="icon-button" aria-label="Recording overlays"><Icon name="settings" size={17}/></summary><div class="menu-popover">
+            <label class="checkbox"><input type="checkbox" bind:checked={showComments}>Commentary overlay</label><label class="checkbox"><input type="checkbox" bind:checked={showActions}>Action history overlay</label><label class="checkbox"><input type="checkbox" bind:checked={showClocks}>Session clocks</label>
+          </div></details>{/if}</div>
           {#if metadataOpen&&metadata}<section class="recording-info-panel" aria-label="Recording details"><div class="section-heading"><h3>Recording details</h3><button class="icon-button" aria-label="Close recording details" on:click={()=>metadataOpen=false}><Icon name="close" size={16}/></button></div>
             <dl class="property-list">{#each [['Video',`${metadata.width??1920} × ${metadata.height??1080} · ${metadata.fps??60} fps`],['Duration',formatTime(metadata.duration??0)],['Encoder',metadata.encoder??'Unknown'],['Hardware encoding',metadata.hardware_accelerated?'Yes':'No'],['Audio',metadata.audio_sample_rate?metadata.audio_sample_rate+' Hz':'See metadata']] as [label,value]}<div><dt>{label}</dt><dd>{value}</dd></div>{/each}</dl>
             <button on:click={()=>task(()=>window.astra.invoke('export-artifact',{path:selectedRecording.metadata,name:selectedRecording.name+'.json'}),'Metadata exported.')}><Icon name="export" size={16}/>Export metadata</button>
@@ -437,7 +477,7 @@
           {#if settingsSection==='data'}
             <div class="form-grid">
               <label>Data directory<input bind:value={configuration.data_relative}></label>
-              <label>Encoding<select bind:value={configuration.encoding}><option value="win1251">Windows-1251</option><option value="win1252">Windows-1252</option><option value="win1250">Windows-1250</option></select></label>
+              <GameLanguage bind:encoding={configuration.encoding}/>
               <label>Active content, in load order<textarea rows="6" bind:value={content}></textarea></label>
               <label>Archives<textarea rows="6" bind:value={archives}></textarea></label>
             </div>
@@ -445,7 +485,6 @@
           {:else if settingsSection==='gameplay'}
             <label>Difficulty<input type="number" min="-500" max="500" bind:value={configuration.difficulty}></label>
             <label class="checkbox"><input type="checkbox" bind:checked={configuration.best_attack}>Always use best attack</label>
-            <p class="hint">Difficulty −100 and best attack were chosen for testing convenience. You can change both.</p>
             <label class="checkbox"><input type="checkbox" bind:checked={configuration.delay_tribunal}>Delay Dark Brotherhood attacks until the main quest completion gate</label>
             <label class="checkbox"><input type="checkbox" bind:checked={configuration.sound}>Game sound</label>
           {:else}

@@ -5,6 +5,7 @@ import {execFileSync} from 'node:child_process';
 import {resolve} from 'node:path';
 
 await mkdir('resources',{recursive:true});
+await cp('assets/icon.png','resources/icon.png');
 const version=JSON.parse(await readFile('../VERSION.json','utf8'));
 await cp('../skill','resources/skill',{recursive:true});
 const python=process.env.ASTRA_BUILD_PYTHON??(process.platform==='win32'?'python':'python3');

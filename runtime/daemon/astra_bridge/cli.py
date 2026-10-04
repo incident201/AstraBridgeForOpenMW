@@ -143,6 +143,7 @@ def build_parser():
     p=commands.add_parser('autosave');p.add_argument('--enabled',action=argparse.BooleanOptionalAction,default=None)
     p.add_argument('--interval',type=float);p.add_argument('--slots',type=int)
     p=commands.add_parser('finish-session');p.add_argument('--description',default='Astra session end')
+    p=commands.add_parser('comment',description='Publish a brief spectator comment without pausing gameplay.');p.add_argument('text')
     p=commands.add_parser('knowledge');p.add_argument('action',choices=['list','add','update','evidence','events','objects','checkpoint','brief'])
     p.add_argument('checkpoint',nargs='?',type=json.loads,help='JSON working state, only with knowledge checkpoint')
     p.add_argument('--object-ref',help='Persistent memory_ref from an observed object or knowledge objects')
@@ -232,10 +233,11 @@ def build_parser():
     for name, field in (("key", "key"), ("text", "text"), ("scroll", "steps")):
         p = commands.add_parser(name); p.add_argument(field, type=int if name == "scroll" else str); p.add_argument("--observation", type=int, required=True)
     for name,command_parser in commands.choices.items():
-        if name not in {'start','serve'}:
+        if name not in {'start','serve','comment'}:
             command_parser.add_argument('--full',action='store_true',default=argparse.SUPPRESS)
             command_parser.add_argument('--request-id',default=argparse.SUPPRESS)
             command_parser.add_argument('--pretty',action='store_true',default=argparse.SUPPRESS)
+    commands.choices['comment'].add_argument('--pretty',action='store_true',default=argparse.SUPPRESS)
     return parser
 
 

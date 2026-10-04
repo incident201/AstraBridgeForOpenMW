@@ -74,7 +74,7 @@ def test_ini_uses_explicit_encoding_and_load_order_without_reading_content(tmp_p
 def test_game_settings_survive_launch_unless_explicitly_changed(tmp_path):
     store=make_storage(tmp_path);(store.game/'Data Files/Morrowind.esm').touch()
     store.update({'content':['Morrowind.esm']});store.prepare_profile()
-    profile=store.root/'profile/settings.cfg';profile.write_text(profile.read_text().replace('difficulty = -100','difficulty = 20'))
+    profile=store.root/'profile/settings.cfg';profile.write_text(profile.read_text().replace('difficulty = 0','difficulty = 20'))
     store.update({'viewer_quality':'1080p60'});store.prepare_profile()
     assert 'difficulty = 20' in profile.read_text()
     store.update({'difficulty':0});store.prepare_profile()

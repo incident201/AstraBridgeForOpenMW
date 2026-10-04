@@ -1,10 +1,17 @@
 export class Viewer {
   peer:RTCPeerConnection|null=null;
+  private generation=0;
+  private video:HTMLVideoElement|null=null;
   location:string|null=null;
+  constructor(private lost:()=>void=()=>{}){}
   async start(video:HTMLVideoElement,quality:string){
     await this.close(false);
+    const generation=this.generation;
+    const check=()=>{if(generation!==this.generation)throw new DOMException('Viewer closed','AbortError');};
     await window.astra.invoke('live-start',{quality});
+    check();this.video=video;
     const peer=new RTCPeerConnection({iceServers:[]});this.peer=peer;
+    peer.onconnectionstatechange=()=>{if(generation===this.generation&&peer.connectionState==='failed')this.lost();};
     const stream=new MediaStream();video.srcObject=stream;
     peer.ontrack=event=>{stream.addTrack(event.track);void video.play().catch(()=>{});};
     peer.addTransceiver('video',{direction:'recvonly'});peer.addTransceiver('audio',{direction:'recvonly'});
@@ -13,17 +20,22 @@ export class Viewer {
       const timer=setTimeout(resolve,3000);
       peer.addEventListener('icegatheringstatechange',()=>{if(peer.iceGatheringState==='complete'){clearTimeout(timer);resolve();}});
     });
+    check();
     let response:any;
     for(let attempt=0;attempt<12;attempt++){
+      check();
       try{response=await window.astra.invoke('whep',{path:'/v1/runtime/live/whep',method:'POST',body:peer.localDescription!.sdp});break;}
       catch(error){if(attempt===11){peer.close();throw error;}await new Promise(resolve=>setTimeout(resolve,250));}
     }
+    if(generation!==this.generation){peer.close();if(response.location)void window.astra.invoke('whep',{path:response.location,method:'DELETE'}).catch(()=>{});check();}
     this.location=response.location;
-    await peer.setRemoteDescription({type:'answer',sdp:response.body});
+    await peer.setRemoteDescription({type:'answer',sdp:response.body});check();
   }
   async close(stop=true){
-    this.peer?.close();this.peer=null;
-    if(this.location){await window.astra.invoke('whep',{path:this.location,method:'DELETE'}).catch(()=>{});this.location=null;}
+    this.generation++;this.peer?.close();this.peer=null;
+    if(this.video){this.video.srcObject=null;this.video=null;}
+    const location=this.location;this.location=null;
+    if(location)await window.astra.invoke('whep',{path:location,method:'DELETE'}).catch(()=>{});
     if(stop)await window.astra.invoke('live-stop').catch(()=>{});
   }
 }

@@ -12,15 +12,17 @@ test('connecting passes the expected profile to startup before acquiring control
  await assert.rejects(()=>core.connect('Agent','chosen'),/profile_mismatch/);assert.deepEqual(calls,['start']);
 });
 
-test('skill export binds the active profile and keeps its ID independent of its name',async()=>{
+test('skill export is profile-neutral and needs no running runtime',async()=>{
  const directory=await mkdtemp(join(tmpdir(),'astra-profile-export-'));
  try{
   await mkdir(join(directory,'skill'));await writeFile(join(directory,'skill/SKILL.md'),'Gameplay instructions');
   const core=new Core(directory,join(directory,'configuration.json'));
-  core.ensureDaemon=async()=>({} as Installation);core.profiles=async()=>({active:{id:'profile-id',name:'Playthrough'}});
+  core.configured=async()=>({} as Installation);
+  core.ensureDaemon=async()=>{throw Error('Must not start container');};
+  core.profiles=async()=>{throw Error('Must not pin profile');};
   const result=await core.exportSkill(join(directory,'export'),'selected.AppImage');
   const metadata=JSON.parse(await readFile(join(directory,'export/installation.json'),'utf8'));
-  assert.deepEqual(metadata.profile,{id:'profile-id',name:'Playthrough'});assert.equal(result.profile.id,metadata.profile.id);
+  assert.equal(metadata.profile,undefined);assert.equal('profile' in result,false);
   assert.equal(metadata.config,core.configFile);assert.equal(metadata.executable,'selected.AppImage');
  }finally{await rm(directory,{recursive:true,force:true});}
 });

@@ -15,7 +15,7 @@ async function fit(page,name){
   return {width:innerWidth,height:innerHeight,document:document.documentElement.scrollHeight,body:document.body.scrollHeight,
    main:[main.clientHeight,main.scrollHeight],
    controls:[...document.querySelectorAll('main>header,.viewer-controls,.bottom-actions,.card-footer')].map(e=>{const b=e.getBoundingClientRect();return {top:b.top,bottom:b.bottom};}),
-   video:(()=>{const v=document.querySelector('.video-wrap video');if(!v)return null;const b=v.getBoundingClientRect();return {top:b.top,bottom:b.bottom,height:b.height,fit:getComputedStyle(v).objectFit};})(),
+   video:(()=>{const v=document.querySelector('.video-wrap video');if(!v||!v.getClientRects().length)return null;const b=v.getBoundingClientRect();return {top:b.top,bottom:b.bottom,height:b.height,fit:getComputedStyle(v).objectFit};})(),
    icons:[...document.querySelectorAll('button > .icon,.metric-icon > .icon')].map(icon=>{const b=icon.getBoundingClientRect();const p=(icon.closest('.metric')??icon.parentElement).getBoundingClientRect();return Math.abs((b.top+b.bottom-p.top-p.bottom)/2);}),
    forms:[...document.querySelectorAll('.settings-fields,.setup-fields')].map(e=>[e.clientHeight,e.scrollHeight])};
  });
@@ -31,7 +31,7 @@ async function fit(page,name){
 try{
  app=await electron.launch({executablePath:resolve('node_modules/electron/dist/electron'),args:[resolve('.'),'--ozone-platform=x11'],
   env:{...process.env,ASTRA_RESOURCES:resolve('resources'),ASTRA_DESKTOP_DATA:join(resolve(output),'userdata')}});
- const page=await app.firstWindow();await page.getByRole('button',{name:'Open viewer',exact:true}).click({timeout:30000});
+ const page=await app.firstWindow();
  await page.waitForFunction(()=>document.querySelector('video')?.currentTime>1,{},{timeout:90000});
  for(const [width,height] of [[1920,1080],[1280,720],[960,680]]){
   await page.setViewportSize({width,height});await fit(page,`play-${width}x${height}`);

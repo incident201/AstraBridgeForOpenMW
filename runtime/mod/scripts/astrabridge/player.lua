@@ -1497,9 +1497,9 @@ local function onFrame(dt)
         for text,frame in pairs(seenMessages) do if lastFrame-frame>600 then seenMessages[text]=nil end end
     end
     local running = not core.isWorldPaused()
-    if running ~= wasRunning then
+    if running ~= wasRunning or lastFrame%15==0 then
         wasRunning = running
-        P.emit({version=1,session=bus:get('session'),event='simulation',active=running})
+        P.emit({version=1,session=bus:get('session'),event='simulation',active=running,simulation_seconds=core.getSimulationTime()})
     end
     bus:set('can_save', ready and Player.isCharGenFinished(self) and not (A.isDead and A.isDead(self))
         and not modalOpen and I.UI.getMode() == nil and core.isWorldPaused())

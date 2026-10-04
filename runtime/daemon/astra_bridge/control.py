@@ -46,6 +46,22 @@ class Control:
                         {'session': self.session.session_id, 'token': uuid.uuid4().hex})
 
     def execute(self, op, args):
+        timeline=getattr(self.session,'timeline',None)
+        if timeline is None:return self._execute(op,args)
+        # Commentary can accompany an in-flight action; it never observes or pauses.
+        if op=='comment':return timeline.comment(args)
+        action=uuid.uuid4().hex
+        timeline.emit('action',action_id=action,operation=op,state='active')
+        try:
+            result=self._execute(op,args)
+        except Exception as exc:
+            timeline.emit('action',action_id=action,operation=op,state='error',reason=str(exc)[:250])
+            raise
+        timeline.emit('action',action_id=action,operation=op,state='finished',
+                      summary=result.get('summary'),feedback=result.get('feedback'))
+        return result
+
+    def _execute(self, op, args):
         s = self.session
         if not isinstance(args, dict):
             raise BridgeError('invalid_arguments')

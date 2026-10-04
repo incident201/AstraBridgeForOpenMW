@@ -6,6 +6,8 @@ import {Readable} from 'node:stream';
 import {pipeline} from 'node:stream/promises';
 import {createWriteStream} from 'node:fs';
 import * as tar from 'tar';
+import {Recordings} from './recordings';
+import {gameDataDirectory} from './game-data';
 import {PodmanBackend} from './runtime/PodmanBackend';
 import {WslContainerBackend} from './runtime/WslContainerBackend';
 import type {Progress,RuntimeBackend,RuntimeSpec} from './runtime/RuntimeBackend';
@@ -15,6 +17,7 @@ export interface RecoveryVersion {image:string;digest:string;version?:string;sna
 interface UpdateTransaction {before:Installation;snapshot:string;backedUp:boolean;replacing:boolean;wasRunning:boolean;gameWasRunning:boolean;api:{runtime_api:number;game_api:number}|null}
 export interface Installation extends RuntimeSpec {
   installed:boolean; storageDirectory:string; backend:'podman'|'wsl'; gameImported:boolean;
+  selectedProfile?:{id:string;name:string};
   sourceGame:string; agentToken?:string; agentProfile?:string; phase?:string;
   gameMode:'mount'|'copy';
   version?:string;previous?:RecoveryVersion;transaction?:UpdateTransaction;retiredImages?:string[];cleanupPending?:boolean;
@@ -24,6 +27,8 @@ export interface InstallOptions {game:string; storage:string; encoding:string; g
 export class Core {
   readonly configFile:string;
   managementBusy=false;
+  readonly recordings=new Recordings();
+  private daemonStarting:Promise<Installation>|null=null;
   constructor(readonly resources:string,configFile?:string,private progress?:Progress){
     const directory=process.platform==='win32'?join(process.env.APPDATA??homedir(),'AstraBridge'):
       join(process.env.XDG_CONFIG_HOME??join(homedir(),'.config'),'astrabridge');
@@ -92,12 +97,20 @@ export class Core {
     throw new Error('Runtime did not become ready. Open Diagnostics or run astrabridge logs.');
   }
   async ensureDaemon(config?:Installation){
+    if(this.daemonStarting)return this.daemonStarting;
+    this.daemonStarting=this.startDaemon(config);
+    try{return await this.daemonStarting;}finally{this.daemonStarting=null;}
+  }
+  private async startDaemon(config?:Installation){
     config??=await this.configured();
     if(config.transaction)throw new Error('Recover the interrupted runtime update in Setup before starting');
     const backend=this.backend(config);await this.requirePrerequisites(backend,config.gpuDevices);
     const state=await backend.inspect(config.name);
     if(!state.exists)throw new Error('Managed container is missing. Reinstall or explicitly update runtime.');
-    if(!state.running)await backend.start(config.name);
+    if(!state.running){
+      try{await backend.start(config.name);}
+      catch(error){if(!(await backend.inspect(config.name)).running)throw error;}
+    }
     await this.ready(config);return config;
   }
   async status(){
@@ -108,12 +121,13 @@ export class Core {
     catch(e){container={exists:false,running:false};error=String(e);}
     let runtime=null;
     if(container.running){try{runtime=await this.api('/v1/runtime/status','GET',undefined,config);}catch(e){error=String(e);}}
-    return {installed:config.installed,phase:config.phase,backend:config.backend,container,runtime,error,release,
+    return {profile:runtime?.profile??config.selectedProfile??{id:'default',name:'Default'},installed:config.installed,phase:config.phase,backend:config.backend,container,runtime,error,release,
       currentDigest:config.digest,currentVersion:config.version,previousRuntime:config.previous??null,updatePending:Boolean(config.transaction),cleanupPending:Boolean(config.cleanupPending),updateRequired:Boolean(release.digest&&release.digest!==config.digest),
       storageDirectory:config.storageDirectory,recordingsDirectory:config.recordingsDirectory,gameMode:config.gameMode,sourceGame:config.sourceGame};
   }
   async install(options:InstallOptions){return this.exclusive(async()=>{
     const game=resolve(options.game);if(!(await stat(game)).isDirectory())throw new Error('Select an existing Morrowind directory');
+    const dataRelative=await gameDataDirectory(game,options.dataRelative);
     if(!['win1250','win1251','win1252'].includes(options.encoding))throw new Error('Choose an explicit game encoding');
     const gameMode=options.gameMode??'mount';if(!['mount','copy'].includes(gameMode))throw new Error('Choose game mode mount or copy');
     if(options.repository&&!options.development)throw new Error('--repository requires --development');
@@ -146,7 +160,7 @@ export class Core {
     config.phase='configuring';await this.save(config);
     if(!(await backend.inspect(config.name)).exists)await backend.create(config);
     await backend.start(config.name);await this.ready(config);
-    await this.api('/v1/runtime/import-ini','POST',{encoding:options.encoding,data_relative:options.dataRelative??'Data Files'},config);
+    await this.api('/v1/runtime/import-ini','POST',{encoding:options.encoding,data_relative:dataRelative},config);
     if(options.content||options.archives)await this.api('/v1/runtime/config','PATCH',{
       ...(options.content?{content:options.content}:{}),...(options.archives?{archives:options.archives}:{})},config);
     await backend.stop(config.name);config.installed=true;config.phase='ready';await this.save(config);
@@ -297,25 +311,23 @@ export class Core {
     return {name:'container',text:await backend.logs(config.name)};
   }
   async exportSkill(destination:string,executable:string){
-    await this.ensureDaemon();const {active:profile}=await this.profiles();
+    await this.configured();
     destination=resolve(destination);try{await access(destination);throw new Error('Skill destination already exists; choose a new directory');}
     catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
     await cp(join(this.resources,'skill'),destination,{recursive:true,errorOnExist:true});
-    await writeFile(join(destination,'installation.json'),JSON.stringify({executable,config:this.configFile,profile:{id:profile.id,name:profile.name}},null,2)+'\n');
-    return {skill:join(destination,'SKILL.md'),executable,config:this.configFile,profile};
+    await writeFile(join(destination,'installation.json'),JSON.stringify({executable,config:this.configFile},null,2)+'\n');
+    return {skill:join(destination,'SKILL.md'),executable,config:this.configFile};
   }
   async profiles(){await this.ensureDaemon();return this.api('/v1/runtime/profiles');}
   async profile(operation:string,args:Record<string,unknown>){return this.exclusive(async()=>{
     await this.ensureDaemon();const result=await this.api('/v1/runtime/profiles/'+operation,'POST',args);
-    if(['switch','delete','duplicate'].includes(operation)){
-      const config=await this.configured();delete config.agentToken;delete config.agentProfile;await this.save(config);
+    if(['switch','delete','duplicate','rename'].includes(operation)){
+      const config=await this.configured();delete config.agentToken;delete config.agentProfile;config.selectedProfile=result.active;await this.save(config);
     }
     return result;
   });}
   async recordingsFolder(){
-    const {active}=await this.profiles(),config=await this.configured();
-    const sub=active.recordings_subdirectory;
-    if(typeof sub!=='string'||sub&&!/^[a-f0-9]{32}$/.test(sub))throw new Error('Invalid profile recording directory');
-    const directory=join(config.recordingsDirectory,sub);await mkdir(directory,{recursive:true});return directory;
+    const config=await this.configured();
+    await mkdir(config.recordingsDirectory,{recursive:true});return config.recordingsDirectory;
   }
 }

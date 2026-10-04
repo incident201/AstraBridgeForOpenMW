@@ -6,14 +6,17 @@ description: "Play Morrowind through the configured AstraBridge Agent-Computer I
 # Play OpenMW through AstraBridge
 
 Control the game through the public `astrabridge game` CLI. Read adjacent
-`installation.json` for `executable`, `config` and `profile.id`. Invoke that
+`installation.json` for `executable` and `config`. Invoke that
 executable with `--config` and the recorded configuration path; quote paths with
 spaces. On PowerShell use the `&` invocation operator.
 
 ```sh
-"/path/to/AstraBridge.AppImage" --config "/path/to/installation.json" agent connect --profile PROFILE_ID
+"/path/to/AstraBridge.AppImage" --config "/path/to/installation.json" agent connect
 "/path/to/AstraBridge.AppImage" --config "/path/to/installation.json" game observe
 ```
+
+The skill is independent of profiles. A new connection uses the profile selected
+by the user in Desktop; never carry another profile's gameplay knowledge into it.
 
 Examples abbreviate that configured executable as `astrabridge`. Command names
 below follow `astrabridge game`, except explicitly marked application commands.
@@ -59,7 +62,7 @@ report setup errors. See [session and recovery](references/session.md) when need
 ## Connect or recover context
 
 1. Use application `astrabridge status` to check the intended profile and runtime.
-   Use the existing matching connection or connect with the exported profile ID. Do not take over another owner's
+   Use the existing matching connection or connect to the currently selected Desktop profile. Do not take over another owner's
    session or restart a runtime the user deliberately stopped. Resolve profile,
    version or setup mismatches through the host user.
 2. If recovering context, check `status` for an active action and retrieve
@@ -130,3 +133,9 @@ Use `finish-session` for explicit save/finalize/close, or application
 save progress automatically. For an uncertain mutation, recover its receipt
 before retrying; reusing a request ID retrieves the old result rather than
 executing again.
+
+## Optional spectator commentary
+
+Use `comment "TEXT"` for brief progress commentary intended for the viewer: a
+new plan, discovery or change of approach. It does not pause or advance the game.
+External chat is not captured automatically. See [commentary and timestamps](references/recording.md#commentary-and-action-timeline).
