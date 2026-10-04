@@ -28,5 +28,9 @@ def prepare_base(run, output, runner, recipe, work, registry=None, proxy=()):
         run(*runner,'tag',local,remote)
         digest_file=work/'dist/base-registry.digest'
         run(*runner,'push','--digestfile',digest_file,remote,'docker://'+remote)
-        return remote.split(':base-')[0]+'@'+digest_file.read_text().strip()
+        reference=remote.split(':base-')[0]+'@'+digest_file.read_text().strip()
+        # Registry compression can change the manifest digest. Push does not
+        # register that remote identity in local containers/storage.
+        run(*runner,'pull',reference)
+        return reference
     return local

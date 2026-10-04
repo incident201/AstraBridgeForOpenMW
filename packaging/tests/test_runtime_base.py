@@ -34,4 +34,5 @@ def test_missing_base_is_published_once_and_returned_by_digest(base,tmp_path,mon
     result=base.prepare_base(run,lambda *a:'', ['podman'],recipe,tmp_path,'registry/example')
     assert result=='registry/example@sha256:'+'b'*64
     assert len([c for c in calls if 'push' in c])==1
+    assert calls[-1]==('podman','pull',result)
     before=base.base_key(recipe);recipe.write_text('FROM new-pin\n');assert base.base_key(recipe)!=before
