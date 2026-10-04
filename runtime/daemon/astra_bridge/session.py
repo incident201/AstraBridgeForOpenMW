@@ -180,6 +180,7 @@ class Session:
         if self.display.media_stream: self.display.media_stream.close()
         self.display.media_stream = MediaStream(self.runtime/'engine-media.bin')
         env['ASTRA_MEDIA_STREAM'] = str(self.display.media_stream.path)
+        env['ASTRA_SKIP_VIDEOS'] = '1'
         libraries=self.engine_libraries or str(packaged.parent/'lib')
         env['LD_LIBRARY_PATH']=libraries+(':'+env['LD_LIBRARY_PATH'] if env.get('LD_LIBRARY_PATH') else '')
         env["XDG_CACHE_HOME"] = str(self.runtime / "cache")

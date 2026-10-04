@@ -132,6 +132,11 @@ class Live:
                 elif delay>0:self.closed.wait(delay)
         except (OSError,ValueError,BridgeError) as exc:
             if not self.closed.is_set():self.error=str(exc);self.closed.set()
+        finally:
+            # The producer owns stdin. EOF lets FFmpeg leave its input read when
+            # closing live view; SIGTERM alone can leave that read blocked.
+            try:self.process.stdin.close()
+            except (OSError,ValueError):pass
 
     def _audio(self):
         media=self.session.display.media_stream
@@ -168,11 +173,19 @@ class Live:
 
     def close(self):
         self.closed.set()
-        for process in (self.process,self.relay):
-            if process and process.poll() is None:
-                os.killpg(process.pid,signal.SIGTERM)
-                try:process.wait(timeout=5)
-                except subprocess.TimeoutExpired:os.killpg(process.pid,signal.SIGKILL);process.wait()
+        processes=[p for p in (self.process,self.relay) if p and p.poll() is None]
+        # These are disposable streaming processes, not the recording encoder.
+        # Signal both together and allow one shared grace period.
+        for process in processes:
+            try:os.killpg(process.pid,signal.SIGTERM)
+            except ProcessLookupError:pass
+        deadline=time.monotonic()+1
+        for process in processes:
+            try:process.wait(timeout=max(.001,deadline-time.monotonic()))
+            except subprocess.TimeoutExpired:
+                try:os.killpg(process.pid,signal.SIGKILL)
+                except ProcessLookupError:pass
+                process.wait(timeout=2)
         for thread in (self.video_thread,self.audio_thread):
             if thread:thread.join(timeout=3)
         if self.process and self.process.stdin:

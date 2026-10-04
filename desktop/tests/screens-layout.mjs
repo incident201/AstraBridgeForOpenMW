@@ -31,6 +31,7 @@ await page.addInitScript(({svg,hasFrame,atlasData})=>{
   if(op==='status')return structuredClone(state);
   if(op==='atlas')return window.fixture.empty?{supported:false}:structuredClone(atlas);
   if(op==='recordings')return window.fixture.empty?[]:structuredClone(recordings);
+  if(op==='delete-recording'){if(window.fixture.cancelDelete)return {cancelled:true};const index=recordings.findIndex(row=>row.id===args.id);recordings.splice(index,1);return {deleted:true};}
   if(op==='configuration')return structuredClone(configuration);
   if(op==='configure'){Object.assign(configuration,args);return structuredClone(configuration);}
   if(op==='gpus')return [{id:'pci:0000:01:00.0',name:'NVIDIA GeForce RTX 3060 Laptop GPU',pci:'0000:01:00.0',accessible:true,render_selectable:true},{id:'pci:0000:06:00.0',name:'AMD Radeon 680M integrated graphics',pci:'0000:06:00.0',accessible:true,render_selectable:true}];
@@ -115,6 +116,15 @@ try{
   await page.getByRole('button',{name:'Storage and skill',exact:true}).click();await shot('setup-storage-'+suffix);
  }
  await page.setViewportSize({width:960,height:680});
+ await nav('Recordings');await page.locator('.recordings-card .node-row').first().click();
+ const count=await page.locator('.recordings-card .node-row').count();
+ await page.evaluate(()=>window.fixture.cancelDelete=true);
+ await page.getByRole('button',{name:'Delete recording',exact:true}).click();
+ assert.equal(await page.locator('.recordings-card .node-row').count(),count);
+ await page.evaluate(()=>window.fixture.cancelDelete=false);
+ await page.getByRole('button',{name:'Delete recording',exact:true}).click();
+ await page.waitForFunction(n=>document.querySelectorAll('.recordings-card .node-row').length===n,count-1);
+ assert.equal(await page.locator('video.playback').count(),0);
  await page.evaluate(()=>window.fixture.empty=true);await nav('Atlas');await shot('atlas-empty');await nav('Recordings');await shot('recordings-empty');
  await page.evaluate(()=>{window.fixture.state.updatePending=true;window.fixture.state.previousRuntime={version:'0.2.2',created:1790000000000};});await nav('Setup');await page.getByRole('button',{name:'Runtime',exact:true}).click();await page.getByRole('button',{name:'Recover interrupted update',exact:true}).waitFor();await shot('setup-recovery');
  await page.evaluate(()=>{window.fixture.state.installed=false;window.fixture.state.runtime={};});await page.waitForFunction(()=>document.querySelector('h2')?.textContent==='Install AstraBridge runtime');await shot('setup-new-game');

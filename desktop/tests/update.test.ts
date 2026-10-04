@@ -126,3 +126,18 @@ test('missing old image is prepared before any stop, backup or recovery removal'
   await assert.rejects(()=>f.core.update(),/Registry unavailable/);assert.deepEqual(f.calls,['ensure-old']);assert.ok(f.state.exists);
  }finally{await f.close();}
 });
+
+
+test('user stop remains identifiable offline and blocks silent agent reconnect',async()=>{
+ const f=await fixture();try{
+  const stopped=await f.core.stop();
+  assert.equal(stopped.session_end?.reason,'user_requested_stop');
+  assert.equal((await f.core.agentStatus()).session_end?.reason,'user_requested_stop');
+  const calls=f.calls.length;
+  for(const action of [()=>f.core.game('observe',{}),()=>f.core.connect()])
+   await assert.rejects(action,(error:any)=>error.details.error==='user_requested_stop'&&error.details.retryable===false);
+  assert.equal(f.calls.length,calls,'Agent commands must not restart a user-stopped runtime');
+  f.core.ensureDaemon=async()=>await f.read();f.core.release=async()=>({digest:f.old.digest} as any);
+  await f.core.start();assert.equal((await f.read()).lastStop,undefined);
+ }finally{await f.close();}
+});

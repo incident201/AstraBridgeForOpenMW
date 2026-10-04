@@ -2077,6 +2077,7 @@ namespace MWGui
 
     void WindowManager::playVideo(std::string_view name, bool allowSkipping, bool overrideSounds)
     {
+        if (AstraMedia::skipVideos()) return;
         AstraMedia::MovieScope astraMovie;
         mVideoWidget->playVideo("video\\" + std::string{ name });
 

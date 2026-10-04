@@ -49,7 +49,7 @@ read-only host-folder mount by default; the user can instead request a managed
 copy in a separate game volume. Ordinary
 start/stop/restart retains the container ID. Updates explicitly recreate the
 container around the existing volumes. When closing Desktop with a running container, the user chooses **Keep running**,
-**Stop runtime**, or **Cancel**. Keeping it running disconnects the viewer and
+**Stop session**, or **Cancel**. Keeping it running disconnects the viewer and
 releases manual input while retaining the agent and recording session. Stopping
 waits for engine shutdown and recording finalization before closing the window;
 it does not create a game save. A failed stop keeps Desktop open with an error.
@@ -156,8 +156,12 @@ aspect ratio without page scrolling. Recording and fullscreen controls sit above
 the picture alongside audio, manual input and a stable FPS indicator. Only
 playback and the recording timeline remain below.
 The mouse capture button enables relative camera movement during manual control.
-**Viewer options** contains stream quality and disconnect; **Session** contains
-runtime start/stop/restart, skill export and ending an agent session. These menus
+The visible **Stop session** button disconnects the agent, finalizes the current
+recording, closes live view, and stops both OpenMW and the container. It is also
+available among the fullscreen controls. It does not create a game save.
+**Stop recording** only finishes the video. **Viewer options** contains stream
+quality and disconnect; **Session** contains start/restart, skill export and
+ending agent control without stopping the game. These menus
 overlay the viewer instead of reducing its size. Errors remain visible inside
 fullscreen. The selected profile is shown as a noninteractive label. At narrow window widths, the navigation uses labeled icons
 with hover titles.
@@ -262,3 +266,8 @@ Morrowind → Tribunal → Bloodmoon ordering used by OpenMW's importer. Only he
 master names are read, not game-world or quest records. Before launch, missing masters or dependency cycles produce a clear error.
 An invalid dependency order from an older import is repaired while preserving
 already valid custom ordering and the selected set of content files. Archive keys with or without a space before their number are accepted.
+
+Live-view shutdown closes the frame producer's FFmpeg input pipe so a blocked
+read receives EOF. The disposable viewer encoder and relay share a bounded
+shutdown grace period. This is independent of the Recorder, which drains its
+captured frames and audio and finalizes the MP4 before the game process exits.

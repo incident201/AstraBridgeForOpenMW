@@ -372,12 +372,23 @@ if not media_target.exists() or media_target.read_bytes()!=media_source.read_byt
     shutil.copyfile(media_source,media_target)
 replace('apps/openmw/mwgui/windowmanagerimp.cpp', '#include "windowmanagerimp.hpp"',
         '#include "windowmanagerimp.hpp"\n#include <components/sdlutil/astramedia.hpp>')
+# Skip every cinematic before decoder or nested UI loop creation in Astra sessions.
+if '        AstraMedia::MovieScope astraMovie;' in (root/'apps/openmw/mwgui/windowmanagerimp.cpp').read_text():
+    replace('apps/openmw/mwgui/windowmanagerimp.cpp',
+        '        AstraMedia::MovieScope astraMovie;',
+        '        if (AstraMedia::skipVideos()) return;\n        AstraMedia::MovieScope astraMovie;')
 replace('apps/openmw/mwgui/windowmanagerimp.cpp',
 '''    void WindowManager::playVideo(std::string_view name, bool allowSkipping, bool overrideSounds)
     {''',
 '''    void WindowManager::playVideo(std::string_view name, bool allowSkipping, bool overrideSounds)
     {
+        if (AstraMedia::skipVideos()) return;
         AstraMedia::MovieScope astraMovie;''')
+replace('apps/openmw/mwgui/mainmenu.cpp', '#include "mainmenu.hpp"',
+        '#include "mainmenu.hpp"\n#include <components/sdlutil/astramedia.hpp>')
+replace('apps/openmw/mwgui/mainmenu.cpp',
+        '        mHasAnimatedMenu = mVFS->exists(menuBackgroundVideo);',
+        '        mHasAnimatedMenu = !AstraMedia::skipVideos() && mVFS->exists(menuBackgroundVideo);')
 replace('apps/openmw/mwgui/windowmanagerimp.cpp',
 '''                if (mVideoWidget->isPaused())
                     mVideoWidget->resume();

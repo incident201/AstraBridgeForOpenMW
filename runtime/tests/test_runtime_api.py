@@ -143,3 +143,23 @@ def test_update_prunes_only_older_update_snapshots_after_a_complete_recovery_cop
     assert (tmp_path/'backups/update-new/saves/progress.omwsave').read_bytes()==b'progress'
     assert (tmp_path/'backups/manual-copy').is_dir()
     assert (tmp_path/'saves/progress.omwsave').read_bytes()==b'progress'
+
+
+@pytest.mark.asyncio
+async def test_shutdown_closes_event_channel_before_waiting_for_handlers(tmp_path):
+    import asyncio
+    runtime=Runtime(tmp_path/'installation',tmp_path/'state',tmp_path/'game')
+    server=TestServer(application(runtime,'x'*40))
+    client=TestClient(server)
+    await client.start_server()
+    socket=await client.ws_connect('/v1/events',headers={'Authorization':'Bearer '+'x'*40})
+    async def read():
+        async for message in socket:pass
+    reader=asyncio.create_task(read())
+    try:
+        await asyncio.wait_for(server.close(),2)
+        await asyncio.wait_for(reader,1)
+        assert socket.closed
+    finally:
+        reader.cancel()
+        await client.close()

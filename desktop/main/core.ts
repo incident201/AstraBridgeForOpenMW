@@ -18,6 +18,7 @@ interface UpdateTransaction {before:Installation;snapshot:string;backedUp:boolea
 export interface Installation extends RuntimeSpec {
   installed:boolean; storageDirectory:string; backend:'podman'|'wsl'; gameImported:boolean;
   selectedProfile?:{id:string;name:string};
+  lastStop?:{reason:'user_requested_stop';at:number};
   sourceGame:string; agentToken?:string; agentProfile?:string; phase?:string;
   gameMode:'mount'|'copy';
   version?:string;previous?:RecoveryVersion;transaction?:UpdateTransaction;retiredImages?:string[];cleanupPending?:boolean;
@@ -129,7 +130,7 @@ export class Core {
     const storageMissing=Boolean(storageState&&(!storageState.state||storageState.game===false));
     let runtime=null;
     if(container.running){try{runtime=await this.api('/v1/runtime/status','GET',undefined,config);}catch(e){error=String(e);}}
-    return {configured:true,storageState,storageMissing,removalPending:config.phase==='removing',profile:runtime?.profile??config.selectedProfile??{id:'default',name:'Default'},installed:config.installed,phase:config.phase,backend:config.backend,container,runtime,error,release,
+    return {session_end:config.lastStop??null,configured:true,storageState,storageMissing,removalPending:config.phase==='removing',profile:runtime?.profile??config.selectedProfile??{id:'default',name:'Default'},installed:config.installed,phase:config.phase,backend:config.backend,container,runtime,error,release,
       currentDigest:config.digest,currentVersion:config.version,previousRuntime:config.previous??null,updatePending:Boolean(config.transaction),cleanupPending:Boolean(config.cleanupPending),updateRequired:Boolean(release.digest&&release.digest!==config.digest),
       storageDirectory:config.storageDirectory,recordingsDirectory:config.recordingsDirectory,gameMode:config.gameMode,sourceGame:config.sourceGame};
   }
@@ -215,10 +216,13 @@ export class Core {
       const settings=await this.api('/v1/runtime/config','GET',undefined,config);
       if(settings.graphics_gpu==='auto')gpu='nvidia';
     }
+    if(generation!==this.lifecycleGeneration)throw new Error('Game startup was cancelled.');
+    if(config.lastStop){delete config.lastStop;await this.save(config);}
     return this.api('/v1/runtime/engine/start','POST',{...(gpu?{gpu}:{}),...(profile?{profile}:{})},config);
   }
   async stop(){this.lifecycleGeneration++;if(this.daemonStarting)await this.daemonStarting.catch(()=>{});
     const config=await this.configured();const backend=this.backend(config);
+    config.lastStop={reason:'user_requested_stop',at:Date.now()/1000};await this.save(config);
     if((await backend.inspect(config.name)).running){
       let starting=false;
       try{starting=Boolean((await this.api('/v1/runtime/status','GET',undefined,config,3000)).starting);}catch{}
@@ -323,7 +327,17 @@ export class Core {
     await this.cleanupRecovery(candidate);
     return this.status();
   });}
+  private stoppedByUser(config:Installation){
+    if(config.lastStop)throw Object.assign(new Error('The user stopped this session. Do not reconnect or restart without a new user request.'),
+      {details:{ok:false,error:'user_requested_stop',session_end:config.lastStop,retryable:false}});
+  }
+  async agentStatus(){
+    const config=await this.configured();
+    if(config.lastStop)return {mode:'idle',connected:false,session_end:config.lastStop};
+    return this.api('/v1/agent/status','GET',undefined,config);
+  }
   async connect(name='Gameplay agent',profile?:string){
+    this.stoppedByUser(await this.configured());
     await this.start(undefined,profile);const config=await this.configured();
     const result=await this.api('/v1/agent/connect','POST',{name,...(profile?{profile}:{})},config);
     config.agentToken=result.session_token;config.agentProfile=result.profile?.id;await this.save(config);
@@ -332,8 +346,10 @@ export class Core {
   async disconnect(){const config=await this.configured();const result=await this.api('/v1/agent/disconnect','POST',{},config);
     delete config.agentToken;await this.save(config);return result;}
   async game(op:string,args:Record<string,unknown>){
-    const config=await this.configured();if(!config.agentToken)throw new Error('Connect first: astrabridge agent connect');
-    const result=await this.api('/v1/game/command','POST',{op,args},config);
+    const config=await this.configured();this.stoppedByUser(config);if(!config.agentToken)throw new Error('Connect first: astrabridge agent connect');
+    let result;
+    try{result=await this.api('/v1/game/command','POST',{op,args},config);}
+    catch(error){if((error as any).details?.error==='user_requested_stop')throw error;this.stoppedByUser(await this.configured());throw error;}
     try{return await this.materialize(result,config);}
     catch(error){return {...result,artifact_error:String(error)};}
   }
@@ -377,6 +393,17 @@ export class Core {
       const config=await this.configured();delete config.agentToken;delete config.agentProfile;config.selectedProfile=result.active;await this.save(config);
     }
     return result;
+  });}
+  async deleteRecording(id:string){return this.exclusive(async()=>{
+    const config=await this.configured();
+    const row=(await this.recordings.list(config.recordingsDirectory)).find(row=>row.id===id);
+    if(!row)throw new Error('Recording no longer exists. Refresh the list.');
+    if((await this.backend(config).inspect(config.name)).running){
+      // Do not delete a recording while the encoder is writing or finalizing it.
+      const status=await this.api('/v1/runtime/status','GET',undefined,config,3000);
+      if(status.recording&&!row.metadata)throw new Error('Stop recording before deleting an unfinished video.');
+    }
+    return this.recordings.remove(config.recordingsDirectory,id);
   });}
   async recordingsFolder(){
     const config=await this.configured();

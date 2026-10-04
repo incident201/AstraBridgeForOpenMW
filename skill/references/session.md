@@ -17,12 +17,20 @@ public environment information, not game-state data.
 3. Follow the user's choice of continuing, loading, or starting a new game. Use `saves` to obtain a fresh save handle before `load`; do not load an arbitrary latest slot or a developer fixture.
 4. Use `status --player` for a fast character summary. It does not open menus, capture an image, or invalidate item/spell handles.
 
+If a command returns `error: "user_requested_stop"` with `session_end`, the host
+user deliberately ended the session. Stop gameplay and report that termination;
+do not reconnect or restart automatically. Any `action_result`/`action_error`
+contains the interrupted command's available diagnostics. `astrabridge status`
+and `astrabridge agent status` retain the stop reason after the container exits.
+A new explicit host **Start game** / `astrabridge start` clears it before the
+agent can connect again.
+
 The agent session remains connected between commands and during long reasoning
 pauses. The Desktop viewer can stay open, but manual input is disabled while
 the agent owns control. Use `astrabridge agent disconnect` when handing control
 back; this stops active input and leaves the game paused. Closing a terminal does not disconnect the agent. When Desktop closes, its
 **Keep running** choice leaves the agent and recording session active; **Stop
-runtime** ends the running game and finalizes recording. Neither choice creates
+session** ends the running game and finalizes recording. Neither choice creates
 a game save. If the user deliberately stops or removes the runtime, do not
 restart it behind their back.
 
@@ -57,7 +65,7 @@ a gameplay workaround.
 |---|---|
 | Application: `astrabridge start` | Start the persistent runtime and game; preserve an already running game. Watch it through Desktop. |
 | Application: `astrabridge agent connect` | Reserve agent control across CLI calls. No inactivity timeout; manual input is disabled until disconnect. |
-| `new-game` | Start the actual introduction/character-creation flow. Discards unsaved current progress. |
+| `new-game` | Start the normal new-game/character-creation flow; all videos are skipped automatically. Discards unsaved current progress. |
 | `save "DESCRIPTION"` | Create a new save slot, description 1…160 UTF-8 bytes. Returns `saved` and `total_saves`. Only when the game permits saving. |
 | `saves` | List slots with descriptions, player names and fresh refs. |
 | `load SAVE_REF` | Load that slot; unsaved progress is lost and transient refs must be refreshed. |

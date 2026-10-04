@@ -51,7 +51,7 @@ async function main(){
     const action=argv.shift();
     if(action==='connect')result=await core.connect(take('--name'),take('--profile'));
     else if(action==='disconnect')result=await core.disconnect();
-    else if(action==='status')result=await core.api('/v1/agent/status');
+    else if(action==='status')result=await core.agentStatus();
     else throw new Error('Use agent connect, disconnect or status');
   }else if(command==='config'){
     const action=argv.shift();await core.ensureDaemon();

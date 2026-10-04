@@ -45,8 +45,8 @@ const closing=new CloseRequest(async()=>{
   try{return (await core.backend(config).inspect(config.name)).running;}catch{return true;}
 },async()=>{
   const options={type:'question' as const,title:'Close AstraBridge?',message:'Closing this window does not stop the runtime.',
-    detail:'Keep running leaves the container, connected agent and recording session active. Manual control is released when the window closes. Stop runtime stops the game and finishes the current recording before closing; it does not create a game save.',
-    buttons:['Cancel','Keep running','Stop runtime'],defaultId:1,cancelId:0,noLink:true};
+    detail:'Keep running leaves the container, connected agent and recording session active. Manual control is released when the window closes. Stop session stops the game and finishes the current recording before closing; it does not create a game save.',
+    buttons:['Cancel','Keep running','Stop session'],defaultId:1,cancelId:0,noLink:true};
   const result=window?await dialog.showMessageBox(window,options):await dialog.showMessageBox(options);
   return (['cancel','keep','stop'] as CloseChoice[])[result.response]??'cancel';
 },()=>core.stop(),async error=>{
@@ -148,6 +148,17 @@ app.whenReady().then(async()=>{
       }
       if(operation==='stop-game')return core.api('/v1/runtime/engine/stop','POST',{});
       if(operation==='agent-end')return core.api('/v1/runtime/agent/end','POST',{});
+      if(operation==='delete-recording'){
+        const rows=await core.recordings.list((await core.configured()).recordingsDirectory);
+        const row=rows.find(row=>row.id===args.id);
+        if(!row)throw new Error('Recording no longer exists. Refresh the list.');
+        const options={type:'warning' as const,message:`Delete ${row.name}?`,
+          detail:'The video, commentary timeline, metadata and recording logs will be permanently deleted. This cannot be undone.',
+          buttons:['Cancel','Delete recording'],defaultId:0,cancelId:0,noLink:true};
+        const decision=window?await dialog.showMessageBox(window,options):await dialog.showMessageBox(options);
+        if(decision.response!==1)return {cancelled:true};
+        return core.deleteRecording(row.id);
+      }
       if(operation==='recordings')return core.recordings.list((await core.configured()).recordingsDirectory);
       if(operation==='open-recordings-folder'){
         const directory=await core.recordingsFolder();const error=await shell.openPath(directory);if(error)throw new Error(error);return directory;

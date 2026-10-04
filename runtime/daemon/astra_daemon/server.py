@@ -56,7 +56,7 @@ def application(runtime: Runtime, token: str):
         data=await body(request) if request.can_read_body else {}
         if data.keys()-{'gpu','profile'}:raise BridgeError('invalid_arguments')
         if action=='start':return answer(await runtime.start_engine(data.get('gpu'),data.get('profile')))
-        if action=='stop':return answer(await runtime.stop_engine())
+        if action=='stop':return answer(await runtime.stop_engine('user_requested_stop'))
         if action=='restart':
             await runtime.stop_engine();return answer(await runtime.start_engine(data.get('gpu'),data.get('profile')))
         raise web.HTTPNotFound()
@@ -185,13 +185,21 @@ def application(runtime: Runtime, token: str):
                 try:await asyncio.wait_for(socket.send_json({'type':'status','data':status}),.5)
                 except Exception:sockets.discard(socket);await socket.close()
             await asyncio.sleep(.5)
+    async def shutdown_sockets(app):
+        # Close WebSockets before aiohttp waits for request handlers, not during
+        # cleanup_ctx: a still-open event channel otherwise delays container stop.
+        async def close(socket):
+            with contextlib.suppress(asyncio.TimeoutError, ConnectionError):
+                await asyncio.wait_for(socket.close(code=1001, message=b'Runtime stopping'), 1)
+        await asyncio.gather(*(close(socket) for socket in tuple(sockets)))
+    app.on_shutdown.append(shutdown_sockets)
+
     async def lifetime(app):
         tasks=[asyncio.create_task(runtime.tick()),asyncio.create_task(broadcast())]
         yield
         for task in tasks:task.cancel()
         for task in tasks:
             with contextlib.suppress(asyncio.CancelledError):await task
-        for socket in tuple(sockets):await socket.close()
         await runtime.close()
     app.cleanup_ctx.append(lifetime)
     app.add_routes([web.get('/health',health),web.get('/v1/runtime/status',status),web.get('/v1/runtime/gpus',gpus),

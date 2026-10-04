@@ -253,3 +253,14 @@ landing prediction. Existing OpenMW physics, collision, Acrobatics, fatigue,
 launch momentum and fall damage determine the result. No additional native
 engine patch or game-content plugin is required. Operational commands and
 result interpretation are documented in the [gameplay skill](../skill/references/navigation.md#jumping-and-falling).
+
+## Videos skipped in AstraBridge
+
+AstraBridge skips all videos: startup logos, the new-game introduction, credits,
+scripted cutscenes and animated menu backgrounds. This avoids spending agent
+session time on video playback. The game proceeds immediately after each video
+call; normal dialogue and gameplay are unaffected. The main menu uses its static
+background. Game files are not modified. This is a runtime policy enforced by
+`ASTRA_SKIP_VIDEOS=1` when launching the modified engine; standalone OpenMW
+without that flag keeps its normal playback behavior. See the
+[engine implementation](openmw-modifications.md#video-policy-inside-the-private-runtime).

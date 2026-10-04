@@ -53,3 +53,26 @@ async def test_viewer_disconnect_cancels_pending_encoder_start(tmp_path,monkeypa
     task=asyncio.create_task(r.viewer(True,'720p30'));await asyncio.to_thread(entered.wait,1)
     assert await asyncio.wait_for(r.viewer(False),.1)=={'running':False}
     resume.set();assert await task=={'running':False};assert closed and r.live is None
+
+
+@pytest.mark.asyncio
+async def test_user_stop_identifies_interrupted_action_and_preserves_diagnostics(tmp_path):
+    r=Runtime(tmp_path/'install',tmp_path/'state',tmp_path/'game')
+    entered=threading.Event();cancelled=threading.Event()
+    token=r.owner.acquire_agent('Agent')['session_token']
+    def execute(op,args):
+        entered.set();assert cancelled.wait(2)
+        return {'action':{'reason':'cancelled','motion':{'horizontal_m':1.2}}}
+    r.session=SimpleNamespace(session_id='session',control=SimpleNamespace(execute=execute,interrupt=cancelled.set),
+                              timeline=SimpleNamespace(emit=lambda *a,**kw:None))
+    r.running=lambda:r.session is not None
+    r.status=lambda:{'session_end':r.termination,'running':r.running()}
+    r._stop_engine=lambda:setattr(r,'session',None)
+    pending=asyncio.create_task(r.game(token,'act',{'seconds':30}))
+    await asyncio.to_thread(entered.wait,1)
+    result=await r.stop_engine('user_requested_stop')
+    assert result['session_end']['reason']=='user_requested_stop'
+    with pytest.raises(BridgeError,match='user_requested_stop') as exc:await pending
+    assert exc.value.details['retryable'] is False
+    assert exc.value.details['action_result']['action']['motion']['horizontal_m']==1.2
+    with pytest.raises(BridgeError,match='user_requested_stop'):await r.game(token,'observe',{})

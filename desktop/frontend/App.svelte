@@ -31,7 +31,7 @@
   let profiles:any[]=[],selectedProfile:any=null,profileForm='',profileName='',lastProfile='';
   let mapView:AtlasMap,mapRevision=0;
   $: if(preferencesReady){localStorage.setItem('overlayComments',String(showComments));localStorage.setItem('overlayActions',String(showActions));localStorage.setItem('overlayClocks',String(showClocks));}
-  $: if(video&&runtime.running&&!viewerDisabled&&!watching&&!connecting&&!viewerClosing&&!busy&&!stopping)void autoWatch();
+  $: if(video&&runtime.running&&!runtime.stopping&&!runtime.session_end&&!viewerDisabled&&!watching&&!connecting&&!viewerClosing&&!busy&&!stopping)void autoWatch();
   $: if(!runtime.running&&(watching||connecting)&&!viewerClosing&&!busy)void endWatch();
   $: if(runtime.game_fps!=null)lastFps=Math.max(0,runtime.game_fps);
   $: filteredRecordings=recordings.filter(row=>recordingsScope==='all'||row.profile_id===runtime.profile?.id);
@@ -74,6 +74,11 @@
     if(stopping)return;stopping=true;
     try{await task(async()=>{const request=window.astra.invoke('stop');await Promise.all([endWatch(),request]);if(restart)return window.astra.invoke('start');});}
     finally{stopping=false;}
+  }
+  async function deleteRecording(){
+    const row=selectedRecording;
+    const result=await task(()=>window.astra.invoke('delete-recording',{id:row.id}));
+    if(result?.deleted){selectedRecording=null;metadata=null;metadataOpen=false;await loadRecordings();notice='Recording deleted.';}
   }
   async function navigate(next:string){
     closeMenus();
@@ -268,12 +273,11 @@
 <svelte:head><title>AstraBridge</title></svelte:head>
 <div class="app-shell" class:play-shell={page==='play'}>
   <aside inert={fullscreen}>
-    <div class="brand"><span class="brand-mark">A</span><div>AstraBridge<small>OPENMW<br>RUNTIME</small></div></div>
+    <div class="brand"><span class="brand-mark">A</span><div>AstraBridge</div></div>
     <nav aria-label="Main navigation">
       {#each pages as [id,label]}<button class:active={page===id} aria-current={page===id?'page':undefined} title={label} on:click={()=>navigate(id)}><Icon name={id}/><span>{label}</span></button>{/each}
     </nav>
-    <div class="sidebar-footer" title={state.container?.running?'Runtime running':state.installed?'Runtime stopped':'Not installed'}><span class:online={state.container?.running} class="dot"></span><span class="runtime-label">{state.container?.running?'Runtime running':state.installed?'Runtime stopped':'Not installed'}</span>
-      {#if runtime.profile}<small class="active-profile" title={runtime.profile.name}>Profile · {runtime.profile.name}</small>{/if}
+    <div class="sidebar-footer">
       <small>{state.release?.version??''} · {state.backend??'Linux / Windows'}</small>
     </div>
   </aside>
@@ -282,12 +286,14 @@
       {#if runtime.profile}<span class="selected-profile" title={runtime.profile.name}><Icon name="profiles" size={16}/><span>Selected profile: <strong>{runtime.profile.name}</strong></span></span>{/if}</div>
       <div class="toolbar">
         {#if state.installed}
-          <span class="game-state"><span class="dot" class:online={runtime.running&&runtime.clocks?.game_active}></span>{stopping?'Stopping…':runtime.starting?'Starting game…':!runtime.running?'Game stopped':runtime.clocks?.game_active?'Gameplay running':'Game paused'}</span>
+          <span class="game-state"><span class="dot" class:online={runtime.running&&runtime.clocks?.game_active}></span>{stopping||runtime.stopping?'Stopping session…':runtime.starting?'Starting game…':runtime.running?(runtime.clocks?.game_active?'Gameplay running':'Game paused'):runtime.error?'Game stopped · error':state.container?.running?'Ready · game stopped':'Stopped'}</span>
+          {#if state.container?.running||runtime.starting||stopping}
+            <button class="session-stop" disabled={stopping||runtime.stopping} title="Disconnect the agent, finish recording, and stop the game and runtime. Game progress is not saved." on:click={()=>stopRuntime()}><Icon name="stop" size={17}/>{stopping||runtime.stopping?'Stopping…':'Stop session'}</button>
+          {/if}
           <details class="dropdown session-menu"><summary aria-label="Session options"><Icon name="more" size={19}/><span>Session</span></summary>
             <div class="menu-popover">
               <div class="menu-label">Runtime</div>
               <button disabled={busy||runtime.running||!state.container?.exists} on:click={()=>task(()=>window.astra.invoke('start'))}><Icon name="play" size={17}/>Start game</button>
-              <button disabled={(!state.container?.running&&!runtime.starting)||(busy&&!runtime.starting)} on:click={()=>stopRuntime()}><Icon name="stop" size={17}/>Stop runtime</button>
               <button disabled={busy} on:click={()=>stopRuntime(true)}><Icon name="restart" size={17}/>Restart</button>
               <div class="menu-divider"></div>
               <button on:click={()=>task(()=>window.astra.invoke('skill-export'),'Skill exported. Give the exported folder to your agent.')}><Icon name="export" size={17}/>Export gameplay skill</button>
@@ -316,6 +322,7 @@
           </div>
           <div class="viewer-tools">
             <span class="fps-counter" title="Rendered game frames per second">{runtime.running&&lastFps!==null?Math.round(lastFps):'—'} <span>fps</span></span>
+            {#if fullscreen}<button class="session-stop" disabled={stopping||runtime.stopping} title="Disconnect the agent, finish recording, and stop the game and runtime. Game progress is not saved." on:click={()=>stopRuntime()}><Icon name="stop" size={17}/>{stopping||runtime.stopping?'Stopping…':'Stop session'}</button>{/if}
             <button class="icon-button" disabled={!watching&&viewMode!=='replay'} on:click={changeMute} aria-label={muted?'Unmute':'Mute'} title={muted?'Unmute':'Mute'}><Icon name={muted?'mute':'volume'} size={18}/></button>
             {#if viewMode!=='live'}<span class="view-only">View only</span>
             {:else if manual}<button class="manual-button" aria-label="Release control" on:click={releaseInput}><Icon name="cursor" size={17}/>Release</button><button class="icon-button" aria-label={pointerCaptured?'Release pointer':'Lock pointer for camera'} aria-pressed={pointerCaptured} title="Capture mouse; Escape releases it" on:click={togglePointerCapture}><Icon name="mouse" size={17}/></button>
@@ -485,6 +492,7 @@
           <div class="toolbar recording-actions"><button on:click={()=>task(()=>window.astra.invoke('export-artifact',{path:selectedRecording.video,name:selectedRecording.name}),'Recording exported.')}><Icon name="export" size={18}/>Export MP4</button>
           {#if selectedRecording.events}<button on:click={()=>task(()=>window.astra.invoke('export-artifact',{path:selectedRecording.events,name:selectedRecording.name.replace(/\.mp4$/,'.events.jsonl')}),'Timeline exported.')}>Export timeline</button>{/if}
           {#if metadata}<button aria-expanded={metadataOpen} on:click={()=>metadataOpen=!metadataOpen}>Recording metadata</button>{/if}
+          <button class="danger" disabled={busy} on:click={deleteRecording}>Delete recording</button>
           {#if selectedRecording.events}<details class="dropdown recording-overlay-options"><summary class="icon-button" aria-label="Recording overlays"><Icon name="settings" size={17}/></summary><div class="menu-popover">
             <label class="checkbox"><input type="checkbox" bind:checked={showComments}>Commentary overlay</label><label class="checkbox"><input type="checkbox" bind:checked={showActions}>Action history overlay</label><label class="checkbox"><input type="checkbox" bind:checked={showClocks}>Session clocks</label>
           </div></details>{/if}</div>

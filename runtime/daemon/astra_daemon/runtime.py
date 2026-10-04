@@ -35,9 +35,9 @@ class Runtime:
         self.storage=Storage(self.root,game,installation)
         self.graphics=Graphics(installation,self.root)
         self.owner=Ownership();self.session=None;self.input=None;self.live=None
-        self.viewer_generation=0
+        self.viewer_generation=0;self.termination=None
         self.transition=False;self.mutation=asyncio.Lock()
-        self.starting=False;self.start_cancelled=threading.Event();self.start_log_offset=0
+        self.starting=False;self.stopping=False;self.start_cancelled=threading.Event();self.start_log_offset=0
         self.artifacts={};self.last_error=None;self.started=time.time()
         self.replay=Replay(self.recordings_root)
         self.atlas_cache={'supported':False}
@@ -64,7 +64,7 @@ class Runtime:
         def reading(stream,field,default=0):
             try:return getattr(stream,field) if stream else default
             except (ValueError,BufferError):return default  # A worker may just have closed its mmap.
-        return {'profile':self.profiles.public(),'running':self.running(),'starting':self.starting,'owner':self.owner.public(),'transitioning':self.transition,
+        return {'profile':self.profiles.public(),'running':self.running(),'starting':self.starting,'stopping':self.stopping,'session_end':self.termination,'owner':self.owner.public(),'transitioning':self.transition,
                 'active_action':session.control.status() if session else None,
                 'session':session.session_id if session else None,
                 'clocks':session.timeline.clocks() if session else None,
@@ -106,7 +106,7 @@ class Runtime:
                     raise BridgeError('restart_required_to_change_gpu')
                 return self.status()
             if self.session:await asyncio.to_thread(self._stop_engine)
-            self.starting=True;self.start_cancelled.clear();self.last_error=None
+            self.starting=True;self.start_cancelled.clear();self.last_error=None;self.termination=None
             log=self.root/'runtime/engine-private.log'
             self.start_log_offset=log.stat().st_size if log.exists() else 0
             try:await asyncio.to_thread(self._start_engine,gpu)
@@ -143,16 +143,26 @@ class Runtime:
             self.session=None
         self.owner.release()
 
-    async def stop_engine(self):
-        # A startup worker owns mutation while loading. Cancel it before waiting
-        # for that lock; a hung logo or failed handshake cannot block Stop.
-        if self.starting:
-            self.start_cancelled.set()
-            if self.session:await asyncio.to_thread(self.session.abort_startup)
-        async with self.mutation:
-            self.transition=True
-            try:await asyncio.to_thread(self._stop_engine)
-            finally:self.transition=False
+    async def stop_engine(self, reason=None):
+        if reason:
+            self.termination={'reason':reason,'at':time.time(),'session':self.session.session_id if self.session else None}
+            if self.session:
+                self.session.termination=self.termination
+                self.session.timeline.emit('session_end',**self.termination)
+            self._history('session_end',**self.termination)
+            if self.session:await asyncio.to_thread(self.session.control.interrupt)
+        self.stopping=True
+        try:
+            # A startup worker owns mutation while loading. Cancel it before waiting
+            # for that lock; a hung logo or failed handshake cannot block Stop.
+            if self.starting:
+                self.start_cancelled.set()
+                if self.session:await asyncio.to_thread(self.session.abort_startup)
+            async with self.mutation:
+                self.transition=True
+                try:await asyncio.to_thread(self._stop_engine)
+                finally:self.transition=False
+        finally:self.stopping=False
         return self.status()
 
     def _mode(self, mode):
@@ -207,12 +217,24 @@ class Runtime:
         return self.owner.public()
 
     async def game(self, token, op, args):
+        def stopped(end, **details):
+            return BridgeError('user_requested_stop',message='The user stopped this session. Do not reconnect or restart without a new user request.',
+                               session_end=end,retryable=False,**details)
+        if self.termination:raise stopped(self.termination)
         if self.transition:raise BridgeError('input_transitioning')
         self.owner.verify_agent(token)
         if not self.running():raise BridgeError('game_not_running')
-        return self.project(await asyncio.to_thread(self.session.control.execute,op,args))
+        session=self.session
+        try:result=await asyncio.to_thread(session.control.execute,op,args)
+        except Exception as exc:
+            if getattr(session,'termination',None):
+                raise stopped(session.termination,action_error=exc.response() if isinstance(exc,BridgeError) else str(exc)) from exc
+            raise
+        if getattr(session,'termination',None):raise stopped(session.termination,action_result=self.project(result))
+        return self.project(result)
 
     async def viewer(self, enabled, quality=None):
+        if enabled and (self.stopping or self.termination):raise BridgeError('session_stopping')
         self.viewer_generation+=1;generation=self.viewer_generation
         if not enabled and self.live is None:return {'running':False}
         async with self.mutation:
@@ -340,7 +362,7 @@ class Runtime:
                                 return session.observe(capture=False,passive=True)
                     await asyncio.to_thread(observe)
                 except Exception as exc:self.last_error=str(exc)
-            elif self.owner.mode!='idle' and not self.running():
+            elif not self.stopping and self.owner.mode!='idle' and not self.running():
                 if self.session:self.session.timeline.agent(False)
                 self.owner.release();self.last_error='game_exited'
             await asyncio.sleep(1)

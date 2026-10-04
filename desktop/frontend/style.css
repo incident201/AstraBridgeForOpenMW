@@ -231,7 +231,7 @@ summary { padding: 10px 0; color: #acc7f1; cursor: pointer; }
 .viewer-panel.viewer-fullscreen .replay-badge{top:76px}
 @media(max-width:1150px){.timeline{gap:8px}.timeline-time{font-size:10px}}
 
-.container-management{margin-top:auto;padding-top:12px;border-top:1px solid #344056}
+.container-management{margin-top:16px;padding-top:12px;border-top:1px solid #344056}
 .container-management h3{margin-top:0}
 
 .profiles-card{flex:1;display:flex;flex-direction:column;overflow:hidden}
@@ -418,16 +418,16 @@ button.record-button.recording:hover:not(:disabled){background:#49303f;border-co
 .viewer-panel .fps-counter{min-width:49px;text-align:right;font-variant-numeric:tabular-nums;font-size:11px;color:#aabbd0}
 .viewer-controls{height:38px;min-height:38px;padding:3px 10px}.viewer-controls .timeline{flex:1}
 .stream-overlays{position:absolute;inset:0;z-index:1;pointer-events:none;font-size:12px;text-shadow:0 1px 2px #000}
-.overlay-clocks{position:absolute;right:12px;top:12px;display:flex;gap:14px;background:#08101e30;border:0;border-radius:4px;padding:5px 7px;color:#abb7cb;font-size:11px}
+.overlay-clocks{position:absolute;right:12px;top:12px;display:flex;gap:14px;background:#08101eb8;border:1px solid #ffffff12;border-radius:5px;padding:7px 10px;color:#d2dbea;font-size:13px}
 .overlay-clocks>span{display:flex;align-items:center;gap:7px}.overlay-clocks b{font-variant-numeric:tabular-nums;font-weight:500}.overlay-clocks .clock-active{color:#9aebbf}
 .action-overlay{position:absolute;right:12px;top:55px;width:min(310px,45%);display:flex;flex-direction:column;gap:3px}
 .overlay-action{display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:4px;background:transparent;border-left:2px solid transparent;color:#c2d1e5;opacity:.6;font-size:11px;min-width:0}
 .overlay-action time,.overlay-comment time{font-variant-numeric:tabular-nums;color:#aab8ce;font-size:10px;white-space:nowrap}
 .overlay-action strong{white-space:nowrap;font-weight:500}.overlay-action>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-left:auto;color:#9bacbf}
 .overlay-action.in-progress{background:linear-gradient(90deg,#377cc838,transparent);border-left-color:#79b0ffaa;color:#edf5ff;opacity:.95}.overlay-action.failed{border-left-color:#e5ac6366}
-.comment-overlay{position:absolute;left:12px;bottom:56px;width:min(410px,50%);display:flex;flex-direction:column;gap:4px}
-.overlay-comment{display:flex;align-items:baseline;gap:9px;background:transparent;border-radius:0;padding:3px 4px;line-height:1.4;color:#e3ebf7;opacity:.65;text-shadow:0 1px 3px #000,0 0 6px #0009}
-.overlay-comment>span{white-space:pre-wrap;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.comment-overlay{position:absolute;left:12px;bottom:56px;width:min(580px,65%);max-height:calc(100% - 110px);overflow-y:auto;overscroll-behavior:contain;pointer-events:auto;scrollbar-width:thin;display:flex;flex-direction:column;gap:4px}
+.overlay-comment{flex-shrink:0;display:flex;align-items:baseline;gap:9px;background:transparent;border-radius:0;padding:3px 4px;line-height:1.4;color:#e3ebf7;opacity:.65;text-shadow:0 1px 3px #000,0 0 6px #0009}
+.overlay-comment>span{min-width:0;white-space:pre-wrap;overflow-wrap:anywhere}
 @media(max-width:1100px){.viewer-heading{gap:8px}.viewer-heading .controller-state{font-size:11px}.manual-label{display:none}.viewer-tools{gap:5px}.selected-profile{max-width:280px}}
 
 .overlay-comment:last-child{opacity:.88}.overlay-action time,.overlay-comment time{opacity:.65}
@@ -444,4 +444,15 @@ button.record-button.recording:hover:not(:disabled){background:#49303f;border-co
 .recording-expand{position:absolute;top:10px;left:10px;z-index:3;opacity:.65;background:#0b142255}
 .recording-expand:hover,.recording-expand:focus-visible{opacity:1}
 
-.installation-removal{border-top:1px solid #344158;margin-top:auto;padding-top:12px;flex-shrink:0}.installation-removal h3{font-size:13px;margin:0 0 5px}.installation-removal p{font-size:12px;margin:0 0 10px}.storage-problem{padding:12px 0}.storage-problem h3{margin:0 0 8px}.storage-problem p{color:#aabbd0;font-size:13px;max-width:700px}
+.installation-removal{border-top:1px solid #344158;margin-top:16px;padding-top:12px;flex-shrink:0}.installation-removal h3{font-size:13px;margin:0 0 5px}.installation-removal p{font-size:12px;margin:0 0 10px}.storage-problem{padding:12px 0}.storage-problem h3{margin:0 0 8px}.storage-problem p{color:#aabbd0;font-size:13px;max-width:700px}
+
+/* Installation content stays grouped instead of stretching between card edges. */
+.setup-card{flex:0 1 auto;max-height:100%;overflow-y:auto}
+.setup-card> *{flex-shrink:0}
+.setup-card>.tabs{margin:0 0 10px}
+.setup-card>p{margin:6px 0;line-height:1.5}
+.setup-card .setup-fields{flex:0 0 auto;overflow:visible}
+.setup-card .container-management h3{font-size:13px;margin:0 0 5px}
+.setup-card .container-management p{margin:0 0 10px}
+
+.stream-overlays:has(.action-overlay) .comment-overlay{width:min(580px,calc(100% - 350px))}

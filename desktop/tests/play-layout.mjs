@@ -71,6 +71,18 @@ try{
  for(const [width,height] of [[1920,1080],[1440,900],[1320,900],[1280,720],[960,680]]){
   await page.setViewportSize({width,height});await shot(`agent-${width}x${height}`);
  }
+ // Long commentary remains complete, readable and scrollable without shrinking video.
+ const beforeLong=await page.locator('.video-wrap').boundingBox();
+ await page.evaluate(()=>{window.fixture.runtime.timeline.push({id:'long',kind:'comment',wall_seconds:753,text:('A complete navigation thought, including the evidence and next step. '.repeat(45))+'END OF COMMENT'});window.fixture.emit();});
+ await page.waitForFunction(()=>document.querySelector('.overlay-comment:last-child')?.textContent.endsWith('END OF COMMENT'));
+ const comment=page.locator('.overlay-comment:last-child > span');
+ assert.ok(await comment.evaluate(e=>getComputedStyle(e).webkitLineClamp==='none'&&e.scrollHeight<=e.clientHeight+1),'Commentary must not be line-clamped or clipped');
+ await comment.evaluate(e=>e.parentElement.parentElement.scrollTop=e.parentElement.parentElement.scrollHeight);
+ assert.deepEqual(await page.locator('.video-wrap').boundingBox(),beforeLong);
+ await shot('complete-commentary-960');
+ assert.equal(await page.locator('.brand small,.sidebar-footer .active-profile,.sidebar-footer .runtime-label').count(),0);
+ assert.equal(await page.locator('.brand-mark').textContent(),'A');
+ assert.ok(await page.getByRole('button',{name:'Stop session',exact:true}).isVisible());
  const liveStarts=await page.evaluate(()=>window.fixture.calls.filter(x=>x.op==='live-start').length);
  const videoHandle=await page.locator('video[aria-label="Live Morrowind game"]').elementHandle();
  await page.getByRole('navigation').getByRole('button',{name:'Atlas',exact:true}).click();

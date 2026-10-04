@@ -1,4 +1,4 @@
-import {readdir,readFile,realpath,stat,lstat} from 'node:fs/promises';
+import {readdir,readFile,realpath,stat,lstat,unlink} from 'node:fs/promises';
 import {join,relative,sep,basename} from 'node:path';
 import {createHash} from 'node:crypto';
 import {RecordingTimeline} from './timeline';
@@ -32,6 +32,24 @@ export class Recordings {
   private artifact(root:string,path:string){
     const id=createHash('sha256').update('host-recording:'+path).digest('hex').slice(0,32);
     this.files.set(id,{root,path});return '/v1/artifacts/'+id;
+  }
+  async remove(root:string,id:string){
+    const row=(await this.list(root)).find(row=>row.id===id);
+    if(!row)throw new Error('Recording no longer exists. Refresh the list.');
+    const file=await this.path(row.video.split('/').pop()!);
+    if(!file)throw new Error('Recording unavailable');
+    const stem=file.slice(0,-4);
+    // Only exact recorder-owned siblings; never wildcard-delete by prefix.
+    for(const suffix of ['.json','.context.json','.encoder.json','.events.jsonl','.ffmpeg.log','.finalize.log','.finalizing.mp4','.mp4']){
+      const target=stem+suffix;
+      try{
+        if(!(await lstat(target)).isFile())continue;
+        await unlink(target);
+      }catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
+    }
+    this.timelines.delete(stem+'.events.jsonl');
+    for(const [key,entry] of this.files)if(entry.path===file||entry.path.startsWith(stem+'.'))this.files.delete(key);
+    return {deleted:true};
   }
   async list(root:string){
     const rows:any[]=[];

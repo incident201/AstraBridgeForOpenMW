@@ -294,15 +294,27 @@ Useful existing checks include [media-clock/transport tests](../runtime/tests/te
 Many tests use fixtures or mocked adapters. They complement, rather than
 replace, live checks of the affected GUI, action and capture paths in OpenMW.
 
-### Video playback inside the private runtime
+### Video policy inside the private runtime
+
+AstraBridge sets `ASTRA_SKIP_VIDEOS=1` when launching OpenMW. The
+`AstraMedia::skipVideos()` helper in `components/sdlutil/astramedia.hpp` makes
+`MWGui::WindowManager::playVideo` return before opening a decoder or changing
+UI/audio state. This skips company and game logos, the new-game introduction,
+credits, and all script-triggered cutscenes, including normally unskippable
+videos. Scripts continue immediately after their video call. In
+`apps/openmw/mwgui/mainmenu.cpp`, the same policy disables the animated menu
+background and uses the ordinary static background. No game files are altered.
+Standalone OpenMW without this environment flag retains normal playback.
+
+### Video playback when enabled outside AstraBridge
 
 `MWGui::WindowManager::playVideo` runs a nested rendering loop outside the normal
 engine frame update. The patch in `runtime/native/patch_engine.py` advances
 AstraMedia, refills/mixes OpenAL loopback audio, and stamps completed movie frames
 inside that loop. Without it, movies with audio can wait indefinitely for an
 audio clock that never advances (including the company logo in a clean Steam
-installation). This preserves logos, introduction videos and other cutscenes;
-it does not skip them. Recording and live view receive their ordinary completed
+installation). This supports logos, introduction videos and other cutscenes
+when the skip policy is not enabled. Recording and live view receive their ordinary completed
 frames and audio through FrameStream/MediaStream.
 
 `AstraMedia::MovieScope` marks this nested loop. During movie playback,

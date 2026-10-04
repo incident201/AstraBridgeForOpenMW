@@ -131,3 +131,16 @@ Periodic clock samples follow the engine media clock; complete JSONL records are
 indexed incrementally, independently of MP4 capture/finalization. Thinking pauses
 have no video duration, so events during such a pause share a recording position.
 All those messages belong to that same frame; their wall timestamps retain order.
+
+### Removing a recording
+
+Select a video in **Recordings** and choose **Delete recording**. Confirmation
+permanently removes the MP4, its commentary/action timeline, metadata and encoder
+logs from the host folder. Other videos and game/profile data are kept. This
+works while the container is stopped; it does not start the runtime. An unfinished
+video cannot be removed while recording is active. The recordings folder can
+still be opened directly with **Open folder**.
+
+Commentary overlays display complete messages with line wrapping. When recent
+messages exceed the available space, the overlay itself scrolls; the game view
+keeps its size. Live, replay and fullscreen use the same overlay layout.

@@ -36,11 +36,10 @@ try{
  await page.getByRole('navigation').getByRole('button',{name:'Play',exact:true}).click();
  await page.getByRole('button',{name:'Start game',exact:true}).click();
  await page.getByRole('heading',{name:'Starting Morrowind…',exact:true}).waitFor();
- await page.getByLabel('Session options',{exact:true}).click();
- assert.ok(await page.getByRole('button',{name:'Stop runtime',exact:true}).isEnabled());
+ assert.ok(await page.getByRole('button',{name:'Stop session',exact:true}).isEnabled());
  await page.screenshot({path:join(output,'cancellable-startup.png')});
- await page.getByRole('button',{name:'Stop runtime',exact:true}).click();
- await page.waitForFunction(()=>document.querySelector('.game-state').textContent.includes('Game stopped'));
+ await page.getByRole('button',{name:'Stop session',exact:true}).click();
+ await page.waitForFunction(()=>document.querySelector('.game-state').textContent.includes('Stopped'));
  assert.ok(!(await page.locator('.game-state').textContent()).includes('running'));
  console.log('Missing storage returns to editable setup; loading has an enabled Stop action.');
 }finally{await browser.close();}

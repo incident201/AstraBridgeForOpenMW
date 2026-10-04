@@ -1,4 +1,5 @@
 #include "mainmenu.hpp"
+#include <components/sdlutil/astramedia.hpp>
 
 #include <MyGUI_Gui.h>
 #include <MyGUI_InputManager.h>
@@ -105,7 +106,7 @@ namespace MWGui
 
         constexpr VFS::Path::NormalizedView menuBackgroundVideo("video/menu_background.bik");
 
-        mHasAnimatedMenu = mVFS->exists(menuBackgroundVideo);
+        mHasAnimatedMenu = !AstraMedia::skipVideos() && mVFS->exists(menuBackgroundVideo);
         mDisableGamepadCursor = Settings::gui().mControllerMenus;
 
         updateMenu();

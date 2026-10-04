@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,rm,symlink,realpath} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,rm,symlink,realpath,readdir} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {Recordings} from '../main/recordings';
+import {Core} from '../main/core';
 import {gameDataDirectory} from '../main/game-data';
 import {localArtifact} from '../main/local-artifact';
 
@@ -55,5 +56,36 @@ test('game folder selection detects case, direct data folders and explicit custo
   await mkdir(join(root,'custom'));assert.equal(await gameDataDirectory(root,'custom'),'custom');
   await assert.rejects(()=>gameDataDirectory(root,'..'),/inside/);
   await assert.rejects(()=>gameDataDirectory(join(root,'custom')),/Select/);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+
+test('deleting a host recording removes only its video and known sidecars',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'recording-delete-'));
+ try{
+  for(const name of ['Trip.mp4','Trip.json','Trip.events.jsonl','Trip.context.json','Trip.encoder.json','Trip.ffmpeg.log','Trip.finalize.log','Trip.finalizing.mp4','Trip.notes.txt','Trip-longer.mp4'])await writeFile(join(root,name),'{}');
+  const recordings=new Recordings(),rows=await recordings.list(root),row=rows.find(row=>row.name==='Trip.mp4')!;
+  await assert.rejects(()=>recordings.remove(root,'../Trip'),/no longer exists/);
+  assert.deepEqual(await recordings.remove(root,row.id),{deleted:true});
+  assert.deepEqual((await readdir(root)).sort(),['Trip-longer.mp4','Trip.notes.txt']);
+  assert.equal(await recordings.path(row.video.split('/').pop()!),null);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+
+test('Desktop deletes offline recordings without starting a daemon and guards active capture',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'recording-core-delete-'));
+ try{
+  await writeFile(join(root,'clip.mp4'),'video');
+  const core=new Core(root,join(root,'installation.json'));
+  core.configured=async()=>({recordingsDirectory:root,name:'test'} as any);
+  let running=true;
+  core.backend=()=>({inspect:async()=>({running})} as any);
+  core.api=async()=>({recording:{recording:true}});
+  const [row]=await core.recordings.list(root);
+  await assert.rejects(()=>core.deleteRecording(row.id),/Stop recording/);
+  running=false;core.api=async()=>{throw Error('Offline delete must not use the API');};
+  assert.equal((await core.deleteRecording(row.id)).deleted,true);
+  assert.equal((await core.recordings.list(root)).length,0);
  }finally{await rm(root,{recursive:true,force:true});}
 });

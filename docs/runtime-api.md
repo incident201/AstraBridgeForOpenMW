@@ -232,13 +232,31 @@ current MP4 with its sidecar. No future event is shown in a rewound view.
 
 ## Startup and installation failures
 
-Runtime status includes `starting`, separately from `running`. A process becomes
+Runtime status includes `starting` and `stopping`, separately from `running`. A process becomes
 running only after its initial bridge handshake and window initialization.
 Startup failures remain in `error` and are returned with an actionable message.
 Stop cancels initialization before waiting for the normal lifecycle lock; an
 uninitialized process is terminated without waiting for an unavailable Lua inbox.
-Short `ping`, `quit` and `stop` time budgets are honored.
+Short `ping`, `quit` and `stop` time budgets are honored. During daemon shutdown,
+event WebSockets close in the server's shutdown phase, before it waits for active
+request handlers. Persistent recording finalization remains part of engine stop.
 
 Desktop status reports missing managed volumes and interrupted removal. Setup
 provides configuration reset and resource-scoped uninstall, independently of the
 update/recovery path. These are host management operations, not gameplay commands.
+
+## User-requested session termination
+
+Desktop **Stop session** / `astrabridge stop` records a host-side `session_end`
+with `reason: "user_requested_stop"` and a timestamp before stopping the runtime.
+This remains available through `astrabridge status` and `astrabridge agent status`
+after the container exits. A new explicit host start clears the marker; agent
+connect alone cannot silently undo it.
+
+The engine-stop Runtime API records the same reason before interrupting input.
+An in-flight Game API command returns `error: "user_requested_stop"`,
+`retryable: false` and `session_end`; `action_result` or `action_error` preserves
+its available diagnostics. Later commands report the deliberate termination
+instead of a generic missing connection. The event is written into session
+history and the recording timeline before finalization. Unexpected process or
+network failures without a user-stop marker keep their original error.

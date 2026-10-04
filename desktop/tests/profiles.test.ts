@@ -7,6 +7,7 @@ import {Core,type Installation} from '../main/core';
 
 test('connecting passes the expected profile to startup before acquiring control',async()=>{
  const core=new Core('/unused');const calls:string[]=[];
+ core.configured=async()=>({} as any);
  core.start=async(_gpu,profile)=>{calls.push('start');assert.equal(profile,'chosen');throw Error('profile_mismatch');};
  core.api=async()=>{calls.push('connect');};
  await assert.rejects(()=>core.connect('Agent','chosen'),/profile_mismatch/);assert.deepEqual(calls,['start']);

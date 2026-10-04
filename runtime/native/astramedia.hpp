@@ -21,6 +21,12 @@
 
 namespace AstraMedia
 {
+    // Runtime policy, independent of whether the audiovisual transport is enabled.
+    inline bool skipVideos()
+    {
+        const char* value = std::getenv("ASTRA_SKIP_VIDEOS");
+        return value && std::strcmp(value, "1") == 0;
+    }
     constexpr unsigned Rate = 48000;
     struct Frame { std::uint64_t number=~std::uint64_t(0), start=0, end=0; unsigned flags=0; };
     class Stream
