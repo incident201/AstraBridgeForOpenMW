@@ -41,4 +41,4 @@ def test_feedback_never_confuses_submission_with_success():
     trade=feedback('choose',{'submitted':True,'changes':{'gold_change':-10}},{},{})
     assert trade['status']=='observed_change' and trade['events'][0]['amount']==-10
     stuck=feedback('act',{'reason':'duration','motion':{'moved_m':0}},{},{},{'move':1})
-    assert stuck['status']=='blocked' and stuck['reason']=='no_observed_movement'
+    assert stuck['status']=='blocked' and stuck['reason']=='no_horizontal_progress'

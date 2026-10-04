@@ -1,5 +1,8 @@
 """Fresh, declarative selection and postconditions; no arbitrary evaluation."""
 import re
+import math
+
+from .outcomes import horizontal_displacement
 from .protocol import BridgeError, number
 
 REF_OPS={'focus','approach','interact','lock','track','strike','cast','target_info',
@@ -32,10 +35,11 @@ def validate_step(step, bindings):
         if selector is None or not isinstance(name,str) or not re.fullmatch(r'[A-Za-z][A-Za-z0-9_]*',name):raise BridgeError('invalid_sequence_binding')
         bindings.add(name)
     expectation=step.get('expect',{})
-    if not isinstance(expectation,dict) or expectation.keys()-{'ui_mode','location','location_changed','outcome','inventory_delta','gold_delta'}:raise BridgeError('invalid_expectation')
+    if not isinstance(expectation,dict) or expectation.keys()-{'ui_mode','location','location_changed','outcome','inventory_delta','gold_delta','min_horizontal_displacement_m'}:raise BridgeError('invalid_expectation')
     for key,value in expectation.items():
         if key=='location_changed':
             if type(value) is not bool:raise BridgeError('invalid_expectation')
+        elif key=='min_horizontal_displacement_m':number(value,0,math.inf)
         elif key=='gold_delta':number(value,-1e12,1e12)
         elif key=='inventory_delta':
             if not isinstance(value,dict) or set(value)!={'name','delta'} or not isinstance(value['name'],str) or not value['name'] or type(value['delta']) is not int:raise BridgeError('invalid_expectation')
@@ -76,9 +80,14 @@ def inventory_count(session,name):
     return sum(r.get('count',1) for r in session.command('inspect',{'view':'inventory'}).get('items',[]) if r.get('name')==name)
 
 
-def check_expectation(session, expected, before, after, action, initial_count=None):
+def check_expectation(session, expected, before, after, action, initial_count=None, summary=None):
     checks=[]
     for key,value in expected.items():
+        if key=='min_horizontal_displacement_m':
+            actual=summary.get('horizontal_displacement_m') if summary is not None else horizontal_displacement(action)
+            checks.append({'condition':key,'expected':value,'actual':actual,'met':actual is not None and actual>=value,
+                           **({'reason':'movement_not_comparable'} if actual is None else {})})
+            continue
         if key=='outcome':actual=action.get('outcome')
         elif key=='location_changed':actual=before.get('location')!=after.get('location')
         elif key=='gold_delta':actual=after.get('stats',{}).get('gold',0)-before.get('stats',{}).get('gold',0)

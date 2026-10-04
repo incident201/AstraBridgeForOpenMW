@@ -138,7 +138,7 @@ def build_parser():
     p.add_argument('--query');p.add_argument('--page',type=int,default=0);p.add_argument('--limit',type=int,default=20)
     p=commands.add_parser('action-result');p.add_argument('ref',nargs='?')
     p.add_argument('--view',type=int,help='Zero-based scan view; does not move the camera')
-    p.add_argument('--section',choices=[*SECTIONS,'action','feedback'])
+    p.add_argument('--section',choices=[*SECTIONS,'action','feedback','summary'])
     p.add_argument('--query');p.add_argument('--page',type=int);p.add_argument('--limit',type=int)
     p=commands.add_parser('autosave');p.add_argument('--enabled',action=argparse.BooleanOptionalAction,default=None)
     p.add_argument('--interval',type=float);p.add_argument('--slots',type=int)

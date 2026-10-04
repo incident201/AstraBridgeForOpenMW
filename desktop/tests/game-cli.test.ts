@@ -35,3 +35,25 @@ test('knowledge checkpoint JSON remains nested and brief has no payload',()=>{
   assert.deepEqual(parseGame(catalog,['knowledge','update','--ref','note_1','--status','done']).args,
     {action:'update',ref:'note_1',status:'done'});
 });
+
+test('summary receipt queries and movement expectations reach the Game API unchanged',()=>{
+  assert.deepEqual(parseGame(catalog,['action-result','request','--section','summary']).args,
+    {ref:'request',section:'summary'});
+  const args={actions:[{op:'act',move:1,seconds:3,expect:{min_horizontal_displacement_m:.5}}]};
+  assert.deepEqual(parseGame(catalog,['sequence',JSON.stringify(args)]).args,args);
+});
+
+test('documented response wrapper retains movement, blockers, screenshots and errors',()=>{
+  const source=readFileSync('../skill/references/commands.md','utf8').match(/```js\n([\s\S]*?)```/)![1];
+  const execute=new Function('stdout','stderr','process','console',source);
+  const success={ok:true,result:{request_id:'request',summary:{termination:'time_limit',encountered_blockers:['actor']},
+    feedback:{status:'partial'},action:{motion:{forward_m:0,vertical_m:-.46}},observation:{screenshot:'/observed.png'}}};
+  for(const packet of [success,{ok:false,error:'game_operation_timeout',request_id:'request'}]){
+    let out='',err='';const process={exitCode:0,stdout:{write:(s:string)=>out+=s},stderr:{write:(s:string)=>err+=s}};
+    execute(JSON.stringify(packet),'diagnostic',process,{log:(s:string)=>out+=s+'\n'});
+    assert.deepEqual(JSON.parse(out),packet);assert.equal(err,'diagnostic');assert.equal(process.exitCode,packet.ok?0:1);
+  }
+  let out='',err='';const process={exitCode:0,stdout:{write:(s:string)=>out+=s},stderr:{write:(s:string)=>err+=s}};
+  execute('partial reply','connection lost',process,{log:()=>assert.fail('Partial JSON was accepted')});
+  assert.equal(out,'partial reply');assert.equal(err,'connection lost');assert.equal(process.exitCode,1);
+});

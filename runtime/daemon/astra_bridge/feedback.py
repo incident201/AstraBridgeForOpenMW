@@ -1,4 +1,5 @@
 """Describe observed outcomes; submission alone is never promoted to success."""
+from .outcomes import no_horizontal_progress
 
 def feedback(op, action, before, after, inputs=None):
     why=action.get('reason')
@@ -11,7 +12,7 @@ def feedback(op, action, before, after, inputs=None):
         state='rejected'
     elif why in {'jump_not_started','player_down','action_not_started'}:
         state='failed'
-    elif why in {'blocked','no_path','path_end_out_of_reach','endpoint_mismatch','height_mismatch','navigation_unavailable','cannot_act','maneuver_blocked','ground_required','shot_path_blocked',
+    elif why in {'no_horizontal_progress','no_observed_movement','blocked','no_path','path_end_out_of_reach','endpoint_mismatch','height_mismatch','navigation_unavailable','cannot_act','maneuver_blocked','ground_required','shot_path_blocked',
                  'no_route_progress','repeated_positions','repeated_obstruction','target_obstructed','viewpoint_blocked','viewpoint_adjustment_needed','target_not_aimed'}:
         state='blocked'
     elif why in {'entered_water','levitation_active','target_lost','ui_open','ui_input_required','game_paused','player_controls_disabled','cancelled','location_changed','player_hurt','swimming_requires_manual_control','cast_not_confirmed','shot_not_confirmed','weapon_changed','health_low','levitation_ended','water_walking_ended','sequence_time_limit'}:
@@ -23,8 +24,6 @@ def feedback(op, action, before, after, inputs=None):
     if movement and state=='succeeded' and movement.get('reason') not in {'maneuver_complete','target_down','following_finished'}:
         state='partial'
     inputs=inputs or {}
-    if op=='act' and why=='duration' and (inputs.get('move') or inputs.get('strafe')) and action.get('motion',{}).get('moved_m',1)<.05:
-        state='blocked';why='no_observed_movement'
     aerial=action.get('aerial',{})
     if op in {'act','trigger'} and action.get('reason')=='duration' and aerial and not aerial.get('took_off'):
         state='failed';why='jump_not_started'
@@ -87,6 +86,10 @@ def feedback(op, action, before, after, inputs=None):
     elif notices & {'lock_failed','trap_failed'}:state='failed';why=next(e['kind'] for e in events if e['kind'] in {'lock_failed','trap_failed'})
     elif 'lock_impossible' in notices:state='rejected';why='lock_impossible'
     elif notices & {'lock_opened','trap_disarmed'}:state='succeeded'
+    if state=='succeeded' and no_horizontal_progress(op,action,inputs):
+        # A successful activation can coexist with unsuccessful movement. Keep
+        # its event, but do not let that side effect certify horizontal progress.
+        state='partial' if action.get('outcome') else 'blocked';why='no_horizontal_progress'
     if action.get('reason')=='ui_input_required':
         state='interrupted';why='ui_input_required'
         events.append({'kind':'ui_input_required','next_command':'ui'})

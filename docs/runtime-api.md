@@ -66,6 +66,42 @@ normal UI callbacks and action validation. Runtime management does not become
 an alternate gameplay knowledge API; the skill still restricts gameplay agents
 to their intended public operations and observed information.
 
+## Action outcome summaries
+
+Ordinary action responses and composed `sequence`/`revisit` results include a
+`summary` derived from the full result before output compaction. It mirrors the
+effective feedback status/reason, normalizes time-limit termination separately,
+and retains encountered blocking categories, stalled-attempt counts and measured
+horizontal endpoint displacement. Navigation commands also report whether their
+destination was reached. Historical blockers do not imply a currently blocked
+endpoint, and a zero displacement alone does not identify an obstacle.
+
+Direct horizontal input is assessed in the horizontal plane; vertical motion
+cannot satisfy it. `act`, directed `jump` and `air-move` use a 0.05 m tolerance
+and allow inputs shorter than 0.2 simulation seconds for acceleration/frame
+latency. Failure is `no_horizontal_progress`, with confirmed independent side
+effects retained. The original 3D `motion.moved_m` field keeps its meaning.
+
+Composed results retain child feedback and summaries. Sequence feedback preserves
+negative child outcomes; unmet explicit expectations fail the sequence, time
+limits are partial, and remaining steps do not execute. The optional
+`expect.min_horizontal_displacement_m` checks one step's finite nonnegative
+minimum displacement; missing/discontinuous measurements fail rather than being
+substituted with zero. `stopped_step` is one-based and can identify a step whose
+execution never started. Existing completed/total action counts are retained.
+
+The summary can also be read from a durable receipt with
+`action-result REQUEST_ID --section summary`, without advancing the game.
+
+The sequence/revisit endpoint metric uses only the player's positions already
+observed for the Atlas, in one unchanged coordinate frame. It is not the sum of
+step distances and is unavailable across observed transitions or timeline/frame
+resets. Raw coordinates are not exposed. Revisit also records bounded attempt
+reasons separately from motor steps, preserving earlier obstruction evidence
+when a later attempt consumes the remaining time. These changes do not alter the
+route planner, engine physics or retry policy. The [response reference](../skill/references/commands.md#keep-outcome-diagnostics-in-wrappers)
+describes the fields and a wrapper that preserves diagnostics.
+
 ## Working-task memory
 
 The Game API accepts `knowledge` with `action: checkpoint` and a nested

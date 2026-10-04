@@ -71,3 +71,30 @@ Only the final observation captures an image. Intermediate structured results,
 `steps`, `completed_actions` and the stopping reason remain available. This saves
 model round trips and screenshots without turning a sequence into an atomic
 transaction. Individual steps can still have their ordinary brief pause boundary.
+
+## Require a measurable horizontal displacement
+
+Use `expect.min_horizontal_displacement_m` when a subsequent step should run only
+after the current step has actually moved far enough in the horizontal plane:
+
+```sh
+astrabridge game sequence '{"actions":[{"op":"act","move":1,"seconds":3,"expect":{"min_horizontal_displacement_m":0.5}},{"op":"wait_until","condition":"fatigue","percent":100,"seconds":10}],"max_seconds":15}'
+```
+
+This checks the displacement of that step, in metres. The value must be finite
+and nonnegative. It does not measure path length or prove progress toward a
+particular destination. An unavailable/non-comparable measurement fails the
+check, even for a zero threshold, with `actual:null` and
+`reason: movement_not_comparable`.
+
+Failure returns `expectation_failed`, includes the actual value in `steps[].checks`
+and prevents subsequent steps. Basic horizontal-input failures are detected by
+`feedback` even without an explicit expectation. Thus jumping up and falling
+back down against an obstacle cannot make a requested walk forward succeed.
+
+Each `steps[]` entry retains its `feedback` and available `summary`. The sequence's
+feedback preserves a failed/blocked/partial child result; it reports success only
+when all steps and checks complete. `summary.stopped_step` locates the failed or
+unstarted step. Summary warnings do not replace a negative feedback status.
+An intentional out-and-back sequence may finish with zero endpoint displacement
+and no warning if its individual movements succeeded.

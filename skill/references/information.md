@@ -80,7 +80,7 @@ astrabridge game action-result heal-at-door-01 --full
 
 Every ordinary command also returns an automatically generated `request_id`. `status.active_action` reports it while the command runs; `action-result` without a ref returns the most recent receipt. Result queries work while another action is active.
 
-Use `action-result REQUEST_ID --section action` or `--section feedback` to read only that part. `--page` and `--limit` page action steps and observation lists; `--query` filters observation rows. The full receipt remains available with `--full`.
+Use `action-result REQUEST_ID --section summary`, `--section action` or `--section feedback` to read only that part. Summary reads preserve the full-result diagnostics even when the original compact output omitted earlier steps. `--page` and `--limit` page action steps and observation lists; `--query` filters observation rows. The full receipt remains available with `--full`.
 
 Receipts live in `runtime/action-results.sqlite3`. Status is `submitted`, `completed`, `rejected`, or `unknown`. A controller restart converts unfinished receipts to `unknown`. Reusing the same ID and arguments returns the saved receipt under `response` and **never executes the action again**; using it with different arguments is rejected. `completed` means the command returned, not necessarily that the gameplay objective succeeded: check its action/feedback. `unknown` means the mutation might have happened. Observe/stop/recover before deciding on a fresh action; do not retry consumables on assumption.
 

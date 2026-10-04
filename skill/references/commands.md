@@ -107,3 +107,54 @@ Character summary includes identity, sign, level, health/magicka/fatigue, eight 
 `body.levitation`, `water_walking`, `water_breathing`, and `slow_fall` mean the effect is active. They do not prove that the character is airborne, on the water surface, or safe from drowning. Check `on_ground`, `swimming`, `submerged` and observed movement.
 
 Reading inventory does not open the inventory UI. `use-item` is for **owned** items; world pickups need `interact`. `inspect inventory` includes normal tooltip details, condition, charges/uses and known effects without opening the menu. Undiscovered ingredient/potion effects remain question marks.
+
+## Keep outcome diagnostics in wrappers
+
+AstraBridge already returns compact JSON. Forward that envelope as-is when
+calling it from an agent tool. For example, with the command's output strings in
+`stdout` and `stderr`:
+
+```js
+try {
+  const response = JSON.parse(stdout);
+  console.log(JSON.stringify(response));
+  if (response.ok === false) process.exitCode = 1;
+} catch {
+  process.stdout.write(stdout); // Preserve a partial/non-JSON response.
+  process.exitCode = 1;
+}
+if (stderr) process.stderr.write(stderr);
+```
+
+Do not reduce an action result to `result.action.reason`: `duration` can mean
+input finished while `feedback` reports failure. A sequence can also stop after
+an earlier step already changed the world. If parsing/transport fails, preserve
+the raw diagnostic and recover the receipt; do not assume the action did not run.
+
+Read `result.summary` first for ordinary actions, `revisit` and `sequence`:
+
+| Field | Meaning |
+|---|---|
+| `status`, `reason` | The effective feedback status/reason; the summary does not apply a separate success rule. |
+| `termination` | `time_limit` for a simulation/wall/turn/condition time limit; otherwise the effective reason. The original reason remains alongside it. |
+| `horizontal_displacement_m` | Measured horizontal distance between the action's start and finish. For a sequence/revisit, this is its overall endpoint displacement, not a sum of steps or travelled path length. `null` means a comparable measurement is unavailable, including a changed coordinate frame. |
+| `destination_reached` | Present for navigation to a destination (`go`, `walk`, `move-local`, `fly`, `swim`, `revisit`, `return-to`). It reflects `arrived`; a general sequence has no inferred overall destination. |
+| `encountered_blockers` | Distinct `blocked_by` values actually reported during the action, including earlier attempts. They describe history, not necessarily what is blocking the final position. No NPC or wall is inferred from a lack of progress alone. |
+| `stalled_attempts` | Reported no-progress/blocked attempts. Revisit counts its stopped route attempts, independently of its motor's recovery/replan counters. Nested results are counted once. |
+| `warnings` | Includes `no_horizontal_progress` when an explicit horizontal movement failed to advance; zero overall displacement by itself does not imply failure. |
+| `completed_actions`, `total_actions`, `stopped_step` | When present, sequence counts and the one-based step that stopped or could not start. A completed input can still fail its expected result. |
+
+For explicitly directed `act`, `jump` and `air-move`, less than 0.05 m of horizontal
+endpoint displacement after at least 0.2 s of requested and elapsed input produces
+`no_horizontal_progress`. Falling/rising does not count as horizontal movement.
+Short inputs and stationary jumps are exempt. A confirmed activation combined
+with unsuccessful movement is partial: its confirmed side effects remain in events.
+
+If a wrapper must filter output, retain `ok`, `error`, `message`, `request_id`,
+`summary`, the whole `feedback` and `action`, and `observation` (including its
+screenshot, messages and modal/body state). A screenshot path still needs to be
+opened for visual inspection. Retrieve omitted steps using
+`action-result REQUEST_ID --full`; a compact response keeps only the last eight
+steps, while its summary was computed from the full result. Use
+`action-result REQUEST_ID --section summary` to recover just that summary without
+recapturing an image or advancing the game.

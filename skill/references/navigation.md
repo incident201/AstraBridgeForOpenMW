@@ -253,3 +253,20 @@ These complement the automatically drawn travel path:
 For `return-to`/`revisit`, time defaults to 60 s and has no fixed upper cap. Always refresh `observe` before creating a note: `remember` uses the latest observation, not a fresh screenshot of its own.
 
 Record visible landmarks, how you entered, and decisions at junctions. If a point has multiple visits and little new progress, inspect its past screenshots and choose a different observed route. Avoid repeatedly issuing the same blocked movement without new evidence.
+
+## Read a stopped revisit
+
+`revisit`/`return-to` return a top-level `summary` separating the reason the command
+ended from obstacles encountered earlier. For example, `termination: time_limit`
+can coexist with `destination_reached:false`, `encountered_blockers:["actor"]`
+and `stalled_attempts:2`. This does not establish that more seconds will solve the
+route; inspect the current scene and navigation details before choosing a retry.
+The `actor` category is emitted only when a motor result actually reported it.
+
+`action.attempts` retains each route attempt's reason and reported elapsed time. If a retry raises an error without returning
+an action result, its entry has `result_available:false`; this is not proof
+that no action was submitted. `action.steps`
+retains the underlying movement/interaction results and their feedback. These
+are diagnostic additions; the learned-route planner, retry budget and collision
+rules are unchanged. Earlier blockers remain in the summary even when compact
+output omits older steps; obtain the full receipt when investigating the path.

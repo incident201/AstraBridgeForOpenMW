@@ -110,8 +110,8 @@ Thinking consumes no game time; movement, turns and waits do. A still NPC may
 need time to advance. Choose durations from the situation, not a fixed micro-step.
 `status` and `stop` remain usable during a long action; honor a stop request promptly.
 
-Check `feedback`, `action.reason`, actual movement, messages and the resulting
-state before dependent actions. `ok:true` means the request returned, not that
+Read `summary`, `feedback`, actual movement and the resulting state before
+dependent actions; keep the [full compact response](references/commands.md#keep-outcome-diagnostics-in-wrappers) in tool wrappers. `ok:true` means the request returned, not that
 the gameplay objective succeeded. On a modal (`ui_input_required`), read its
 controls and resolve it; closing it does not resume the interrupted action.
 On obstruction, changed UI or lost targets, reassess instead of blindly repeating.

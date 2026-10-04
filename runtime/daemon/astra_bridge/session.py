@@ -23,6 +23,7 @@ from .feedback import feedback
 from .exploration import ExplorationAtlas
 from .control import Control
 from .observations import prune_screenshots, present_response
+from .outcomes import summarize
 from . import workflows
 from . import information
 from .knowledge import Knowledge
@@ -703,6 +704,7 @@ class Session:
                     result['feedback']=feedback(op,result['action'],before,result['observation'],args)
                     if result['feedback']['reason']=='player_down':
                         result['action']['reason']='player_down';result['action']['outcome']='interrupted'
+                    summarize(result,op)
                     self.memory.record_step(op,args,result['action'],result['observation'])
             with open(self.runtime / "actions.jsonl", "a") as log:
                 log.write(json.dumps({"op": op, "args": args, "result": present_response(result),

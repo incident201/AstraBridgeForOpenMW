@@ -4,6 +4,7 @@ import re
 
 from .protocol import BridgeError, number, validate, ACTION_DEFAULTS
 from . import selectors
+from .outcomes import MotionSpan, summarize, step_result, TIME_LIMITS
 
 
 SEQUENCE_OPS = {'jump','air_move','act','look','go','walk','revisit','return_to','approach','interact','move_local',
@@ -44,8 +45,9 @@ def resolve_owned(session, op, params):
 
 def sequence(session, args):
     validate_sequence(args)
-    steps=[];elapsed=0.;reason='completed';completed=0;events=[];bindings={}
+    steps=[];elapsed=0.;reason='completed';completed=0;events=[];bindings={};end_status='interrupted';stopped_step=None
     observation=session.observe(capture=False)
+    motion=MotionSpan(session)
     health=observation.get('stats',{}).get('health',{}).get('current')
     start_clock=observation.get('simulation_seconds')
     previous_guard=getattr(session,'sequence_guard',None)
@@ -54,6 +56,7 @@ def sequence(session, args):
     session.batch_depth=getattr(session,'batch_depth',0)+1
     try:
         for index,step in enumerate(args['actions']):
+            stopped_step=index+1
             if session.control.cancelled.is_set(): reason='cancelled';break
             remaining=args.get('max_seconds',60)-elapsed
             if remaining<.02: reason='sequence_time_limit';break
@@ -72,9 +75,11 @@ def sequence(session, args):
                 before_step=observation
                 r=session.call(op,params)
             except BridgeError as exc:
-                reason=str(exc);steps.append({'operation':op,'reason':reason,'submitted':False});break
+                if getattr(session,'uncertain',False):raise
+                reason=str(exc);end_status='rejected';steps.append({'operation':op,'reason':reason,'result_available':False});break
             a=r.get('action',{});elapsed+=a.get('elapsed',0)
-            steps.append({'operation':op,**a})
+            steps.append(step_result(r,op))
+            motion.sample(session,a)
             if selected:steps[-1]['selected']=selected
             observation=r.get('observation',observation)
             events.extend(observation.get('events',[]))
@@ -82,10 +87,10 @@ def sequence(session, args):
             if a.get('reason') in {'health_low','player_hurt','sequence_time_limit'}:reason=a['reason'];break
             status=r.get('feedback',{}).get('status')
             if status in {'blocked','failed','rejected','partial','interrupted'}:
-                reason=r['feedback'].get('reason') or a.get('reason') or status;break
-            checks=selectors.check_expectation(session,expectation,before_step,observation,a,initial_count)
+                reason=r['feedback'].get('reason') or a.get('reason') or status;end_status=status;break
+            checks=selectors.check_expectation(session,expectation,before_step,observation,a,initial_count,r.get('summary'))
             if checks:steps[-1]['checks']=checks
-            if any(not c['met'] for c in checks):reason='expectation_failed';break
+            if any(not c['met'] for c in checks):reason='expectation_failed';end_status='failed';break
             completed+=1
             h=observation.get('stats',{}).get('health',{})
             if h and args.get('stop_health_pct',0) and h['current']<=h['maximum']*args['stop_health_pct']/100:
@@ -101,9 +106,14 @@ def sequence(session, args):
     finally:
         session.batch_depth-=1
         session.sequence_guard=previous_guard
-    return {'action':{'reason':reason,'elapsed':elapsed,'steps':steps,'completed_actions':completed,
-                      'total_actions':len(args['actions']),'paused':True,'bindings':bindings},
-            'observation':session.observe(),'feedback':{'status':'succeeded' if reason=='completed' else 'interrupted','reason':reason,'events':events}}
+    observation=session.observe();motion.sample(session)
+    if reason=='completed':end_status='succeeded';stopped_step=None
+    elif reason in TIME_LIMITS:end_status='partial'
+    result={'action':{'reason':reason,'elapsed':elapsed,'steps':steps,'completed_actions':completed,
+                      'total_actions':len(args['actions']),'paused':True,'bindings':bindings,
+                      **({'stopped_step':stopped_step} if stopped_step is not None else {})},
+            'observation':observation,'feedback':{'status':end_status,'reason':reason,'events':events}}
+    return summarize(result,'sequence',motion.distance())
 
 
 def read_document(session,args):
@@ -201,27 +211,30 @@ def atlas_query(session,args):
 
 def navigate(session,args):
     """Try at most three different learned legs within one total action budget."""
-    total=0;steps=[];replans=0
+    total=0;steps=[];replans=0;attempts=[];motion=MotionSpan()
     budget=number(args.get('seconds',60),.02,math.inf)
     while True:
-        try:result=_navigate_once(session,{**args,'seconds':budget-total})
+        try:result=_navigate_once(session,{**args,'seconds':budget-total},motion=motion)
         except BridgeError as exc:
-            if not replans:raise
+            if not replans or getattr(session,'uncertain',False):raise
+            attempts.append({'reason':str(exc),'result_available':False})
             result['action']['reason']=str(exc);result['feedback'].update(status='interrupted',reason=str(exc));break
+        attempts.append({'reason':result['action']['reason'],'elapsed':result['action'].get('elapsed',0)})
         total+=result['action'].get('elapsed',0);steps.extend(result['action'].get('steps',[]))
         if result['action']['reason'] not in {'blocked','no_route_progress','repeated_positions','repeated_obstruction','no_progress','no_path','known_door_not_visible','activation_unconfirmed'} or replans>=2 or budget-total<.5:break
         if not session.atlas.route_to(args['ref']):break
         replans+=1
-    result['action'].update(elapsed=total,steps=steps,replans=replans)
-    return result
+    result['action'].update(elapsed=total,steps=steps,replans=replans,attempts=attempts)
+    return summarize(result,'revisit',motion.distance())
 
 
-def _navigate_once(session,args):
+def _navigate_once(session,args, *, motion=None):
     if args.keys()-{'ref','run','seconds','under_fire'} or not isinstance(args.get('ref'),str):raise BridgeError('invalid_arguments')
     budget=number(args.get('seconds',60),.02,math.inf)
     validate('go',{'ref':'waypoint_validation','seconds':max(.5,budget),
                    **{k:v for k,v in args.items() if k in {'run','under_fire'}}})
     session.observe(capture=False)
+    if motion is not None:motion.begin(session)
     plan=session.atlas.route_to(args['ref'])
     if not plan:raise BridgeError('recorded_route_unavailable')
     elapsed=0.;results=[];reason='arrived';seen_positions=set()
@@ -255,7 +268,8 @@ def _navigate_once(session,args):
                     offsets=[[round(a-b,4) for a,b in zip(p,pose)] for p in chunk] if chunk else None
                     marker=session.command('mark',_atlas_offset=offset,_atlas_route=offsets)['ref']
                     r=session.call('go',{'ref':marker,'seconds':remaining,**{k:v for k,v in args.items() if k in {'run','under_fire'}}})
-                    a=r['action'];results.append(a);elapsed+=a.get('elapsed',0)
+                    a=r['action'];results.append(step_result(r,'go'));elapsed+=a.get('elapsed',0)
+                    if motion is not None:motion.sample(session,a)
                     session.atlas.record_outcome(step,origin,a)
                     if a.get('reason')!='arrived':reason=a.get('reason','interrupted');break
                     if math.dist(goal,node['p'])<.04:break
@@ -272,11 +286,13 @@ def _navigate_once(session,args):
                 if remaining<.1:reason='step_limit';break
                 r=session.call('interact',{'ref':door['ref'],'approach':True,'seconds':remaining,
                                           **{k:v for k,v in args.items() if k in {'run','under_fire'}}})
-                a=r['action'];results.append(a);elapsed+=a.get('elapsed',0)
+                a=r['action'];results.append(step_result(r,'interact'));elapsed+=a.get('elapsed',0)
+                if motion is not None:motion.sample(session,a)
                 session.atlas.record_outcome(step,origin,a)
                 if a.get('outcome')!='location_changed':reason='activation_unconfirmed' if a.get('reason')=='completed' else a.get('reason','activation_unconfirmed');break
                 if session.atlas.segment!=step['to_space']:reason='unexpected_location';break
     finally:session.batch_depth-=1
     obs=session.observe()
+    if motion is not None:motion.sample(session)
     return {'action':{'reason':reason,'elapsed':elapsed,'steps':results,'ref':plan['destination'],'paused':True},
             'observation':obs,'feedback':{'status':'succeeded' if reason=='arrived' else 'interrupted','reason':reason,'events':[]}}

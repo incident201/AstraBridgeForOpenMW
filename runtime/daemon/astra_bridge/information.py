@@ -21,7 +21,7 @@ def receipt_details(receipt, args):
     else:
         observation = raw.get('observation', raw.get('final', raw))
     section = args.get('section', 'scene')
-    if section in {'action','feedback'} and view is None:
+    if section in {'action','feedback','summary'} and view is None:
         value = raw.get(section, {})
         if section == 'action' and isinstance(value,dict) and 'steps' in value:
             rows, meta = page_rows(value['steps'],args)
