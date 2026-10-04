@@ -35,7 +35,7 @@ class Runtime:
         self.storage=Storage(self.root,game,installation)
         self.graphics=Graphics(installation,self.root)
         self.owner=Ownership();self.session=None;self.input=None;self.live=None
-        self.viewer_generation=0;self.termination=None
+        self.viewer_generation=0;self.termination=None;self.stop_preparation=None
         self.transition=False;self.mutation=asyncio.Lock()
         self.starting=False;self.stopping=False;self.start_cancelled=threading.Event();self.start_log_offset=0
         self.artifacts={};self.last_error=None;self.started=time.time()
@@ -64,7 +64,7 @@ class Runtime:
         def reading(stream,field,default=0):
             try:return getattr(stream,field) if stream else default
             except (ValueError,BufferError):return default  # A worker may just have closed its mmap.
-        return {'profile':self.profiles.public(),'running':self.running(),'starting':self.starting,'stopping':self.stopping,'session_end':self.termination,'owner':self.owner.public(),'transitioning':self.transition,
+        return {'profile':self.profiles.public(),'running':self.running(),'starting':self.starting,'stopping':self.stopping,'session_end':self.termination,'stop_preparation':self.stop_preparation,'owner':self.owner.public(),'transitioning':self.transition,
                 'active_action':session.control.status() if session else None,
                 'session':session.session_id if session else None,
                 'clocks':session.timeline.clocks() if session else None,
@@ -102,6 +102,7 @@ class Runtime:
         async with self.mutation:
             if profile is not None and profile!=self.profiles.data['active']:raise BridgeError('profile_mismatch',profile=self.profiles.public())
             if self.running():
+                if self.stop_preparation:self._cancel_prepared_stop()
                 if gpu is not None and gpu!=self.graphics.info.get('requested_gpu'):
                     raise BridgeError('restart_required_to_change_gpu')
                 return self.status()
@@ -141,15 +142,61 @@ class Runtime:
                     if database:database.close()
             self._history('engine_stopped',session=session.session_id)
             self.session=None
-        self.owner.release()
+        self.owner.release();self.stop_preparation=None
+
+    def _request_stop(self, reason):
+        self.termination={'reason':reason,'at':time.time(),'session':self.session.session_id if self.session else None}
+        if self.session:
+            self.session.termination=self.termination
+            self.session.timeline.emit('session_end',**self.termination)
+        self._history('session_end',**self.termination)
+
+    def _cancel_prepared_stop(self):
+        self.stop_preparation=None;self.termination=None
+        if self.session:
+            self.session.termination=None
+            self.session.timeline.emit('stop_cancelled')
+
+    def _save_before_stop(self):
+        session=self.session
+        if self.input:self.input.release()
+        with session.control.owner,session.lock:
+            session.timeline.agent(False);self.owner.release()
+            session.control.cancelled.clear()
+            try:
+                session.command('stop',timeout=3,_runtime_mode='idle')
+                session.display.media_stream.ui(False)
+                if session.recorder:session.recorder.set_active('manual',False)
+                if session.command('ping',timeout=3).get('state')!='running':
+                    return {'status':'not_needed','reason':'no_active_game'}
+                result=session.call('save',{'description':'Astra session end'})
+                return {'status':'saved','saved':result['saved']}
+            except Exception as exc:
+                return {'status':'failed','reason':str(exc) if isinstance(exc,BridgeError) else 'save_failed'}
+
+    async def prepare_stop(self):
+        if self.starting:return {'save':{'status':'not_needed','reason':'starting'}}
+        async with self.mutation:
+            if self.stop_preparation:return self.project(self.stop_preparation)
+            if not self.running():return {'save':{'status':'not_needed','reason':'game_not_running'}}
+            self.transition=True;self.stopping=True
+            self._request_stop('user_requested_stop')
+            self.stop_preparation={'token':uuid.uuid4().hex,'save':{'status':'pending'}}
+            try:
+                await asyncio.to_thread(self.session.control.interrupt)
+                self.stop_preparation['save']=await asyncio.to_thread(self._save_before_stop)
+                return self.project(self.stop_preparation)
+            finally:self.transition=False;self.stopping=False
+
+    async def cancel_stop(self, token=None):
+        async with self.mutation:
+            if self.stop_preparation and (token is None or token==self.stop_preparation['token']):
+                self._cancel_prepared_stop();return {'cancelled':True}
+            return {'cancelled':False}
 
     async def stop_engine(self, reason=None):
         if reason:
-            self.termination={'reason':reason,'at':time.time(),'session':self.session.session_id if self.session else None}
-            if self.session:
-                self.session.termination=self.termination
-                self.session.timeline.emit('session_end',**self.termination)
-            self._history('session_end',**self.termination)
+            self._request_stop(reason)
             if self.session:await asyncio.to_thread(self.session.control.interrupt)
         self.stopping=True
         try:
@@ -177,6 +224,7 @@ class Runtime:
 
     async def acquire_agent(self, name, profile=None):
         async with self.mutation:
+            if self.stop_preparation:raise BridgeError('user_requested_stop',retryable=False)
             if profile is not None and profile!=self.profiles.data['active']:raise BridgeError('profile_mismatch',profile=self.profiles.public())
             if not self.running():raise BridgeError('game_not_running')
             if self.owner.mode=='agent':raise BridgeError('agent_already_connected')
@@ -205,6 +253,7 @@ class Runtime:
     async def manual(self, token, enable):
         async with self.mutation:
             if enable:
+                if self.stop_preparation:raise BridgeError('session_stop_pending')
                 if not self.running():raise BridgeError('game_not_running')
                 self.owner.acquire_manual(token)
             elif self.owner.mode!='manual' or self.owner.token!=token:return self.owner.public()

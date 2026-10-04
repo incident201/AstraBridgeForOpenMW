@@ -24,3 +24,8 @@ test('a failed stop keeps the window open and reports the error',async()=>{
   const errors:unknown[]=[];const close=new CloseRequest(async()=>true,async()=> 'stop',async()=>{throw Error('stop failed');},async error=>{errors.push(error);});
   assert.equal(await close.request(),false);assert.equal(errors.length,1);
 });
+
+test('cancelling stop after a failed save keeps Desktop open',async()=>{
+ const close=new CloseRequest(async()=>true,async()=> 'stop',async()=>({cancelled:true}),async()=>{throw Error('Cancel is not an error');});
+ assert.equal(await close.request(),false);
+});

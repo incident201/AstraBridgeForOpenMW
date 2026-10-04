@@ -30,8 +30,8 @@ pauses. The Desktop viewer can stay open, but manual input is disabled while
 the agent owns control. Use `astrabridge agent disconnect` when handing control
 back; this stops active input and leaves the game paused. Closing a terminal does not disconnect the agent. When Desktop closes, its
 **Keep running** choice leaves the agent and recording session active; **Stop
-session** ends the running game and finalizes recording. Neither choice creates
-a game save. If the user deliberately stops or removes the runtime, do not
+session** attempts a game save and then finalizes recording and shuts down. If
+saving is unavailable, the host chooses whether to stop without saving or cancel. If the user deliberately stops or removes the runtime, do not
 restart it behind their back.
 
 The Desktop timeline can show a paused or earlier recording while the game keeps
@@ -52,12 +52,15 @@ an optional mismatch guard, not a profile switch.
 
 After an authorized runtime update/restart/recreation, connect again, observe and
 refresh all transient handles. Saves, Atlas and knowledge survive a container
-replacement. After changing Desktop versions, the host user should export the
-matching gameplay skill again: the exported `installation.json` points to the
-chosen AppImage/EXE, configuration. If that executable is missing or its
-runtime version does not match, request a fresh export instead of guessing a
-binary, editing the configuration, entering a container or applying an update as
-a gameplay workaround.
+replacement. With the permanent CLI enabled, a successful runtime update switches
+the launcher to the matching application. Re-export the skill when its instructions
+change; changing an AppImage/EXE filename alone does not require a new export.
+Check actual `astrabridge version` and `astrabridge status` values to diagnose a
+mismatch, rather than comparing filenames in two exports. If the target is missing
+or incompatible, ask the host to repair the CLI command in Setup. Do not guess a
+binary, edit configuration, enter a container or apply an update as a gameplay
+workaround. Legacy exports with direct application paths should be replaced once
+with a complete new export after the host enables the permanent command.
 
 ## Saves and process lifecycle
 
@@ -75,7 +78,7 @@ a gameplay workaround.
 | `finish-session --description "TEXT"` | Interrupt the active command, save, finalize recording and close. Reports each stage; keeps the game open if saving or recording finalization fails. |
 | `action-result [REQUEST_ID] [--full]` | Retrieve a durable command receipt; see [information](information.md#recover-a-command-result). |
 | Application: `astrabridge agent disconnect` | Interrupt an active action, clear held input, pause and release control. Does not save or stop the runtime. |
-| Application: `astrabridge stop` | Close game/recording and stop the persistent container. Does not autosave or delete managed data. |
+| Application: `astrabridge stop` | Try to save, then close game/recording and stop the persistent container. On `save_before_stop_failed`, leave the decision to the host user; never retry with `--without-save` automatically. |
 
 One gameplay command owns the controller at a time. While it runs, use `status` or `stop`; another gameplay command returns `controller_busy_use_status_or_stop`. `status --player` reads the engine and also needs the gameplay owner. For the complete save/record-stop/close request, use `finish-session`; use individual operations when the user requests only part of that lifecycle.
 

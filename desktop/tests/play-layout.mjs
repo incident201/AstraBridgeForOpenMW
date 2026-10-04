@@ -30,6 +30,7 @@ await page.addInitScript(({hasFrame})=>{
   if(op==='record'){if(window.fixture.failRecord)throw Error('Recording could not start. Check the output folder permissions.');recording=args.action==='start';runtime.recording=recording?{recording:true,duration:125,encoder:'h264_nvenc'}:null;emit();}
   if(op==='agent-end'){runtime.owner={mode:'idle'};emit();}
   if(op==='start'){runtime.running=true;state.container.running=true;emit();}
+  if(op==='stop'&&window.fixture.cancelStop)return {cancelled:true};
   if(op==='stop'){runtime.running=false;state.container.running=false;emit();}
   if(op==='whep')return {body:'fixture',location:'/fixture-peer'};
   return {};
@@ -83,6 +84,13 @@ try{
  assert.equal(await page.locator('.brand small,.sidebar-footer .active-profile,.sidebar-footer .runtime-label').count(),0);
  assert.equal(await page.locator('.brand-mark').textContent(),'A');
  assert.ok(await page.getByRole('button',{name:'Stop session',exact:true}).isVisible());
+ const stoppedViewers=await page.evaluate(()=>window.fixture.calls.filter(x=>x.op==='live-stop').length);
+ await page.evaluate(()=>window.fixture.cancelStop=true);
+ await page.getByRole('button',{name:'Stop session',exact:true}).click();
+ await page.waitForFunction(()=>!document.querySelector('.working'));
+ assert.equal(await page.evaluate(()=>window.fixture.calls.filter(x=>x.op==='live-stop').length),stoppedViewers,'Cancelling an unsaved stop must preserve the viewer');
+ assert.ok(await page.locator('video[aria-label="Live Morrowind game"]').evaluate(e=>Boolean(e.srcObject)));
+ await page.evaluate(()=>window.fixture.cancelStop=false);
  const liveStarts=await page.evaluate(()=>window.fixture.calls.filter(x=>x.op==='live-start').length);
  const videoHandle=await page.locator('video[aria-label="Live Morrowind game"]').elementHandle();
  await page.getByRole('navigation').getByRole('button',{name:'Atlas',exact:true}).click();

@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import {mkdtemp,writeFile,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {CliRegistration} from '../main/cli-registration';
 import {Core,type Installation} from '../main/core';
 
 const digest=(char:string)=>'sha256:'+char.repeat(64);
-async function fixture(){
+async function fixture(options:ConstructorParameters<typeof Core>[3]={}){
  const directory=await mkdtemp(join(tmpdir(),'astra-update-'));const configFile=join(directory,'installation.json');
  const old:Installation={name:'astrabridge-test',image:'localhost/runtime:old@'+digest('a'),digest:digest('a'),version:'1.0.0',installed:true,
   backend:'podman',storageDirectory:directory,sourceGame:'/game',gameMode:'mount',gameDirectory:'/game',recordingsDirectory:'/recordings',
@@ -30,7 +31,7 @@ async function fixture(){
   pruneBackups:async(_image:string,_volume:string,keep:string)=>{calls.push('prune');if(state.failCleanup)throw Error('busy');for(const id of backups.keys())if(id!==keep)backups.delete(id);},
   removeImage:async(image:string)=>{calls.push('image-rm');assert.equal(image,old.previous!.image);if(state.failCleanup)throw Error('in use');}
  };
- const core=new Core(directory,configFile);core.backend=()=>backend as any;
+ const core=new Core(directory,configFile,undefined,options);core.backend=()=>backend as any;
  core.api=async(path:string)=>{
   if(path==='/v1/runtime/status')return {owner:{mode:'idle'},running:state.game};
   if(path==='/health')return {runtime_api:state.image===old.image?1:state.failReady?99:2,game_api:1,environment:{project_version:state.image===old.image?'1.0.0':'2.0.0'}};
@@ -140,4 +141,24 @@ test('user stop remains identifiable offline and blocks silent agent reconnect',
   f.core.ensureDaemon=async()=>await f.read();f.core.release=async()=>({digest:f.old.digest} as any);
   await f.core.start();assert.equal((await f.read()).lastStop,undefined);
  }finally{await f.close();}
+});
+
+
+test('CLI binding switches only after a successful runtime update',async()=>{
+ const directory=await mkdtemp(join(tmpdir(),'cli-update-'));
+ try{
+  const oldApp=join(directory,'old.AppImage'),nextApp=join(directory,'new.AppImage');
+  await writeFile(oldApp,'old',{mode:0o755});await writeFile(nextApp,'new',{mode:0o755});
+  for(const fail of [true,false]){
+   const cli=new CliRegistration(directory,{platform:'linux',binDirectory:join(directory,fail?'failed':'success'),searchPath:()=>''});
+   const f=await fixture({cli,executable:nextApp});
+   try{
+    await cli.install(oldApp,f.configFile,f.old.name,f.old.version!,f.old.digest);
+    await f.core.status();assert.equal((await cli.status()).application,oldApp,'Read-only status must not rebind a shortcut');
+    f.state.failReady=fail;
+    if(fail){await assert.rejects(()=>f.core.update());assert.equal((await cli.status()).application,oldApp);}
+    else{await f.core.update();const result=await cli.status(f.configFile,f.old.name);assert.equal(result.application,nextApp);assert.equal(result.digest,f.release.digest);}
+   }finally{await f.close();}
+  }
+ }finally{await rm(directory,{recursive:true,force:true});}
 });

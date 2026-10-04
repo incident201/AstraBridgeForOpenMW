@@ -232,6 +232,8 @@ jobs:
         run: |
           cl /nologo /std:c++17 /EHsc /MT packaging\launcher.cpp /Fe:packaging\astrabridge.exe
           if errorlevel 1 exit /b 1
+          cl /nologo /std:c++17 /EHsc /MT packaging\cli-launcher.cpp /Fe:resources\cli-launcher.exe /link advapi32.lib user32.lib bcrypt.lib
+          if errorlevel 1 exit /b 1
           npm run package:windows
           if errorlevel 1 exit /b 1
           release\win-unpacked\astrabridge.exe version
@@ -249,6 +251,19 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or -not $actual.ok) { throw 'Packaged CLI failed' }
           $expected = Get-Content resources/release.json -Raw | ConvertFrom-Json
           if ($actual.result.digest -ne $expected.digest) { throw 'Packaged runtime identity differs' }
+          $cliDirectory = Join-Path $env:RUNNER_TEMP 'AstraBridge CLI проверка'
+          New-Item -ItemType Directory -Force $cliDirectory | Out-Null
+          $cli = Join-Path $cliDirectory 'astrabridge.exe'
+          Copy-Item (Join-Path $destination 'resources/astra/cli-launcher.exe') $cli
+          $application = Join-Path $destination 'astrabridge.exe'
+          $config = Join-Path $cliDirectory 'configuration.json'
+          $target = "[AstraBridgeCLI]`r`nSchema=1`r`nExecutable=`"$application`"`r`nConfig=`"$config`"`r`n"
+          [IO.File]::WriteAllText((Join-Path $cliDirectory 'cli-target.ini'), $target, [Text.Encoding]::Unicode)
+          $forwarded = & $cli version | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $forwarded.result.digest -ne $expected.digest) { throw 'Permanent CLI forwarding failed' }
+          $pathState = & $cli --user-path query $cliDirectory | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $pathState.changed) { throw 'Read-only PATH query failed' }
+
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ runner.os }}

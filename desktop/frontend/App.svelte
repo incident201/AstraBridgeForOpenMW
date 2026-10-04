@@ -1,4 +1,5 @@
 <script lang="ts">
+  import CliSetup from './CliSetup.svelte';
   import TransferProgress from './TransferProgress.svelte';
   import type {PullStatus} from '../main/runtime/PullProgress';
   let transfer:PullStatus|null=null;
@@ -76,7 +77,7 @@
   }
   async function stopRuntime(restart=false){
     if(stopping)return;stopping=true;
-    try{await task(async()=>{const request=window.astra.invoke('stop');await Promise.all([endWatch(),request]);if(restart)return window.astra.invoke('start');});}
+    try{await task(async()=>{const result=await window.astra.invoke('stop');if(result?.cancelled)return result;await endWatch();if(restart)return window.astra.invoke('start');return result;});}
     finally{stopping=false;}
   }
   async function deleteRecording(){
@@ -292,9 +293,9 @@
       {#if runtime.profile}<span class="selected-profile" title={runtime.profile.name}><Icon name="profiles" size={16}/><span>Selected profile: <strong>{runtime.profile.name}</strong></span></span>{/if}</div>
       <div class="toolbar">
         {#if state.installed}
-          <span class="game-state"><span class="dot" class:online={runtime.running&&runtime.clocks?.game_active}></span>{stopping||runtime.stopping?'Stopping session…':runtime.starting?'Starting game…':runtime.running?(runtime.clocks?.game_active?'Gameplay running':'Game paused'):runtime.error?'Game stopped · error':state.container?.running?'Ready · game stopped':'Stopped'}</span>
+          <span class="game-state"><span class="dot" class:online={runtime.running&&runtime.clocks?.game_active}></span>{stopping||runtime.stopping?(runtime.stop_preparation?.save?.status==='pending'?'Saving game…':'Stopping session…'):runtime.starting?'Starting game…':runtime.running?(runtime.clocks?.game_active?'Gameplay running':'Game paused'):runtime.error?'Game stopped · error':state.container?.running?'Ready · game stopped':'Stopped'}</span>
           {#if state.container?.running||runtime.starting||stopping}
-            <button class="session-stop" disabled={stopping||runtime.stopping} title="Disconnect the agent, finish recording, and stop the game and runtime. Game progress is not saved." on:click={()=>stopRuntime()}><Icon name="stop" size={17}/>{stopping||runtime.stopping?'Stopping…':'Stop session'}</button>
+            <button class="session-stop" disabled={stopping||runtime.stopping} title="Save the game, finish recording, and stop the session. Ask before stopping if saving is unavailable." on:click={()=>stopRuntime()}><Icon name="stop" size={17}/>{stopping||runtime.stopping?'Stopping…':'Stop session'}</button>
           {/if}
           <details class="dropdown session-menu"><summary aria-label="Session options"><Icon name="more" size={19}/><span>Session</span></summary>
             <div class="menu-popover">
@@ -328,7 +329,7 @@
           </div>
           <div class="viewer-tools">
             <span class="fps-counter" title="Rendered game frames per second">{runtime.running&&lastFps!==null?Math.round(lastFps):'—'} <span>fps</span></span>
-            {#if fullscreen}<button class="session-stop" disabled={stopping||runtime.stopping} title="Disconnect the agent, finish recording, and stop the game and runtime. Game progress is not saved." on:click={()=>stopRuntime()}><Icon name="stop" size={17}/>{stopping||runtime.stopping?'Stopping…':'Stop session'}</button>{/if}
+            {#if fullscreen}<button class="session-stop" disabled={stopping||runtime.stopping} title="Save the game, finish recording, and stop the session. Ask before stopping if saving is unavailable." on:click={()=>stopRuntime()}><Icon name="stop" size={17}/>{stopping||runtime.stopping?'Stopping…':'Stop session'}</button>{/if}
             <button class="icon-button" disabled={!watching&&viewMode!=='replay'} on:click={changeMute} aria-label={muted?'Unmute':'Mute'} title={muted?'Unmute':'Mute'}><Icon name={muted?'mute':'volume'} size={18}/></button>
             {#if viewMode!=='live'}<span class="view-only">View only</span>
             {:else if manual}<button class="manual-button" aria-label="Release control" on:click={releaseInput}><Icon name="cursor" size={17}/>Release</button><button class="icon-button" aria-label={pointerCaptured?'Release pointer':'Lock pointer for camera'} aria-pressed={pointerCaptured} title="Capture mouse; Escape releases it" on:click={togglePointerCapture}><Icon name="mouse" size={17}/></button>
@@ -414,9 +415,10 @@
           {:else}
             <dl class="storage-locations"><div><dt>Game files <span>{state.gameMode==='copy'?'Managed copy':'Read-only host folder'}</span></dt><dd><code>{state.sourceGame}</code></dd></div>
             <div><dt>Managed storage</dt><dd><code>{state.storageDirectory}</code></dd></div><div><dt>Recordings</dt><dd><code>{state.recordingsDirectory}</code></dd></div></dl>
+            <CliSetup disabled={busy||!state.installed||state.updateRequired||state.updatePending} version={state.currentVersion} digest={state.currentDigest} warning={state.cliWarning}/>
             <div class="toolbar"><button on:click={()=>task(()=>window.astra.invoke('open-recordings-folder'))}><Icon name="folder" size={20}/>Open recordings folder</button><button on:click={()=>task(()=>window.astra.invoke('skill-export'),'Skill exported.')}><Icon name="export" size={20}/>Export gameplay skill</button></div>
           {/if}
-          {#if !(busy&&transfer)}<div class="installation-removal"><h3>Remove or reset installation</h3><p class="hint">Remove managed profiles and the runtime, or clear only the setup reference. Original host game files and recordings are kept.</p><div class="toolbar"><button class="danger" disabled={busy} on:click={()=>removeInstallation('uninstall')}>Remove installation and data</button><button disabled={busy||runtime.running} on:click={()=>removeInstallation('reset-setup')}>Reset setup only</button></div></div>{/if}
+          {#if installedSection==='runtime'&&!(busy&&transfer)}<div class="installation-removal"><h3>Remove or reset installation</h3><p class="hint">Remove managed profiles and the runtime, or clear only the setup reference. Original host game files and recordings are kept.</p><div class="toolbar"><button class="danger" disabled={busy} on:click={()=>removeInstallation('uninstall')}>Remove installation and data</button><button disabled={busy||runtime.running} on:click={()=>removeInstallation('reset-setup')}>Reset setup only</button></div></div>{/if}
         {:else}
           <div class="tabs" aria-label="Setup steps"><button class:active={setupStep==='game'} on:click={()=>setupStep='game'}>1. Game</button><button class:active={setupStep==='storage'} on:click={()=>setupStep='storage'}>2. Storage</button></div>
           <div class="setup-fields">

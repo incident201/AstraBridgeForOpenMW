@@ -211,3 +211,10 @@ the corresponding source archive. Version-specific English notes live in
 Keep implementation details in `docs/` and public gameplay usage in the skill.
 Update the engine/mod inventories with the corresponding changes. Preserve the
 skill's general description and UI metadata unless explicitly requested otherwise.
+
+The Windows package includes the permanent CLI helper. Build
+`desktop/packaging/cli-launcher.cpp` with MSVC into
+`desktop/resources/cli-launcher.exe`, linking `advapi32.lib`, `user32.lib` and `bcrypt.lib`,
+before packaging. The release workflow performs this step alongside the portable
+application launcher. Linux generates its forwarding script during registration;
+no host Python or Node installation is needed for the registered command.

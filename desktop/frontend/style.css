@@ -465,3 +465,10 @@ button.record-button.recording:hover:not(:disabled){background:#49303f;border-co
 .transfer-log{margin:10px 0}.transfer-log summary{font-size:12px;color:#9db3d0;cursor:pointer}
 
 .setup-card>.setup-stage{margin:0 0 12px;padding:4px 10px;border-left:2px solid #639aff;color:#d6e7ff;font-size:13px}
+
+.cli-setup{border-top:1px solid #344158;padding:12px 0;margin-top:10px}
+.cli-heading{display:flex;align-items:center;gap:14px;flex-wrap:wrap}.cli-heading h3{font-size:13px;margin:0}.cli-heading code{font-size:12px;color:#bed3f3}
+.cli-setup p{margin:6px 0 10px}.cli-location,.cli-guidance{overflow-wrap:anywhere}.cli-error{font-size:12px;color:#f4b7c5;overflow-wrap:anywhere}
+
+.setup-card .storage-locations{margin:4px 0 8px}.setup-card .storage-locations>div{margin-bottom:10px}.setup-card .storage-locations>div:last-child{margin-bottom:0}
+.setup-card .storage-locations dd{padding:6px 10px;line-height:1.4}.setup-card .storage-locations dt{margin-bottom:5px}

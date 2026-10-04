@@ -189,11 +189,19 @@ Application-level `astrabridge status` also reports `currentVersion`,
 `previousRuntime`, `updateRequired`, `updatePending` and `cleanupPending`.
 These describe host management, not game state. `astrabridge update` recovers an
 interrupted transaction before allowing another update attempt. The new Desktop
-exports its bundled skill with executable/configuration paths in
-`installation.json`. It has no profile binding; agent connect uses the currently
-selected profile. Switching profiles does not require re-export;
-re-export it after changing application versions, especially when the AppImage
-filename changes. Existing exported copies are not rewritten automatically.
+exports its bundled skill with `command: "astrabridge"`, the permanent launcher
+path in `executable`, and `config` in `installation.json`. It has no profile
+binding; agent connect uses the currently selected profile. Enable the launcher
+with `astrabridge cli install` or Setup before exporting. `cli status` reports the
+registered application/configuration, target availability and PATH readiness;
+`cli uninstall` removes a matching registration. These host operations require
+no running game or daemon.
+
+Successful updates of the registered installation refresh the launcher atomically.
+Opening an older Desktop or switching profiles does not rebind it. Existing skill
+copies therefore remain usable after application replacement; re-export when the
+instructions change. Legacy exports still use their executable plus explicit
+`--config`, and should be replaced once to adopt the permanent command.
 
 ## Spectator timeline
 
@@ -260,3 +268,27 @@ its available diagnostics. Later commands report the deliberate termination
 instead of a generic missing connection. The event is written into session
 history and the recording timeline before finalization. Unexpected process or
 network failures without a user-stop marker keep their original error.
+
+## Save before a user stop
+
+Desktop **Stop session**, including the close-window choice, uses
+`POST /v1/runtime/engine/prepare-stop` before the existing engine-stop operation.
+Preparation interrupts input, releases agent/manual control and pauses the game.
+It attempts a regular `Astra session end` save with the normal game restrictions,
+and confirms the new save/checkpoint. The response contains `token` and `save`
+(`status: saved`, `not_needed`, or `failed`, with the saved item or failure reason).
+Repeated preparation returns the same result, avoiding duplicate saves.
+
+Failed preparation keeps the engine, viewer and recorder open. Desktop asks
+**Stop without saving** or **Cancel**. Cancellation calls
+`POST /v1/runtime/engine/cancel-stop` with the preparation token; it clears the
+pending stop while leaving the game paused and control released. Manual and agent
+acquisition are blocked until that decision. The low-level engine-stop endpoint
+remains available for lifecycle cleanup and an explicitly confirmed discard.
+
+The host CLI `astrabridge stop` follows the same save-first path. When saving
+cannot be confirmed it returns `save_before_stop_failed` with
+`needs_confirmation: true`, without stopping the container. The host user can
+choose `stop --without-save` or `stop --cancel`. Startup/no active game skips
+saving. Update, uninstall and lower-level lifecycle cleanup retain their existing
+backup/deletion semantics.

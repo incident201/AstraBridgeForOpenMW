@@ -55,11 +55,22 @@ Use `install --game-mode copy` for a managed copy; `mount` is the default.
 The game appears in Desktop's **Play** viewer. When no agent is connected,
 **Take manual control** enables mouse/keyboard input. Choose 720p30 or 1080p60
 for the live view. When closing Desktop, choose **Keep running** to leave the
-runtime active or **Stop runtime** to stop it and finish recording.
+runtime active or **Stop session** to save the game, finish recording and stop it. If saving is
+unavailable, choose **Stop without saving** or **Cancel**.
 
 ## Connect an agent
 
-Use **Export gameplay skill** or:
+In **Setup → Storage and skill**, select **Enable CLI command** to register
+`astrabridge` for your user. Linux uses `~/.local/bin`; add it to PATH if Setup
+requests it. On Windows the user PATH is registered automatically. Restart the
+terminal or agent client when needed to pick up PATH changes. The command follows
+successful runtime updates and uses the selected installation/profile.
+
+You can also register it by running the AppImage/EXE with `cli install`.
+`astrabridge cli status` shows its target and PATH status; `cli uninstall` removes
+the registration.
+
+Then use **Export gameplay skill** or:
 
 ```sh
 astrabridge skill export "/path/to/openmw-play"

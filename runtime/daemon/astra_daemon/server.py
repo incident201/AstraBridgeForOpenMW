@@ -54,6 +54,12 @@ def application(runtime: Runtime, token: str):
     async def engine(request):
         action=request.match_info['action']
         data=await body(request) if request.can_read_body else {}
+        if action=='prepare-stop':
+            if data:raise BridgeError('invalid_arguments')
+            return answer(await runtime.prepare_stop())
+        if action=='cancel-stop':
+            if data.keys()-{'token'}:raise BridgeError('invalid_arguments')
+            return answer(await runtime.cancel_stop(data.get('token')))
         if data.keys()-{'gpu','profile'}:raise BridgeError('invalid_arguments')
         if action=='start':return answer(await runtime.start_engine(data.get('gpu'),data.get('profile')))
         if action=='stop':return answer(await runtime.stop_engine('user_requested_stop'))

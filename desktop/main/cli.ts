@@ -14,13 +14,14 @@ Usage: astrabridge [--config FILE] <command>
   install --game DIRECTORY --storage DIRECTORY --encoding win1250|win1251|win1252
           [--game-mode mount|copy] [--recordings DIRECTORY] [--data-relative "Data Files"]
           [--development --repository DIRECTORY]
-  start [--gpu auto|nvidia|GPU_ID] | stop | restart [--gpu auto|nvidia|GPU_ID] | status | update
+  start [--gpu auto|nvidia|GPU_ID] | stop [--without-save | --cancel] | restart [--gpu auto|nvidia|GPU_ID] | status | update
   agent connect [--name NAME] [--profile ID] | disconnect | status
   game <command> [arguments]
   config show | set JSON
   gpus
   recordings
   logs [--name FILE]
+  cli install | status | uninstall
   skill export DIRECTORY
   version
 
@@ -46,7 +47,17 @@ async function main(){
     const gpu=take('--gpu');
     if(gpu&&!['auto','nvidia'].includes(gpu)&&!/^pci:[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]$/.test(gpu))throw new Error('Use a GPU ID from astrabridge gpus, auto or nvidia');
     if(command==='start'||command==='restart')result=await core[command](gpu);
-    else result=await core[command as 'stop'|'status'|'update']();
+    else if(command==='stop'){
+      if(argv.includes('--without-save')&&argv.includes('--cancel'))throw Error('Choose --without-save or --cancel');
+      if(argv.includes('--cancel'))result=await core.cancelSessionStop();
+      else result=await (argv.includes('--without-save')?core.stop():core.stopSession());
+    }else result=await core[command as 'status'|'update']();
+  }else if(command==='cli'){
+    const action=argv.shift();
+    if(action==='install')result=await core.installCli();
+    else if(action==='uninstall')result=await core.uninstallCli();
+    else if(action==='status')result=await core.cliStatus();
+    else throw Error('Use cli install, cli status or cli uninstall');
   }else if(command==='agent'){
     const action=argv.shift();
     if(action==='connect')result=await core.connect(take('--name'),take('--profile'));
@@ -67,7 +78,7 @@ async function main(){
   else if(command==='logs')result=await core.logs(take('--name'));
   else if(command==='skill'&&argv.shift()==='export'){
     if(!argv[0])throw new Error('Provide a skill destination directory');
-    result=await core.exportSkill(argv[0],process.env.ASTRA_EXECUTABLE??process.env.APPIMAGE??process.execPath);
+    result=await core.exportSkill(argv[0]);
   }else if(command==='version'||command==='--version')result=await core.release();
   else throw new Error(`Unknown command ${command}. Use --help.`);
   console.log(JSON.stringify({ok:true,result},null,pretty?2:undefined));

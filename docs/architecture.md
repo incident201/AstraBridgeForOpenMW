@@ -51,8 +51,10 @@ start/stop/restart retains the container ID. Updates explicitly recreate the
 container around the existing volumes. When closing Desktop with a running container, the user chooses **Keep running**,
 **Stop session**, or **Cancel**. Keeping it running disconnects the viewer and
 releases manual input while retaining the agent and recording session. Stopping
-waits for engine shutdown and recording finalization before closing the window;
-it does not create a game save. A failed stop keeps Desktop open with an error.
+first attempts a normal game save, then waits for recording finalization and
+runtime shutdown. If saving cannot be confirmed, **Stop without saving** and
+**Cancel** are offered. Cancel keeps the paused game and viewer open. Active agent
+control is released while preparing to stop. A failed stop keeps Desktop open.
 
 Setup provides **Remove container** with a separate confirmation. It stops a
 running runtime and removes only the container; named volumes, game files,
@@ -108,7 +110,7 @@ can show all profiles or filter the selected profile; **Open folder** opens the
 host recording root. Both work without starting the runtime. Switching clears in-memory
 Atlas/artifact/replay caches and closes the previous session's databases.
 
-Exported gameplay skills identify the application and configuration, not a
+Exported gameplay skills identify a permanent CLI launcher and configuration, not a
 profile. `agent connect` uses the profile currently selected by the user.
 An optional `--profile ID` is a mismatch guard, not a switching command.
 Switching profiles does not require a new skill export. Updates snapshot the profile catalog and every profile, including
@@ -156,9 +158,11 @@ aspect ratio without page scrolling. Recording and fullscreen controls sit above
 the picture alongside audio, manual input and a stable FPS indicator. Only
 playback and the recording timeline remain below.
 The mouse capture button enables relative camera movement during manual control.
-The visible **Stop session** button disconnects the agent, finalizes the current
+The visible **Stop session** button interrupts agent control, attempts to save, finalizes the current
 recording, closes live view, and stops both OpenMW and the container. It is also
-available among the fullscreen controls. It does not create a game save.
+available among the fullscreen controls. Unavailable or failed saving requires
+explicit confirmation before the game is closed; cancellation preserves the running
+game and recording. Startup or the main menu without an active game needs no save.
 **Stop recording** only finishes the video. **Viewer options** contains stream
 quality and disconnect; **Session** contains start/restart, skill export and
 ending agent control without stopping the game. These menus
@@ -289,3 +293,35 @@ Published runtimes reuse a frozen OS dependency base and separate component
 layers. Updating Bridge code does not replace the layer containing the engine,
 FFmpeg or Python dependencies when those components are unchanged. The first
 update from an older image layout may still need to download these new layers.
+
+### Permanent CLI command
+
+**Setup → Storage and skill → Enable CLI command** and `cli install` register
+`astrabridge` for the current user without administrator permissions. Linux uses
+an executable shell launcher in `~/.local/bin`. Windows uses a native launcher in
+`%LOCALAPPDATA%/AstraBridge/cli/bin` and adds that directory to the user PATH.
+Setup reports missing PATH entries, shadowing commands and processes that need
+their environment refreshed. Linux shell startup files are configured by the user.
+
+The launcher forwards arguments, standard streams and exit status to the selected
+application, setting `ASTRA_CONFIG` for its bound installation. Explicit
+`--config FILE` still overrides that default. No arguments opens Desktop. Linux
+publishes the complete launcher with an atomic rename; Windows atomically replaces
+its UTF-16 target file, allowing updates while the native forwarding EXE is running.
+Registration contains no API token or selected profile.
+
+Only a successful install/update of the same installation refreshes an existing
+registration. Opening an older Desktop, querying status or switching profiles
+never changes it. A failed update leaves the previous target intact. Missing or
+modified launchers are reported for repair, and unrelated commands are not replaced.
+`cli uninstall`, full installation removal and setup reset remove only a matching
+AstraBridge registration. Windows removes its PATH entry only if AstraBridge added
+it; other PATH entries are preserved. When a Windows launcher is still executing,
+removal is marked pending and a helper deletes the matching binary after it exits.
+The target is disabled immediately; a locked or replaced file is not blindly deleted.
+
+New skill exports contain `command`, the stable `executable` path and `config`.
+Export requires an enabled command for the matching installation/runtime. Existing
+exports remain valid with their original direct executable/config invocation;
+replacing them once adopts the permanent launcher. Thereafter only changes to skill
+instructions require a new export, not a different versioned application filename.

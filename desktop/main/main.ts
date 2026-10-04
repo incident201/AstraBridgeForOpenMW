@@ -6,6 +6,7 @@ import {Readable} from 'node:stream';
 import {createWriteStream} from 'node:fs';
 import WebSocket from 'ws';
 import {Core} from './core';
+import {StopSessionRequest} from './stop-session';
 import {CloseRequest,type CloseChoice} from './close';
 import {localArtifact} from './local-artifact';
 
@@ -37,6 +38,15 @@ async function connectEvents(){
   events.on('error',()=>{});
 }
 function allowedFrame(url:string){return url.startsWith('astra://app/');}
+const stopSession=new StopSessionRequest(()=>core.stopSession(),async(reason,prepared)=>{
+  const detail=reason==='save_unavailable'?'Saving is unavailable in the current game state.':
+    reason==='runtime_unreachable'?'The runtime did not confirm a save.':'The game could not confirm a completed save.';
+  const options={type:'warning' as const,title:'Save before stopping',message:'Could not save the game',
+    detail:detail+' '+(prepared?'The game is paused and agent control has been released. ':'')+'Stop without saving, or cancel to keep the session open.',
+    buttons:['Cancel','Stop without saving'],defaultId:0,cancelId:0,noLink:true};
+  const choice=window?await dialog.showMessageBox(window,options):await dialog.showMessageBox(options);
+  return choice.response===1;
+},()=>core.stop(),token=>core.cancelSessionStop(token));
 const closing=new CloseRequest(async()=>{
   if(core.managementBusy)throw new Error('Wait for the install, update or container operation to finish before closing');
   const config=await core.load();if(!config)return false;
@@ -45,11 +55,11 @@ const closing=new CloseRequest(async()=>{
   try{return (await core.backend(config).inspect(config.name)).running;}catch{return true;}
 },async()=>{
   const options={type:'question' as const,title:'Close AstraBridge?',message:'Closing this window does not stop the runtime.',
-    detail:'Keep running leaves the container, connected agent and recording session active. Manual control is released when the window closes. Stop session stops the game and finishes the current recording before closing; it does not create a game save.',
+    detail:'Keep running leaves the container, connected agent and recording session active. Manual control is released when the window closes. Stop session first tries to save the game, then finishes recording and stops the runtime.',
     buttons:['Cancel','Keep running','Stop session'],defaultId:1,cancelId:0,noLink:true};
   const result=window?await dialog.showMessageBox(window,options):await dialog.showMessageBox(options);
   return (['cancel','keep','stop'] as CloseChoice[])[result.response]??'cancel';
-},()=>core.stop(),async error=>{
+},()=>stopSession.request(),async error=>{
   const options={type:'error' as const,title:'AstraBridge is still open',message:'Could not finish closing the runtime.',detail:String(error),buttons:['OK']};
   return window?dialog.showMessageBox(window,options):dialog.showMessageBox(options);
 });
@@ -97,7 +107,8 @@ app.whenReady().then(async()=>{
         const result=remove?await core.uninstall():await core.resetSetup();
         events?.close();events=null;return result;
       }
-      if(['start','stop','restart','update'].includes(operation)){
+      if(operation==='stop'){const result=await stopSession.request();await connectEvents();return result;}
+      if(['start','restart','update'].includes(operation)){
         const result=await core[operation as 'start'|'stop'|'restart'|'update']();await connectEvents();return result;
       }
       if(operation==='remove-container'){
@@ -121,10 +132,12 @@ app.whenReady().then(async()=>{
       if(operation==='choose-directory'){
         const result=await dialog.showOpenDialog(window!,{properties:['openDirectory','createDirectory']});return result.canceled?null:result.filePaths[0];
       }
+      if(operation==='cli-status')return core.cliStatus();
+      if(operation==='cli-install')return core.installCli();
+      if(operation==='cli-uninstall')return core.uninstallCli();
       if(operation==='skill-export'){
         const result=await dialog.showOpenDialog(window!,{properties:['openDirectory','createDirectory']});if(result.canceled)return null;
-        const executable=process.env.APPIMAGE??join(dirname(process.execPath),process.platform==='win32'?'astrabridge.exe':'astrabridge');
-        return core.exportSkill(join(result.filePaths[0],'openmw-play'),executable);
+        return core.exportSkill(join(result.filePaths[0],'openmw-play'));
       }
       if(operation==='logs')return core.logs(args.name);
       if(operation==='configuration'){

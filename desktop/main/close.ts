@@ -14,7 +14,7 @@ export class CloseRequest {
       if(!await this.running())return true;
       const choice=await this.choose();
       if(choice==='cancel')return false;
-      if(choice==='stop')await this.stop();
+      if(choice==='stop'&&(await this.stop() as any)?.cancelled)return false;
       return true;
     }catch(error){await this.report(error);return false;}
   }

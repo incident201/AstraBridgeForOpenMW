@@ -48,6 +48,7 @@ exec "$astra_dir/astrabridge-bin" "$@"
     await fs.writeFile(path.join(directory,'astrabridge-desktop'),script,{mode:0o755});
     await fs.writeFile(path.join(directory,'astrabridge'),script,{mode:0o755});
   }else if(context.electronPlatformName==='win32'){
+    await fs.access(path.join(context.appOutDir,'resources/astra/cli-launcher.exe'));
     const shim=path.join(__dirname,'astrabridge.exe');
     await fs.access(shim);
     await fs.copyFile(shim,path.join(context.appOutDir,'astrabridge.exe'));

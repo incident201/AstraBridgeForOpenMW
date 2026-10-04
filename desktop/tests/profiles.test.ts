@@ -18,13 +18,14 @@ test('skill export is profile-neutral and needs no running runtime',async()=>{
  try{
   await mkdir(join(directory,'skill'));await writeFile(join(directory,'skill/SKILL.md'),'Gameplay instructions');
   const core=new Core(directory,join(directory,'configuration.json'));
-  core.configured=async()=>({} as Installation);
+  core.configured=async()=>({digest:'release'} as Installation);
+  core.cliStatus=async()=>({enabled:true,matches:true,targetAvailable:true,digest:'release',executable:'permanent-launcher'} as any);
   core.ensureDaemon=async()=>{throw Error('Must not start container');};
   core.profiles=async()=>{throw Error('Must not pin profile');};
-  const result=await core.exportSkill(join(directory,'export'),'selected.AppImage');
+  const result=await core.exportSkill(join(directory,'export'));
   const metadata=JSON.parse(await readFile(join(directory,'export/installation.json'),'utf8'));
   assert.equal(metadata.profile,undefined);assert.equal('profile' in result,false);
-  assert.equal(metadata.config,core.configFile);assert.equal(metadata.executable,'selected.AppImage');
+  assert.equal(metadata.config,core.configFile);assert.equal(metadata.executable,'permanent-launcher');
  }finally{await rm(directory,{recursive:true,force:true});}
 });
 

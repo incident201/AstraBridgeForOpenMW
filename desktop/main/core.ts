@@ -6,6 +6,7 @@ import {Readable} from 'node:stream';
 import {pipeline} from 'node:stream/promises';
 import {createWriteStream} from 'node:fs';
 import * as tar from 'tar';
+import {CliRegistration,applicationExecutable} from './cli-registration';
 import {Recordings} from './recordings';
 import {gameDataDirectory} from './game-data';
 import {PodmanBackend} from './runtime/PodmanBackend';
@@ -30,11 +31,29 @@ export class Core {
   managementBusy=false;
   private lifecycleGeneration=0;
   readonly recordings=new Recordings();
+  readonly cli:CliRegistration;
+  private cliWarning:string|undefined;
   private daemonStarting:Promise<Installation>|null=null;
-  constructor(readonly resources:string,configFile?:string,private progress?:Progress){
+  constructor(readonly resources:string,configFile?:string,private progress?:Progress,options:{cli?:CliRegistration;executable?:string}={}){
     const directory=process.platform==='win32'?join(process.env.APPDATA??homedir(),'AstraBridge'):
       join(process.env.XDG_CONFIG_HOME??join(homedir(),'.config'),'astrabridge');
     this.configFile=resolve(configFile??process.env.ASTRA_CONFIG??join(directory,'installation.json'));
+    this.cli=options.cli??new CliRegistration(resources);
+    this.executable=options.executable??applicationExecutable();
+  }
+  private executable:string|undefined;
+  async cliStatus(){const c=await this.load();return this.cli.status(this.configFile,c?.name);}
+  async installCli(){
+    const c=await this.configured(),r=await this.release();
+    if(!c.installed||c.transaction||c.phase==='removing'||r.digest&&r.digest!==c.digest)throw Error('Finish setup/update with the matching application before enabling the CLI command.');
+    if(!this.executable)throw Error('Enable the CLI command from the packaged AppImage or EXE.');
+    const result=await this.cli.install(this.executable,this.configFile,c.name,r.version,c.digest);this.cliWarning=undefined;return result;
+  }
+  async uninstallCli(){const result=await this.cli.uninstall(this.configFile);if(result.removed)this.cliWarning=undefined;return result;}
+  private async refreshCli(c:Installation){
+    if(!this.executable)return;
+    try{await this.cli.refresh(this.executable,this.configFile,c.name,(await this.release()).version,c.digest);this.cliWarning=undefined;}
+    catch(error){this.cliWarning='Runtime updated, but the CLI command needs repair in Setup: '+String(error);this.progress?.(this.cliWarning+'\n');}
   }
   async release():Promise<Release>{return JSON.parse(await readFile(join(this.resources,'release.json'),'utf8'));}
   async load():Promise<Installation|null>{
@@ -130,7 +149,7 @@ export class Core {
     const storageMissing=Boolean(storageState&&(!storageState.state||storageState.game===false));
     let runtime=null;
     if(container.running){try{runtime=await this.api('/v1/runtime/status','GET',undefined,config);}catch(e){error=String(e);}}
-    return {session_end:config.lastStop??null,configured:true,storageState,storageMissing,removalPending:config.phase==='removing',profile:runtime?.profile??config.selectedProfile??{id:'default',name:'Default'},installed:config.installed,phase:config.phase,backend:config.backend,container,runtime,error,release,
+    return {cliWarning:this.cliWarning,session_end:config.lastStop??null,configured:true,storageState,storageMissing,removalPending:config.phase==='removing',profile:runtime?.profile??config.selectedProfile??{id:'default',name:'Default'},installed:config.installed,phase:config.phase,backend:config.backend,container,runtime,error,release,
       currentDigest:config.digest,currentVersion:config.version,previousRuntime:config.previous??null,updatePending:Boolean(config.transaction),cleanupPending:Boolean(config.cleanupPending),updateRequired:Boolean(release.digest&&release.digest!==config.digest),
       storageDirectory:config.storageDirectory,recordingsDirectory:config.recordingsDirectory,gameMode:config.gameMode,sourceGame:config.sourceGame};
   }
@@ -172,7 +191,7 @@ export class Core {
     await this.api('/v1/runtime/import-ini','POST',{encoding:options.encoding,data_relative:dataRelative},config);
     if(options.content||options.archives)await this.api('/v1/runtime/config','PATCH',{
       ...(options.content?{content:options.content}:{}),...(options.archives?{archives:options.archives}:{})},config);
-    await backend.stop(config.name);config.installed=true;config.phase='ready';await this.save(config);
+    await backend.stop(config.name);config.installed=true;config.phase='ready';await this.save(config);await this.refreshCli(config);
     return this.status();
   });}
 
@@ -188,7 +207,8 @@ export class Core {
       let running=false;try{running=(await this.backend(config).inspect(config.name)).running;}catch{}
       if(running)throw new Error('Stop the runtime before resetting setup, or use Remove installation');
     }
-    await rm(this.configFile,{force:true});return {reset:true};
+    let warning;try{await this.uninstallCli();}catch(error){warning='CLI command was kept: '+String(error);}
+    await rm(this.configFile,{force:true});return {reset:true,warning};
   });}
 
   async uninstall(){return this.exclusive(async()=>{
@@ -206,6 +226,7 @@ export class Core {
     if(backend.cleanupStore){
       if(!await backend.cleanupStore())warnings.push('Other containers or volumes use this storage; their files and shared cache were kept.');
     }
+    try{await this.uninstallCli();}catch(error){warnings.push('CLI command was kept: '+String(error));}
     await rm(this.configFile,{force:true});
     return {removed:true,recordingsDirectory:config.recordingsDirectory,sourceGame:config.sourceGame,warnings};
   });}
@@ -219,6 +240,29 @@ export class Core {
     if(generation!==this.lifecycleGeneration)throw new Error('Game startup was cancelled.');
     if(config.lastStop){delete config.lastStop;await this.save(config);}
     return this.api('/v1/runtime/engine/start','POST',{...(gpu?{gpu}:{}),...(profile?{profile}:{})},config);
+  }
+  async stopSession(){
+    const config=await this.configured(),backend=this.backend(config);
+    if(!(await backend.inspect(config.name)).running)return this.stop();
+    let state:any;
+    try{state=await this.api('/v1/runtime/status','GET',undefined,config,3000);}catch{}
+    if(state&&(state.starting||!state.running))return this.stop();
+    config.lastStop={reason:'user_requested_stop',at:Date.now()/1000};await this.save(config);
+    let preparation:any;
+    try{preparation=await this.api('/v1/runtime/engine/prepare-stop','POST',{},config,90_000);}
+    catch(error){throw Object.assign(new Error('A save could not be confirmed. Use stop --without-save to stop anyway, or stop --cancel to keep the game open.'),
+      {details:{error:'save_before_stop_failed',message:'A save could not be confirmed. Use stop --without-save to stop anyway, or stop --cancel to keep the game open.',retryable:false,reason:(error as any).details?.error??'runtime_unreachable',needs_confirmation:true}});}
+    if(!['saved','not_needed'].includes(preparation?.save?.status))throw Object.assign(new Error('A save could not be confirmed. Use stop --without-save to stop anyway, or stop --cancel to keep the game open.'),
+      {details:{error:'save_before_stop_failed',message:'A save could not be confirmed. Use stop --without-save to stop anyway, or stop --cancel to keep the game open.',retryable:false,reason:preparation?.save?.reason??'save_failed',token:preparation?.token,needs_confirmation:true}});
+    return {...await this.stop(),save:preparation.save};
+  }
+  async cancelSessionStop(token?:string){
+    const config=await this.configured();
+    let cancelled=false;
+    try{cancelled=Boolean((await this.api('/v1/runtime/engine/cancel-stop','POST',token?{token}:{},config,10_000)).cancelled);}catch(error){if(token)throw error;}
+    if(token&&!cancelled)return {cancelled:true,stale:true};
+    delete config.lastStop;if(cancelled||token)delete config.agentToken;await this.save(config);
+    return {cancelled:true};
   }
   async stop(){this.lifecycleGeneration++;if(this.daemonStarting)await this.daemonStarting.catch(()=>{});
     const config=await this.configured();const backend=this.backend(config);
@@ -292,6 +336,7 @@ export class Core {
     if(digest===config.digest){
       if(!(await backend.inspect(config.name)).exists){await backend.create(config);config.phase='ready';await this.save(config);}
       if(config.cleanupPending)await this.cleanupRecovery(config);
+      await this.refreshCli(config);
       return this.status();
     }
     const state=await backend.inspect(config.name);
@@ -325,6 +370,7 @@ export class Core {
       throw new Error(`Update failed; the previous runtime and saved data were restored. ${String(error)}`);
     }
     await this.cleanupRecovery(candidate);
+    await this.refreshCli(candidate);
     return this.status();
   });}
   private stoppedByUser(config:Installation){
@@ -378,13 +424,16 @@ export class Core {
     if((await backend.inspect(config.name)).running){try{return await this.api('/v1/runtime/logs?name='+encodeURIComponent(name??'daemon.log'));}catch{}}
     return {name:'container',text:await backend.logs(config.name)};
   }
-  async exportSkill(destination:string,executable:string){
-    await this.configured();
+  async exportSkill(destination:string){
+    const config=await this.configured();
+    const cli=await this.cliStatus();
+    if(!cli.enabled||!cli.matches||!cli.targetAvailable||cli.digest!==config.digest)throw Error('Enable the CLI command for this installation in Setup before exporting the skill.');
+    const executable=cli.executable;
     destination=resolve(destination);try{await access(destination);throw new Error('Skill destination already exists; choose a new directory');}
     catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
     await cp(join(this.resources,'skill'),destination,{recursive:true,errorOnExist:true});
-    await writeFile(join(destination,'installation.json'),JSON.stringify({executable,config:this.configFile},null,2)+'\n');
-    return {skill:join(destination,'SKILL.md'),executable,config:this.configFile};
+    await writeFile(join(destination,'installation.json'),JSON.stringify({command:'astrabridge',executable,config:this.configFile},null,2)+'\n');
+    return {skill:join(destination,'SKILL.md'),command:'astrabridge',executable,config:this.configFile};
   }
   async profiles(){await this.ensureDaemon();return this.api('/v1/runtime/profiles');}
   async profile(operation:string,args:Record<string,unknown>){return this.exclusive(async()=>{
