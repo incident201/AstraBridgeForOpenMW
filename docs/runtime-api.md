@@ -188,11 +188,14 @@ accepts independent `graphics_gpu` and `encoding_gpu` selectors. See
 Application-level `astrabridge status` also reports `currentVersion`,
 `previousRuntime`, `updateRequired`, `updatePending` and `cleanupPending`.
 These describe host management, not game state. `astrabridge update` recovers an
-interrupted transaction before allowing another update attempt. The new Desktop
-exports its bundled skill with `command: "astrabridge"`, the permanent launcher
-path in `executable`, and `config` in `installation.json`. It has no profile
-binding; agent connect uses the currently selected profile. Enable the launcher
-with `astrabridge cli install` or Setup before exporting. `cli status` reports the
+interrupted transaction before allowing another update attempt. With a matching
+permanent CLI enabled, Desktop exports its bundled skill with
+`command: "astrabridge"`, the launcher path in `executable`, and `config` in
+`installation.json`. Otherwise it exports the current application path and
+`config` without `command`, for direct invocation with `--config`. Registration is
+optional and export never changes it. Neither mode has a profile binding; agent
+connect uses the currently selected profile. Enable the launcher with
+`astrabridge cli install` or Setup. `cli status` reports the
 registered application/configuration, target availability and PATH readiness;
 `cli uninstall` removes a matching registration. These host operations require
 no running game or daemon.
@@ -200,8 +203,8 @@ no running game or daemon.
 Successful updates of the registered installation refresh the launcher atomically.
 Opening an older Desktop or switching profiles does not rebind it. Existing skill
 copies therefore remain usable after application replacement; re-export when the
-instructions change. Legacy exports still use their executable plus explicit
-`--config`, and should be replaced once to adopt the permanent command.
+instructions change. Direct application exports use their executable plus explicit
+`--config`; export again to adopt the permanent command after enabling it.
 
 ## Spectator timeline
 

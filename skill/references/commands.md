@@ -5,7 +5,7 @@ Use this reference for argument syntax, response fields and handle freshness. Re
 ## Calling convention
 
 Every gameplay command below follows `astrabridge game`. The permanent launcher
-supplies the configuration recorded at CLI registration. For a legacy export
+supplies the configuration recorded at CLI registration. For an export
 without `command` in `installation.json`, use its executable and `--config` path.
 Use `astrabridge game COMMAND --help` for parser help; it does not run an action.
 For connecting, profile mismatches, host requirements and save/load, see [session.md](session.md).

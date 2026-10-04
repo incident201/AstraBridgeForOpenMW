@@ -6,9 +6,9 @@ description: "Play Morrowind through the configured AstraBridge Agent-Computer I
 # Play OpenMW through AstraBridge
 
 Control the game through the public `astrabridge game` CLI. Read adjacent
-`installation.json` once. Current exports provide `command: "astrabridge"` and
-`executable`, the permanent launcher. Check once that the short command resolves
-to that launcher in your shell, then use:
+`installation.json` once. When it provides `command: "astrabridge"`, `executable`
+is the permanent launcher. Check once that the short command resolves to that
+launcher in your shell, then use:
 
 ```sh
 astrabridge agent connect
@@ -18,8 +18,8 @@ astrabridge game observe
 The launcher supplies the installation configuration and follows successful
 application/runtime updates. If this process cannot find the command in PATH,
 use the recorded `executable` path and ask the host to fix PATH; on PowerShell
-invoke a quoted path with `&`. A legacy export without `command` still requires
-its recorded executable **and** `--config` path. Do not register or replace the
+invoke a quoted path with `&`. An export without `command` uses the application
+directly: invoke its recorded executable **and** `--config` path. Do not register or replace the
 host's CLI command as a gameplay action.
 
 The skill is independent of profiles. A new connection uses the profile selected

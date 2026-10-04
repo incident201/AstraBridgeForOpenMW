@@ -5,10 +5,10 @@ const output=process.env.ASTRA_TEST_OUTPUT;if(!output)throw Error('Set ASTRA_TES
 const browser=await chromium.launch();const page=await browser.newPage();
 await page.addInitScript(()=>{
  let cli={enabled:false,command:'astrabridge',matches:false};
- window.fixture={calls:[]};
+ window.fixture={calls:[],updateRequired:false};
  window.astra={subscribe:()=>()=>{},input:()=>{},invoke:async op=>{
   window.fixture.calls.push(op);
-  if(op==='status')return {installed:true,configured:true,currentVersion:'0.3.0',currentDigest:'release',release:{version:'0.3.0'},container:{exists:true,running:false},runtime:{running:false,profile:{name:'Default'}},sourceGame:'/home/player/Games/Morrowind',storageDirectory:'/home/player/Games/AstraBridge',recordingsDirectory:'/home/player/Videos/AstraBridge'};
+  if(op==='status')return {installed:true,configured:true,updateRequired:window.fixture.updateRequired,currentVersion:'0.3.0',currentDigest:'release',release:{version:'0.3.0'},container:{exists:true,running:false},runtime:{running:false,profile:{name:'Default'}},sourceGame:'/home/player/Games/Morrowind',storageDirectory:'/home/player/Games/AstraBridge',recordingsDirectory:'/home/player/Videos/AstraBridge'};
   if(op==='cli-status')return cli;
   if(op==='cli-install'){cli={enabled:true,command:'astrabridge',matches:true,pathReady:false,targetAvailable:true,digest:'release',executable:'/home/player/.local/bin/astrabridge',guidance:'Add /home/player/.local/bin to PATH once, then restart the terminal or agent client.'};return cli;}
   if(op==='cli-uninstall'){cli={enabled:false,matches:false};return {removed:true};}
@@ -19,6 +19,9 @@ try{
  await page.goto(process.env.ASTRA_UI_URL??'http://127.0.0.1:4178');
  await page.getByRole('navigation').getByRole('button',{name:'Setup',exact:true}).click();
  await page.getByRole('button',{name:'Storage and skill',exact:true}).click();
+ assert.equal(await page.getByRole('button',{name:'Remove CLI command',exact:true}).count(),0,'No removal button for an absent command');
+ await page.getByRole('button',{name:'Export gameplay skill',exact:true}).click();
+ assert.ok(await page.evaluate(()=>window.fixture.calls.includes('skill-export')));
  await page.getByRole('button',{name:'Enable CLI command',exact:true}).click();
  await page.getByText('Add /home/player/.local/bin to PATH once, then restart the terminal or agent client.',{exact:true}).waitFor();
  for(const [width,height] of [[960,680],[1280,720]]){
@@ -28,6 +31,9 @@ try{
   assert.ok(await page.locator('main').evaluate(e=>e.scrollHeight<=e.clientHeight+1));
   await page.screenshot({path:output+`/cli-${width}.png`});
  }
+ await page.evaluate(()=>window.fixture.updateRequired=true);
+ await page.waitForFunction(()=>document.querySelector('[aria-label="CLI command setup"] button')?.disabled);
+ assert.equal(await page.getByRole('button',{name:'Remove CLI command',exact:true}).isEnabled(),true,'Runtime update must not block removal');
  await page.getByRole('button',{name:'Remove CLI command',exact:true}).click();
  await page.getByRole('button',{name:'Enable CLI command',exact:true}).waitFor();
  assert.ok(await page.evaluate(()=>window.fixture.calls.includes('cli-install')&&window.fixture.calls.includes('cli-uninstall')));

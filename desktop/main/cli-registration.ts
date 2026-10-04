@@ -8,7 +8,7 @@ import {run,checked} from './runtime/RuntimeBackend';
 
 interface Binding {schema:1;owner:'AstraBridge CLI';executable:string;config:string;installation:string;version:string;digest:string;binaryHash?:string;pathAdded?:boolean;disabled?:boolean}
 interface WindowsPath {query(directory:string):Promise<boolean>;add(directory:string):Promise<boolean>;remove(directory:string):Promise<boolean>}
-interface Options {platform?:string;binDirectory?:string;searchPath?:()=>string;windowsPath?:WindowsPath;removeLauncher?:(path:string)=>Promise<void>;deferRemoval?:(path:string,hash:string)=>Promise<void>}
+interface Options {platform?:string;binDirectory?:string;searchPath?:()=>string;applicationDirectory?:string;windowsPath?:WindowsPath;removeLauncher?:(path:string)=>Promise<void>;deferRemoval?:(path:string,hash:string)=>Promise<void>}
 const marker='# AstraBridge CLI registration v1\n# ';
 const hash=(bytes:Buffer|string)=>createHash('sha256').update(bytes).digest('hex');
 const quote=(value:string)=>"'"+value.replaceAll("'","'\"'\"'")+"'";
@@ -35,12 +35,14 @@ async function atomicFile(path:string,data:Buffer|string,mode=0o600,replace=true
 export class CliRegistration {
  readonly windows:boolean;readonly directory:string;readonly executable:string;private target:string;
  private searchPath:()=>string;private windowsPath:WindowsPath;private removeLauncher:(path:string)=>Promise<void>;private deferRemoval:(path:string,hash:string)=>Promise<void>;
+ private applicationDirectory:string|undefined;
  constructor(private resources:string,options:Options={}){
   this.windows=(options.platform??process.platform)==='win32';
   this.directory=options.binDirectory??(this.windows?join(process.env.LOCALAPPDATA??homedir(),'AstraBridge','cli','bin'):join(homedir(),'.local','bin'));
   this.executable=join(this.directory,this.windows?'astrabridge.exe':'astrabridge');
   this.target=this.windows?join(this.directory,'cli-target.ini'):this.executable;
   this.searchPath=options.searchPath??(()=>process.env.PATH??'');
+  this.applicationDirectory=options.applicationDirectory??(!this.windows?process.env.APPDIR:undefined);
   this.removeLauncher=options.removeLauncher??(path=>rm(path));
   this.deferRemoval=options.deferRemoval??((path,hash)=>new Promise<void>((resolve,reject)=>{
    const child=spawn(join(resources,'cli-launcher.exe'),['--remove-launcher',path,hash],{detached:true,stdio:'ignore',windowsHide:true});
@@ -74,6 +76,10 @@ export class CliRegistration {
  }
  private async firstCommand(){
   for(const directory of this.searchPath().split(this.windows?';':delimiter).filter(Boolean)){
+   // AppRun prepends its private mount to PATH. Its bundled entry point is not
+   // a host command and disappears when the AppImage exits. Keep scanning the
+   // remaining PATH so actual host conflicts are still detected.
+   if(this.applicationDirectory&&await sameFile(directory,this.applicationDirectory,this.windows))continue;
    for(const name of this.windows?['astrabridge.com','astrabridge.exe','astrabridge.bat','astrabridge.cmd']:['astrabridge']){
     const path=join(directory.replace(/^"|"$/g,''),name);
     try{await access(path,this.windows?constants.F_OK:constants.X_OK);if((await lstat(path)).isDirectory())continue;return path;}catch{}

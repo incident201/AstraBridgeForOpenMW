@@ -301,7 +301,9 @@ update from an older image layout may still need to download these new layers.
 an executable shell launcher in `~/.local/bin`. Windows uses a native launcher in
 `%LOCALAPPDATA%/AstraBridge/cli/bin` and adds that directory to the user PATH.
 Setup reports missing PATH entries, shadowing commands and processes that need
-their environment refreshed. Linux shell startup files are configured by the user.
+their environment refreshed. The private AppImage directory that AppRun adds to
+PATH is excluded from host command lookup; other PATH entries still undergo
+conflict checks. Linux shell startup files are configured by the user.
 
 The launcher forwards arguments, standard streams and exit status to the selected
 application, setting `ASTRA_CONFIG` for its bound installation. Explicit
@@ -320,8 +322,11 @@ it; other PATH entries are preserved. When a Windows launcher is still executing
 removal is marked pending and a helper deletes the matching binary after it exits.
 The target is disabled immediately; a locked or replaced file is not blindly deleted.
 
-New skill exports contain `command`, the stable `executable` path and `config`.
-Export requires an enabled command for the matching installation/runtime. Existing
-exports remain valid with their original direct executable/config invocation;
-replacing them once adopts the permanent launcher. Thereafter only changes to skill
-instructions require a new export, not a different versioned application filename.
+With an enabled command for the matching installation/runtime, skill exports
+contain `command`, the stable `executable` path and `config`. Otherwise export
+records the current application path and `config`, without `command`; it does not
+require or change CLI registration. Direct application exports use an explicit
+`--config` and need re-exporting if that application moves. Enabling the permanent
+command and exporting again removes this filename dependency. Both export modes
+require the application to match the installed runtime and follow the selected
+profile.

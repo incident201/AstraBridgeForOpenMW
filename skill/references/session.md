@@ -59,8 +59,9 @@ Check actual `astrabridge version` and `astrabridge status` values to diagnose a
 mismatch, rather than comparing filenames in two exports. If the target is missing
 or incompatible, ask the host to repair the CLI command in Setup. Do not guess a
 binary, edit configuration, enter a container or apply an update as a gameplay
-workaround. Legacy exports with direct application paths should be replaced once
-with a complete new export after the host enables the permanent command.
+workaround. Exports made without the permanent command use the application path
+and explicit `--config`. If that application moves, ask the host for a new export;
+the host can optionally enable the permanent command to avoid this dependency.
 
 ## Saves and process lifecycle
 

@@ -426,14 +426,18 @@ export class Core {
   }
   async exportSkill(destination:string){
     const config=await this.configured();
+    const release=await this.release();
+    if(release.digest&&release.digest!==config.digest)throw Error('Update the runtime to match this application before exporting the gameplay skill.');
     const cli=await this.cliStatus();
-    if(!cli.enabled||!cli.matches||!cli.targetAvailable||cli.digest!==config.digest)throw Error('Enable the CLI command for this installation in Setup before exporting the skill.');
-    const executable=cli.executable;
+    const registered=cli.enabled&&cli.matches&&cli.targetAvailable&&cli.digest===config.digest;
+    const executable=registered?cli.executable:this.executable;
+    if(!executable)throw Error('Export the gameplay skill from the packaged AppImage or EXE.');
+    const connection={...(registered?{command:'astrabridge'}:{}),executable,config:this.configFile};
     destination=resolve(destination);try{await access(destination);throw new Error('Skill destination already exists; choose a new directory');}
     catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
     await cp(join(this.resources,'skill'),destination,{recursive:true,errorOnExist:true});
-    await writeFile(join(destination,'installation.json'),JSON.stringify({command:'astrabridge',executable,config:this.configFile},null,2)+'\n');
-    return {skill:join(destination,'SKILL.md'),command:'astrabridge',executable,config:this.configFile};
+    await writeFile(join(destination,'installation.json'),JSON.stringify(connection,null,2)+'\n');
+    return {skill:join(destination,'SKILL.md'),...connection};
   }
   async profiles(){await this.ensureDaemon();return this.api('/v1/runtime/profiles');}
   async profile(operation:string,args:Record<string,unknown>){return this.exclusive(async()=>{

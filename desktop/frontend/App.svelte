@@ -415,7 +415,7 @@
           {:else}
             <dl class="storage-locations"><div><dt>Game files <span>{state.gameMode==='copy'?'Managed copy':'Read-only host folder'}</span></dt><dd><code>{state.sourceGame}</code></dd></div>
             <div><dt>Managed storage</dt><dd><code>{state.storageDirectory}</code></dd></div><div><dt>Recordings</dt><dd><code>{state.recordingsDirectory}</code></dd></div></dl>
-            <CliSetup disabled={busy||!state.installed||state.updateRequired||state.updatePending} version={state.currentVersion} digest={state.currentDigest} warning={state.cliWarning}/>
+            <CliSetup disabled={busy} installDisabled={!state.installed||state.updateRequired||state.updatePending} version={state.currentVersion} digest={state.currentDigest} warning={state.cliWarning}/>
             <div class="toolbar"><button on:click={()=>task(()=>window.astra.invoke('open-recordings-folder'))}><Icon name="folder" size={20}/>Open recordings folder</button><button on:click={()=>task(()=>window.astra.invoke('skill-export'),'Skill exported.')}><Icon name="export" size={20}/>Export gameplay skill</button></div>
           {/if}
           {#if installedSection==='runtime'&&!(busy&&transfer)}<div class="installation-removal"><h3>Remove or reset installation</h3><p class="hint">Remove managed profiles and the runtime, or clear only the setup reference. Original host game files and recordings are kept.</p><div class="toolbar"><button class="danger" disabled={busy} on:click={()=>removeInstallation('uninstall')}>Remove installation and data</button><button disabled={busy||runtime.running} on:click={()=>removeInstallation('reset-setup')}>Reset setup only</button></div></div>{/if}

@@ -221,6 +221,7 @@ jobs:
             exit 1
           fi
           cmp packaged-version.json packaged-version-nosandbox.json
+          APPIMAGE_EXTRACT_AND_RUN=1 node tests/packaged-cli.mjs ./release/*.AppImage
       - uses: ilammy/msvc-dev-cmd@v1
         if: runner.os == 'Windows'
         with:

@@ -76,6 +76,9 @@ Then use **Export gameplay skill** or:
 astrabridge skill export "/path/to/openmw-play"
 ```
 
+CLI registration is optional. Without it, **Export gameplay skill** records the
+current AppImage/EXE path and configuration for the agent to invoke directly.
+
 Give that exported folder to the agent. It contains the current gameplay
 instructions and connection settings. Gameplay uses an explicit agent session:
 

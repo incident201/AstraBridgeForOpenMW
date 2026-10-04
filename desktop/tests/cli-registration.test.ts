@@ -69,11 +69,49 @@ test('exports retain the stable executable when the application is replaced',asy
   const core=new Core(f.root,f.config,undefined,{cli:f.cli,executable:f.old});
   core.configured=async()=>({name:'installation',installed:true,digest:'a'} as any);core.load=core.configured;
   core.release=async()=>({version:'1',digest:'a'} as any);
-  await assert.rejects(()=>core.exportSkill(join(f.root,'not-enabled')),/Enable the CLI/);
+  await core.exportSkill(join(f.root,'not-enabled'));
+  assert.deepEqual(JSON.parse(await readFile(join(f.root,'not-enabled/installation.json'),'utf8')),{executable:f.old,config:f.config});
+  assert.equal((await f.cli.status()).enabled,false,'Export must not implicitly install a command');
   await core.installCli();await core.exportSkill(join(f.root,'export'));
   const before=await readFile(join(f.root,'export/installation.json'));
   const metadata=JSON.parse(before.toString());assert.equal(metadata.command,'astrabridge');assert.equal(metadata.executable,f.cli.executable);assert.equal(metadata.profile,undefined);
   await f.cli.refresh(f.next,f.config,'installation','2','b');assert.deepEqual(await readFile(join(f.root,'export/installation.json')),before);
+ }finally{await f.close();}
+});
+test('AppImage private PATH entry is ignored while real host conflicts remain visible',async()=>{
+ const f=await fixture();try{
+  const appDir=join(f.root,'mounted AppImage'),other=join(f.root,'other');await mkdir(appDir);await mkdir(other);
+  await writeFile(join(appDir,'astrabridge'),'#!/bin/sh\nexit 0\n',{mode:0o755});
+  let searchPath=[appDir,f.bin,other].join(delimiter);
+  const cli=new CliRegistration(f.root,{platform:'linux',binDirectory:f.bin,applicationDirectory:appDir,searchPath:()=>searchPath});
+  const empty=await cli.status(f.config);assert.equal(empty.shadowedBy,null);
+  await cli.install(f.old,f.config,'installation','1','a');assert.equal((await cli.status(f.config)).pathReady,true);
+  await cli.install(f.next,f.config,'installation','2','b');assert.equal((await cli.status(f.config)).application,f.next);
+  await cli.uninstall(f.config);assert.equal((await cli.status(f.config)).enabled,false);
+  await writeFile(join(other,'astrabridge'),'foreign',{mode:0o755});
+  await assert.rejects(()=>cli.install(f.old,f.config,'installation','1','a'),/already in PATH/);
+  searchPath=[appDir,f.bin].join(delimiter);await cli.install(f.old,f.config,'installation','1','a');
+  searchPath=[appDir,other,f.bin].join(delimiter);assert.equal((await cli.status(f.config)).shadowedBy,join(other,'astrabridge'));
+ }finally{await f.close();}
+});
+test('skill export uses the application when the optional CLI is missing, foreign or stale',async()=>{
+ const f=await fixture();try{
+  await mkdir(join(f.root,'skill'));await writeFile(join(f.root,'skill/SKILL.md'),'instructions');
+  const core=new Core(f.root,f.config,undefined,{cli:f.cli,executable:f.next});
+  core.configured=async()=>({name:'installation',installed:true,digest:'b'} as any);core.load=core.configured;
+  core.release=async()=>({version:'2',digest:'b'} as any);
+  const check=async(name:string)=>{
+   const result=await core.exportSkill(join(f.root,name));
+   assert.equal(result.command,undefined);assert.equal(result.executable,f.next);
+   assert.deepEqual(JSON.parse(await readFile(join(f.root,name,'installation.json'),'utf8')),{executable:f.next,config:f.config});
+  };
+  await writeFile(f.cli.executable,'foreign',{mode:0o755});await check('foreign-command');
+  assert.equal(await readFile(f.cli.executable,'utf8'),'foreign');await rm(f.cli.executable);
+  await f.cli.install(f.old,f.config,'installation','1','a');await check('stale-command');
+  await f.cli.install(f.old,join(f.root,'other-config'),'other','2','b');await check('other-installation');
+  await f.cli.install(f.old,f.config,'installation','2','b');await rm(f.old);await check('missing-target');
+  core.release=async()=>({version:'3',digest:'c'} as any);
+  await assert.rejects(()=>core.exportSkill(join(f.root,'wrong-runtime')),/match this application/);
  }finally{await f.close();}
 });
 test('Windows registration keeps PATH ownership and a stable native shim',async()=>{
