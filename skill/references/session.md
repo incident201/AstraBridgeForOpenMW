@@ -112,3 +112,9 @@ for that start. `game record-start`, `game record-status` and `game record-stop`
 encoder automatically: the runtime probes
 the configured encoder and records the result in metadata. If an explicitly
 selected device is unavailable, report the error to the host user.
+
+If startup reports a missing managed store or a content load-order/dependency
+error, report it to the host user. Setup can recover or reset installation state;
+Game data settings control selected files and their order. Do not reset, uninstall
+or replace a playthrough as a gameplay recovery step. A `starting` runtime is not
+a ready game; wait for startup to complete or let the host stop the attempt.

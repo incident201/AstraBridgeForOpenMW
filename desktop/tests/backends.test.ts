@@ -70,3 +70,32 @@ test('Linux binds the selected host game read-only and passes NVIDIA CDI without
     assert.ok(!args.some(arg=>arg.includes('/tmp/.X11-unix')||arg.includes('DISPLAY=')||arg.includes('/run/user/')));
   }finally{await rm(directory,{recursive:true,force:true});}
 });
+
+test('Podman reports missing volumes, skips absent removal and never deletes unrelated resources',async()=>{
+ const directory=await mkdtemp(join(tmpdir(),'astra-volume-'));const calls:string[][]=[];
+ try{
+  let exists=false;
+  const runner:Runner=async(_p,args)=>{calls.push(args);return {code:args.includes('exists')&&!exists?1:0,stdout:'',stderr:''};};
+  const backend=new PodmanBackend(directory,runner);
+  assert.deepEqual(await backend.inspectStorage({...spec,gameDirectory:'/external/game'}),{state:false,game:null});
+  await backend.removeVolume(spec.stateVolume);assert.ok(!calls.some(a=>a.includes('rm')));
+  exists=true;await backend.removeVolume(spec.stateVolume);assert.deepEqual(calls.at(-1)?.slice(-3),['volume','rm',spec.stateVolume]);
+ }finally{await rm(directory,{recursive:true,force:true});}
+});
+
+test('WSL volume deletion is idempotent and does not mask runtime failures',async()=>{
+ const calls:string[][]=[];let missing=true;
+ const runner:Runner=async(_p,args)=>{calls.push(args);return args.includes('inspect')?{code:missing?1:0,stdout:missing?'[]':'[{"Name":"volume"}]',stderr:''}:{code:0,stdout:'',stderr:''};};
+ const backend=new WslContainerBackend(runner);await backend.removeVolume(spec.stateVolume);assert.equal(calls.length,1);
+ missing=false;await backend.removeVolume(spec.stateVolume);assert.deepEqual(calls.at(-1),['volume','rm',spec.stateVolume]);
+ const broken=new WslContainerBackend(async()=>({code:1,stdout:'',stderr:'WSL service unavailable'}));
+ await assert.rejects(()=>broken.inspectStorage(spec),/service unavailable/);
+});
+
+test('Podman never resets a managed store that contains another container or volume',async()=>{
+ const directory=await mkdtemp(join(tmpdir(),'astra-shared-'));const calls:string[][]=[];
+ try{
+  const runner:Runner=async(_p,args)=>{calls.push(args);return {code:0,stdout:args.includes('ps')?'other-container\n':'',stderr:''};};
+  assert.equal(await new PodmanBackend(directory,runner).cleanupStore(),false);assert.ok(!calls.some(a=>a.includes('unshare')||a.includes('prune')));
+ }finally{await rm(directory,{recursive:true,force:true});}
+});

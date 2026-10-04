@@ -85,6 +85,18 @@ app.whenReady().then(async()=>{
       if(operation==='status'){const result=await core.status();if(result.container?.running)await connectEvents();return result;}
       if(operation==='prerequisites')return core.prerequisites(typeof args.storage==='string'?args.storage:undefined);
       if(operation==='install')return core.install(args);
+      if(operation==='reset-setup'||operation==='uninstall'){
+        const remove=operation==='uninstall';
+        const options={type:'warning' as const,title:remove?'Remove installation?':'Reset setup?',
+          message:remove?'Permanently remove this runtime and its managed data?':'Forget this installation and return to setup?',
+          detail:remove?'This stops the runtime and deletes its container, profiles, saves, Atlas, notes, recovery snapshots and imported game copy. Original host game files and recordings are kept. Unused runtime images are removed when possible. Other files in the storage folder are not deleted.':
+            'This clears only the application’s installation configuration. Existing containers and files are not deleted. Use this when storage was already removed or is no longer accessible. To keep an existing installation, reconnect its storage instead.',
+          buttons:['Cancel',remove?'Remove installation and data':'Reset setup'],defaultId:0,cancelId:0,noLink:true};
+        const decision=window?await dialog.showMessageBox(window,options):await dialog.showMessageBox(options);
+        if(decision.response!==1)return {cancelled:true};
+        const result=remove?await core.uninstall():await core.resetSetup();
+        events?.close();events=null;return result;
+      }
       if(['start','stop','restart','update'].includes(operation)){
         const result=await core[operation as 'start'|'stop'|'restart'|'update']();await connectEvents();return result;
       }

@@ -229,3 +229,16 @@ indexes complete JSONL lines from the host recording folder and reconstructs
 comments, active/completed actions and interpolated clocks at the playback time.
 `replay` metadata includes `profile_subdirectory` so the host can associate the
 current MP4 with its sidecar. No future event is shown in a rewound view.
+
+## Startup and installation failures
+
+Runtime status includes `starting`, separately from `running`. A process becomes
+running only after its initial bridge handshake and window initialization.
+Startup failures remain in `error` and are returned with an actionable message.
+Stop cancels initialization before waiting for the normal lifecycle lock; an
+uninitialized process is terminated without waiting for an unavailable Lua inbox.
+Short `ping`, `quit` and `stop` time budgets are honored.
+
+Desktop status reports missing managed volumes and interrupted removal. Setup
+provides configuration reset and resource-scoped uninstall, independently of the
+update/recovery path. These are host management operations, not gameplay commands.

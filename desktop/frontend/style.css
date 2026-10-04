@@ -443,3 +443,5 @@ button.record-button.recording:hover:not(:disabled){background:#49303f;border-co
 .recording-video:fullscreen{width:100vw;height:100vh;margin:0;background:#050910}
 .recording-expand{position:absolute;top:10px;left:10px;z-index:3;opacity:.65;background:#0b142255}
 .recording-expand:hover,.recording-expand:focus-visible{opacity:1}
+
+.installation-removal{border-top:1px solid #344158;margin-top:auto;padding-top:12px;flex-shrink:0}.installation-removal h3{font-size:13px;margin:0 0 5px}.installation-removal p{font-size:12px;margin:0 0 10px}.storage-problem{padding:12px 0}.storage-problem h3{margin:0 0 8px}.storage-problem p{color:#aabbd0;font-size:13px;max-width:700px}

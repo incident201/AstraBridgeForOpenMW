@@ -44,6 +44,23 @@ export class WslContainerBackend implements RuntimeBackend {
     throw new Error('Pinned local runtime image is missing; load it before continuing');
   }
   async createVolume(name:string){checked(await this.command(['volume','create',resourceName(name)]));}
+  async ensureImage(image:string,digest:string){
+    const local=await this.command(['image','inspect',image]);
+    if(local.code===0&&imageIdentity(imageInfo(local),image.startsWith('localhost/'))===digest)return;
+    if(local.code!==0&&!missingInspection(local))checked(local);
+    if(image.startsWith('localhost/')){await this.localImage(image);return;}
+    if(await this.pull(image.split('@')[0]+'@'+digest)!==digest)throw new Error('Previous runtime digest mismatch');
+  }
+  private async volumeExists(name:string){
+    const result=await this.command(['volume','inspect',resourceName(name)]);
+    if(missingInspection(result))return false;checked(result);return true;
+  }
+  async inspectStorage(spec:RuntimeSpec){
+    return {state:await this.volumeExists(spec.stateVolume),game:spec.gameDirectory?null:await this.volumeExists(spec.gameVolume)};
+  }
+  async removeVolume(name:string){
+    if(await this.volumeExists(name))checked(await this.command(['volume','rm',resourceName(name)]));
+  }
   async create(spec:RuntimeSpec){
     if((spec.repository||spec.buildDirectory)&&spec.mode!=='development')throw new Error('Source/build mounts require development mode');
     checked(await this.command(['container','create','--name',resourceName(spec.name),'--gpus','all',
@@ -57,7 +74,7 @@ export class WslContainerBackend implements RuntimeBackend {
       ...(spec.buildDirectory?['-v',`${spec.buildDirectory}:/work/build`]:[]),await this.localImage(spec.image)]));
   }
   async start(name:string){checked(await this.command(['container','start',resourceName(name)]));}
-  async stop(name:string){checked(await this.command(['container','stop','--time','120',resourceName(name)],undefined,150_000));}
+  async stop(name:string,seconds=120){checked(await this.command(['container','stop','--time',String(seconds),resourceName(name)],undefined,(seconds+30)*1000));}
   async remove(name:string){checked(await this.command(['container','rm',resourceName(name)]));}
   async inspect(name:string):Promise<RuntimeInspection>{
     const result=await this.command(['container','inspect',resourceName(name)]);

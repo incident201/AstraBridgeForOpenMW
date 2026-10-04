@@ -253,3 +253,11 @@ console launcher is compiled with `cl.exe`) and a Windows build environment.
 See [Development](development.md) for commands, cache locations and test setup.
 Real game tests require the user's game installation and an explicitly selected
 save. CPU recording tests need neither game data nor GPU hardware.
+
+### Managed-storage removal on Linux
+
+Keep `unshare` and `umount` (util-linux) and `rm` (coreutils) installed alongside
+Podman. The prerequisite checker verifies these commands. They let Desktop clean
+UID-mapped files in its selected managed store without sudo; original game files,
+recordings and other stores are retained. The standard packages on supported
+Linux desktop distributions normally already provide these tools.

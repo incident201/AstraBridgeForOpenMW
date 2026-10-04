@@ -77,8 +77,9 @@ detecting an edition/language, deduplicating content or rewriting its structure.
 Filesystem links escaping the imported tree are rejected. The user explicitly
 chooses the game language. Desktop maps it to the supported text encoding and
 automatically locates `Data Files` (or a selected data folder). An advanced
-subfolder override supports custom layouts. `Morrowind.ini` supplies active
-content order and archives; these can be edited before starting the game.
+subfolder override supports custom layouts. `Morrowind.ini` supplies selected
+content files and archives. Master dependencies and timestamps determine the
+imported order; explicit settings can be edited before starting the game.
 The existing Tribunal addon generator separately reads its effective script
 during runtime profile preparation.
 
@@ -224,3 +225,40 @@ built against the image's libweston ABI. It creates a virtual keyboard/pointer
 seat for the headless backend so XWayland keeps focus and accepts manual input.
 It opens no host input devices and requires no `/dev/input` or host display mount.
 The daemon sends validated XTest events to the private XWayland server.
+
+## Installation recovery and removal
+
+Setup distinguishes a missing container from missing managed volumes. If only the
+container was removed, it can be recreated using existing data. Missing profile
+or copied-game volumes block startup/update before any backup or replacement;
+an image download cannot recover deleted playthrough data.
+
+**Reset setup only** clears the application's installation reference, including
+an interrupted update or malformed configuration. It does not delete storage or
+recordings. The setup form then lets the user choose game files, managed storage
+and recordings again. Reconnect temporarily unavailable storage instead when
+continuing the same installation is intended.
+
+**Remove installation and data** stops the runtime, removes its container and
+managed profile/copied-game volumes, and clears configuration after successful
+removal. Missing resources are treated as already removed. An interrupted removal
+can be retried. Original host game files and recordings are retained. On Linux,
+Podman removes UID-mapped files itself; no `sudo rm -rf` is required. If no other
+containers, pods or volumes use that managed Podman store, its remaining image
+cache and graph/run directories are removed through the UID-mapped namespace.
+This avoids resetting rootless Podman infrastructure shared with other stores. Shared stores and other files in
+the selected directory are preserved. Configuration-only reset remains available
+when a deleted or inaccessible store cannot be cleaned through the runtime tools.
+
+Update and rollback ensure their pinned old image is available before stopping
+or replacing the container, and verify its digest when it must be downloaded.
+
+## Importing Morrowind.ini
+
+INI `GameFileN` entries identify enabled files; their numeric order is not a
+ready-made OpenMW load order. Import sorts selected files by timestamp, then
+resolves dependencies from the initial TES3 header, including the standard
+Morrowind → Tribunal → Bloodmoon ordering used by OpenMW's importer. Only header
+master names are read, not game-world or quest records. Before launch, missing masters or dependency cycles produce a clear error.
+An invalid dependency order from an older import is repaired while preserving
+already valid custom ordering and the selected set of content files. Archive keys with or without a space before their number are accepted.

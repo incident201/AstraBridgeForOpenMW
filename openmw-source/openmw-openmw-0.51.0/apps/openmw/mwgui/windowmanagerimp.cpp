@@ -1,4 +1,5 @@
 #include "windowmanagerimp.hpp"
+#include <components/sdlutil/astramedia.hpp>
 
 #include <algorithm>
 #include <cassert>
@@ -2076,6 +2077,7 @@ namespace MWGui
 
     void WindowManager::playVideo(std::string_view name, bool allowSkipping, bool overrideSounds)
     {
+        AstraMedia::MovieScope astraMovie;
         mVideoWidget->playVideo("video\\" + std::string{ name });
 
         mVideoWidget->eventKeyButtonPressed.clear();
@@ -2123,6 +2125,14 @@ namespace MWGui
                 if (mVideoWidget->isPaused())
                     mVideoWidget->resume();
 
+                // Movies run a nested render loop outside Engine::frame.
+                // Advance loopback audio here too: the decoder uses its audio
+                // clock, and otherwise waits forever at the first movie frame.
+                if (AstraMedia::stream().enabled())
+                {
+                    AstraMedia::stream().begin(dt, true);
+                    AstraMedia::stream().render(mViewer->getFrameStamp()->getFrameNumber());
+                }
                 mViewer->eventTraversal();
                 mViewer->updateTraversal();
                 mViewer->renderingTraversals();
@@ -2135,6 +2145,8 @@ namespace MWGui
             frameRateLimiter.limit();
         }
         mVideoWidget->stop();
+        // Do not mix the final movie interval again in the enclosing frame.
+        if (AstraMedia::stream().enabled()) AstraMedia::stream().begin(0.f, false);
 
         MWBase::Environment::get().getSoundManager()->resumeSounds(MWSound::VideoPlayback);
 

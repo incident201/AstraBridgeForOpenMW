@@ -38,6 +38,7 @@ namespace AstraMedia
         template<class T> T* at(std::size_t n) { return reinterpret_cast<T*>(mData+n); }
     public:
         bool active = false;
+        bool movie = false;
         std::uint64_t frameStart = 0, frameEnd = 0;
         unsigned frameFlags = 0;
         Stream()
@@ -143,5 +144,12 @@ namespace AstraMedia
         }
     };
     inline Stream& stream() { static Stream value; return value; }
+    struct MovieScope
+    {
+        Stream& media = stream();
+        bool previous = media.movie;
+        MovieScope() { media.movie = true; }
+        ~MovieScope() { media.movie = previous; }
+    };
 }
 #endif

@@ -9,6 +9,7 @@ import time
 import uuid
 
 from astra_bridge.protocol import BridgeError
+from .content_order import import_order
 
 DEFAULTS = {
     'encoding':'win1251', 'data_relative':'Data Files', 'content':[], 'archives':[],
@@ -91,12 +92,13 @@ class Storage:
             if not ini.has_section(section): return []
             rows=[]
             for key,value in ini[section].items():
-                suffix=key[len(prefix):]
+                suffix=key[len(prefix):].strip()
                 if key.lower().startswith(prefix) and suffix.isdigit() and value:
                     rows.append((int(suffix),value.strip()))
             return [value for _,value in sorted(rows)]
         content = numbered('Game Files','gamefile')
         archives = numbered('Archives','archive')
+        content = import_order(self.game/data_relative,content,encoding)
         cfg=self.update({'content':content,'archives':archives})
         return {'imported':True,'configuration':cfg}
 
@@ -106,6 +108,10 @@ class Storage:
         if not data.is_relative_to(self.game.resolve()) or not data.is_dir():
             raise BridgeError('game_data_directory_missing', data_relative=cfg['data_relative'])
         if not cfg['content']: raise BridgeError('content_list_empty_configure_game')
+        # Repair invalid legacy imports without re-sorting an already valid
+        # user-selected mod order or enabling any additional content files.
+        ordered=import_order(data,cfg['content'],cfg['encoding'],by_timestamp=False)
+        if ordered!=cfg['content']:cfg=self.update({'content':ordered})
         names = {p.name.lower():p.name for p in data.iterdir() if p.is_file()}
         def exact(name):
             if name.lower() not in names: raise BridgeError('content_file_missing', filename=name)

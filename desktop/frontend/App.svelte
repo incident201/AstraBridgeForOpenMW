@@ -10,6 +10,7 @@
   import {ReplayViewer,type ReplayInfo} from './replay';
   import {Viewer,artifact,pointer} from './viewer';
   const pages=[['play','Play'],['atlas','Atlas'],['recordings','Recordings'],['profiles','Profiles'],['settings','Settings'],['diagnostics','Diagnostics'],['setup','Setup']];
+  let dismissedRuntimeError='';
   let page='play',state:any={installed:false},runtime:any={},busy=false,error='',notice='',progress='';
   let prerequisites:PrerequisiteReport|null=null,checkingPrerequisites=false,requirementsOpen=false;
   let game='',storage='',recordingsDirectory='',encoding='win1252',dataRelative='',development=false;
@@ -34,6 +35,8 @@
   $: if(!runtime.running&&(watching||connecting)&&!viewerClosing&&!busy)void endWatch();
   $: if(runtime.game_fps!=null)lastFps=Math.max(0,runtime.game_fps);
   $: filteredRecordings=recordings.filter(row=>recordingsScope==='all'||row.profile_id===runtime.profile?.id);
+  $: runtimeError=runtime.error&&runtime.error!==dismissedRuntimeError?runtime.error:'';
+  $: if(!runtime.error)dismissedRuntimeError='';
   $: owner=runtime.owner?.mode??'idle';
   $: manual=owner==='manual';
   $: recording=Boolean(runtime.recording?.recording);
@@ -84,6 +87,16 @@
     profiles=data.profiles;selectedProfile=profiles.find(p=>p.id===(data.result?.id??selectedProfile?.id))??profiles.find(p=>p.active);profileForm='';
     if(!data.cancelled)notice=operation==='duplicate'?'Independent profile copy created.':operation==='delete'?'Profile deleted. Video recordings are kept on your computer.':'';
   });}
+  async function removeInstallation(operation:'uninstall'|'reset-setup'){
+    await task(async()=>{
+      const previous=state,result=await window.astra.invoke(operation);
+      if(result?.cancelled)return;
+      await endWatch();runtime={};lastProfile='';page='setup';requirementsOpen=false;setupStep='game';
+      game=previous.sourceGame??'';storage=previous.storageDirectory??'';recordingsDirectory=previous.recordingsDirectory??'';
+      notice=operation==='uninstall'?'Managed installation removed. Original game files and recordings were kept.':'Setup reset. Choose the game and storage folder for a new installation.';
+      if(result.warnings?.length)notice+=' Some cached images remain: '+result.warnings.join(' ');
+    });
+  }
   async function choose(field:'game'|'storage'|'recordings'){const selected=await window.astra.invoke('choose-directory');if(selected){if(field==='game')game=selected;else if(field==='storage')storage=selected;else recordingsDirectory=selected;}}
   async function install(){
     progress='';await task(async()=>{await window.astra.invoke('install',{game,storage,encoding,dataRelative:dataRelative||undefined,development,gameMode,recordings:recordingsDirectory||undefined});page='play';},'Installation ready. Start the game when you are ready.');
@@ -216,7 +229,7 @@
     viewerDisabled=localStorage.getItem('viewerDisabled')==='true';
     showComments=localStorage.getItem('overlayComments')!=='false';showActions=localStorage.getItem('overlayActions')==='true';showClocks=localStorage.getItem('overlayClocks')!=='false';
     preferencesReady=true;
-    void refresh().then(()=>checkPrerequisites(true));const timer=setInterval(()=>void refresh(),2500);
+    void refresh().then(()=>{if(state.storageMissing||state.removalPending||state.configError||state.configured&&!state.installed)page='setup';return checkPrerequisites(true);});const timer=setInterval(()=>void refresh(),2500);
     const replayTimer=setInterval(()=>void pollReplay(),1000);
     const unsubscribe=window.astra.subscribe(message=>{
       if(message.type==='viewer.fullscreen')setViewerFullscreen(message.enabled);
@@ -264,12 +277,12 @@
       {#if runtime.profile}<span class="selected-profile" title={runtime.profile.name}><Icon name="profiles" size={16}/><span>Selected profile: <strong>{runtime.profile.name}</strong></span></span>{/if}</div>
       <div class="toolbar">
         {#if state.installed}
-          <span class="game-state"><span class="dot" class:online={runtime.running&&runtime.clocks?.game_active}></span>{!runtime.running?'Game stopped':runtime.clocks?.game_active?'Gameplay running':'Game paused'}</span>
+          <span class="game-state"><span class="dot" class:online={runtime.running&&runtime.clocks?.game_active}></span>{runtime.starting?'Starting game…':!runtime.running?'Game stopped':runtime.clocks?.game_active?'Gameplay running':'Game paused'}</span>
           <details class="dropdown session-menu"><summary aria-label="Session options"><Icon name="more" size={19}/><span>Session</span></summary>
             <div class="menu-popover">
               <div class="menu-label">Runtime</div>
               <button disabled={busy||runtime.running||!state.container?.exists} on:click={()=>task(()=>window.astra.invoke('start'))}><Icon name="play" size={17}/>Start game</button>
-              <button disabled={busy||!state.container?.running} on:click={()=>task(async()=>{await endWatch();return window.astra.invoke('stop');})}><Icon name="stop" size={17}/>Stop runtime</button>
+              <button disabled={(!state.container?.running&&!runtime.starting)||(busy&&!runtime.starting)} on:click={()=>task(async()=>{await endWatch();return window.astra.invoke('stop');})}><Icon name="stop" size={17}/>Stop runtime</button>
               <button disabled={busy} on:click={()=>task(async()=>{await endWatch();return window.astra.invoke('restart');})}><Icon name="restart" size={17}/>Restart</button>
               <div class="menu-divider"></div>
               <button on:click={()=>task(()=>window.astra.invoke('skill-export'),'Skill exported. Give the exported folder to your agent.')}><Icon name="export" size={17}/>Export gameplay skill</button>
@@ -279,16 +292,16 @@
         {/if}
       </div>
     </header>
-    {#if state.installed&&(state.updatePending||state.updateRequired)&&page!=='setup'}<div class="banner" role="status"><span>{state.updatePending?'A runtime update was interrupted. Open Setup to recover your previous runtime.':'This Desktop needs its matching runtime. Open Setup to update; your saved data will be kept.'}</span><button class="banner-action" on:click={()=>navigate('setup')}>Open setup</button></div>{/if}
+    {#if state.installed&&(state.storageMissing||state.removalPending||state.updatePending||state.updateRequired)&&page!=='setup'}<div class="banner" role="status"><span>{state.storageMissing?'Managed storage could not be found. Open Setup to reconnect storage or set up again.':state.removalPending?'Installation removal was interrupted. Open Setup to finish removal.':state.updatePending?'A runtime update was interrupted. Open Setup to recover your previous runtime.':'This Desktop needs its matching runtime. Open Setup to update; your saved data will be kept.'}</span><button class="banner-action" on:click={()=>navigate('setup')}>Open setup</button></div>{/if}
     {#if prerequisites&&!prerequisites.available&&page!=='setup'&&!fullscreen}<div class="banner error" role="status"><span>Required system components are missing or need configuration.</span><button class="banner-action" on:click={showRequirements}>Review requirements</button></div>{/if}
-    {#if error&&!fullscreen}<div role="alert" class="banner error">{error}<button on:click={()=>error=''} aria-label="Dismiss error">×</button></div>{/if}
+    {#if (error||runtimeError)&&!fullscreen}<div role="alert" class="banner error">{error||runtimeError}<button on:click={()=>{error='';dismissedRuntimeError=runtime.error??'';}} aria-label="Dismiss error">×</button></div>{/if}
     {#if notice&&!fullscreen}<div role="status" class="banner">{notice}<button on:click={()=>notice=''} aria-label="Dismiss notification">×</button></div>{/if}
     {#if busy}<div class="working" role="status">Working…</div>{/if}
     {#if !state.installed&&page!=='setup'}<section class="empty"><h2>Set up your game</h2><p>Import your Morrowind installation and install the AstraBridge runtime.</p><button class="primary" on:click={()=>navigate('setup')}>Open setup</button></section>{/if}
 
     {#if state.installed}
       <section class="viewer-panel" class:tab-hidden={page!=='play'} class:fullscreen-controls={fullscreenControls} class:viewer-fullscreen={fullscreen} aria-labelledby="live-view-title">
-        {#if fullscreen&&error}<div class="viewer-alert error" role="alert"><span>{error}</span><button class="icon-button" on:click={()=>error=''} aria-label="Dismiss error">×</button></div>{/if}
+        {#if fullscreen&&(error||runtimeError)}<div class="viewer-alert error" role="alert"><span>{error||runtimeError}</span><button class="icon-button" on:click={()=>{error='';dismissedRuntimeError=runtime.error??'';}} aria-label="Dismiss error">×</button></div>{/if}
         {#if fullscreen&&notice&&!error}<div class="viewer-alert" role="status"><span>{notice}</span><button class="icon-button" on:click={()=>notice=''} aria-label="Dismiss notification">×</button></div>{/if}
         <div class="section-heading">
           <div class="viewer-heading">
@@ -332,9 +345,9 @@
           {#if viewMode!=='live'}<span class="replay-badge">{viewMode==='still'||!replayPlaying?'View paused':'Replay'}</span>{/if}
           {#if replayBusy}<div class="replay-loading" role="status">Loading recording…</div>{/if}
           {#if replayError}<div class="replay-error" role="alert">{replayError}</div>{/if}
-          {#if !watching&&viewMode==='live'}<div class="video-placeholder"><div class="placeholder-icon"><Icon name="monitor" size={32}/></div><h3>{runtime.running?'Your game is running':'Ready when you are'}</h3><p>{connecting?'Connecting viewer…':runtime.running?'Viewer disconnected.':'Start Morrowind in your current profile.'}</p>
+          {#if !watching&&viewMode==='live'}<div class="video-placeholder"><div class="placeholder-icon"><Icon name="monitor" size={32}/></div><h3>{runtime.starting?'Starting Morrowind…':runtime.running?'Your game is running':'Ready when you are'}</h3><p>{runtime.starting?'Loading game files and startup videos. Stop is available in Session.':connecting?'Connecting viewer…':runtime.running?'Viewer disconnected.':'Start Morrowind in your current profile.'}</p>
             <div class="placeholder-actions">{#if runtime.running}<button class="primary" disabled={busy} on:click={()=>watch(true)}><Icon name="play" size={17}/>Open viewer</button>
-            {:else}<button class="primary" disabled={busy||!state.container?.exists||state.updateRequired||state.updatePending} on:click={()=>task(()=>window.astra.invoke('start'))}><Icon name="play" size={17}/>Start game</button>{/if}
+            {:else}<button class="primary" disabled={busy||runtime.starting||!state.container?.exists||state.storageMissing||state.removalPending||state.updateRequired||state.updatePending} on:click={()=>task(()=>window.astra.invoke('start'))}><Icon name="play" size={17}/>Start game</button>{/if}
             {#if replayAvailable}<button disabled={replayBusy} on:click={()=>seekReplay(0,true)}><Icon name="recordings" size={17}/>Review recording</button>{/if}</div>
           </div>{/if}
         </div>
@@ -354,20 +367,28 @@
     {/if}
     {#if page==='setup'}
       <section class="card setup-card">
-        <div class="section-heading"><h2>{state.installed?'Your installation':'Install AstraBridge runtime'}</h2><button on:click={()=>{requirementsOpen=!requirementsOpen;if(requirementsOpen)void checkPrerequisites();}}>{requirementsOpen?'Back to setup':'System requirements'}</button></div>
+        <div class="section-heading"><h2>{state.configured||state.installed?'Your installation':'Install AstraBridge runtime'}</h2><button on:click={()=>{requirementsOpen=!requirementsOpen;if(requirementsOpen)void checkPrerequisites();}}>{requirementsOpen?'Back to setup':'System requirements'}</button></div>
         {#if requirementsOpen}
           <Prerequisites report={prerequisites} checking={checkingPrerequisites} recheck={()=>checkPrerequisites()}/>
-        {:else if state.installed}
+        {:else if state.configError}
+          <h3>Installation configuration could not be read</h3><p class="hint">Reset setup to configure a new installation. Existing files and containers are kept.</p>
+          <pre class="setup-progress">{state.configError}</pre><button disabled={busy} on:click={()=>removeInstallation('reset-setup')}>Reset setup</button>
+        {:else if (state.configured||state.installed)&&!(busy&&!state.installed)}
           <div class="tabs" aria-label="Installation sections"><button class:active={installedSection==='runtime'} on:click={()=>installedSection='runtime'}>Runtime</button><button class:active={installedSection==='storage'} on:click={()=>installedSection='storage'}>Storage and skill</button></div>
           {#if installedSection==='runtime'}
             <p>Desktop {state.release?.version} · Runtime {state.currentVersion??'installed'}</p>
             <details class="runtime-digest"><summary>Image identity</summary><code>{state.currentDigest}</code></details>
-            {#if !state.container?.exists}<p class="hint">The container has been removed. Your stored data are kept.</p>{/if}
+            {#if state.removalPending}<div class="storage-problem"><h3>Removal is incomplete</h3><p>Retry to finish removing the remaining managed resources.</p><button disabled={busy} on:click={()=>removeInstallation('uninstall')}>Finish removing installation</button></div>
+            {:else if state.storageMissing}<div class="storage-problem"><h3>Managed storage is missing</h3><p>Reconnect the original storage folder and check again, or reset setup for a new installation. An image download cannot restore deleted profiles and saves.</p><div class="toolbar"><button disabled={busy} on:click={()=>task(refresh)}>Check again</button><button class="primary" disabled={busy||runtime.running} on:click={()=>removeInstallation('reset-setup')}>Reset setup</button></div></div>
+            {:else if !state.installed}<div class="storage-problem"><h3>Installation is incomplete</h3><p>Remove the partial installation or reset setup to configure it again.</p><button disabled={busy} on:click={()=>removeInstallation('reset-setup')}>Reset setup</button></div>
+            {:else}
+            {#if !state.container?.exists}<p class="hint">The container is missing. Existing managed data can be reused when recreating it.</p>{/if}
             {#if state.updatePending}<p class="hint">Recover the interrupted update before starting the game or removing the container.</p>{/if}
             {#if state.updatePending||state.cleanupPending||state.updateRequired||!state.container?.exists}<div class="toolbar"><button class="primary" disabled={busy} on:click={()=>task(()=>window.astra.invoke('update'),'Runtime ready.')}>{state.updatePending?'Recover interrupted update':!state.container?.exists?'Recreate container':state.updateRequired?'Update runtime':'Retry cleanup'}</button></div>
             {:else}<p class="runtime-match"><span class="dot online"></span>Runtime matches Desktop</p>{/if}
             {#if state.previousRuntime}<p class="hint">Recovery copy: {state.previousRuntime.version??'previous runtime'} · {new Date(state.previousRuntime.created).toLocaleDateString()}</p>{/if}
             <p class="hint">Save your game and disconnect the agent before updating. One previous runtime and a copy of its saved data are kept for recovery.</p>
+            {/if}
             {#if busy&&progress}<pre class="setup-progress">{progress}</pre>{/if}
             <div class="container-management"><h3>Container management</h3><p class="hint">Remove the container while keeping your game, saves, Atlas, notes and recordings.</p><button class="danger" disabled={busy||!state.container?.exists||state.updatePending} on:click={async()=>{const result=await task(()=>window.astra.invoke('remove-container'));if(result?.removed)notice='Container removed. Your stored data are kept.';}}>Remove container</button></div>
           {:else}
@@ -375,6 +396,7 @@
             <div><dt>Managed storage</dt><dd><code>{state.storageDirectory}</code></dd></div><div><dt>Recordings</dt><dd><code>{state.recordingsDirectory}</code></dd></div></dl>
             <div class="toolbar"><button on:click={()=>task(()=>window.astra.invoke('open-recordings-folder'))}><Icon name="folder" size={20}/>Open recordings folder</button><button on:click={()=>task(()=>window.astra.invoke('skill-export'),'Skill exported.')}><Icon name="export" size={20}/>Export gameplay skill</button></div>
           {/if}
+          <div class="installation-removal"><h3>Remove or reset installation</h3><p class="hint">Remove managed profiles and the runtime, or clear only the setup reference. Original host game files and recordings are kept.</p><div class="toolbar"><button class="danger" disabled={busy} on:click={()=>removeInstallation('uninstall')}>Remove installation and data</button><button disabled={busy||runtime.running} on:click={()=>removeInstallation('reset-setup')}>Reset setup only</button></div></div>
         {:else}
           <div class="tabs" aria-label="Setup steps"><button class:active={setupStep==='game'} on:click={()=>setupStep='game'}>1. Game</button><button class:active={setupStep==='storage'} on:click={()=>setupStep='storage'}>2. Storage</button></div>
           <div class="setup-fields">
@@ -472,7 +494,7 @@
     {:else if page==='settings'&&configuration}
       <section class="card settings-card"><div class="section-heading"><h2>Configuration</h2>{#if runtime.running}<button on:click={()=>task(()=>window.astra.invoke('stop-game'))}>Stop game to edit</button>{/if}</div>
         <div class="tabs" aria-label="Configuration sections">{#each [['data','Game data'],['gameplay','Gameplay'],['graphics','Graphics and recording']] as [id,label]}<button class:active={settingsSection===id} aria-pressed={settingsSection===id} on:click={()=>settingsSection=id}>{label}</button>{/each}</div>
-        <p class="hint">Changes apply on the next game start.</p>
+        <p class="hint">Changes apply on the next game start. Required masters are loaded before their dependent plugins.</p>
         <fieldset class="settings-fields" disabled={runtime.running||busy}>
           {#if settingsSection==='data'}
             <div class="form-grid">

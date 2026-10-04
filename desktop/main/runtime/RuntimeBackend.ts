@@ -11,16 +11,21 @@ export interface RuntimeSpec {
   gpuDevices?:string[];
 }
 export interface RuntimeInspection {exists:boolean; running:boolean; id?:string; image?:string; status?:string}
+export interface StorageInspection {state:boolean;game:boolean|null}
 export interface PrerequisiteCheck {id:string; title:string; status:'ok'|'warning'|'error'; detail:string; remedy?:string}
 export interface PrerequisiteReport {available:boolean; version:string; message?:string; checks?:PrerequisiteCheck[]}
 export interface RuntimeBackend {
   readonly kind:'podman'|'wsl';
   check(gpuDevices?:string[]):Promise<PrerequisiteReport>;
   pull(image:string):Promise<string>;
+  ensureImage?(image:string,digest:string):Promise<void>;
+  inspectStorage?(spec:RuntimeSpec):Promise<StorageInspection>;
+  removeVolume(name:string):Promise<void>;
+  cleanupStore?():Promise<boolean>;
   createVolume(name:string):Promise<void>;
   create(spec:RuntimeSpec):Promise<void>;
   start(name:string):Promise<void>;
-  stop(name:string):Promise<void>;
+  stop(name:string,seconds?:number):Promise<void>;
   remove(name:string):Promise<void>;
   inspect(name:string):Promise<RuntimeInspection>;
   logs(name:string):Promise<string>;

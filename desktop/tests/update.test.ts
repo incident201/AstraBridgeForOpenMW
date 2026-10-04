@@ -105,3 +105,24 @@ test('concurrent management queries share one daemon start',async()=>{
   assert.equal(f.calls.filter(c=>c==='start').length,1);
  }finally{await f.close();}
 });
+
+test('deleted storage blocks update/recovery before pulls, backups or container changes',async()=>{
+ const f=await fixture();try{
+  const backend=f.core.backend(await f.read());backend.inspectStorage=async()=>({state:false,game:null});f.core.backend=()=>backend;
+  await assert.rejects(()=>f.core.update(),(e:any)=>e.details?.error==='managed_storage_missing');
+  assert.deepEqual(f.calls,[]);assert.equal((await f.core.status()).storageMissing,true);
+  await writeFile(f.configFile,JSON.stringify({...f.old,transaction:{before:f.old,snapshot:'lost',backedUp:false,replacing:false,wasRunning:false,gameWasRunning:false,api:null}}));
+  await assert.rejects(()=>f.core.update(),/Managed storage is missing/);assert.deepEqual(f.calls,[]);
+  f.state.exists=false;f.state.running=false;await f.core.resetSetup();assert.equal(await f.core.load(),null);
+ }finally{await f.close();}
+});
+
+test('missing old image is prepared before any stop, backup or recovery removal',async()=>{
+ const f=await fixture();try{
+  const backend=f.core.backend(await f.read());backend.ensureImage=async()=>{f.calls.push('ensure-old');throw Error('Registry unavailable');};f.core.backend=()=>backend;
+  await assert.rejects(()=>f.core.update(),/Registry unavailable/);
+  assert.deepEqual(f.calls,['pull','ensure-old']);assert.equal((await f.read()).transaction,undefined);assert.equal(f.state.running,true);
+  f.calls.length=0;await writeFile(f.configFile,JSON.stringify({...f.old,transaction:{before:f.old,snapshot:'recovery',backedUp:true,replacing:true,wasRunning:false,gameWasRunning:false,api:null}}));
+  await assert.rejects(()=>f.core.update(),/Registry unavailable/);assert.deepEqual(f.calls,['ensure-old']);assert.ok(f.state.exists);
+ }finally{await f.close();}
+});

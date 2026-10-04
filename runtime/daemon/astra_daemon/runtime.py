@@ -10,6 +10,7 @@ import uuid
 import math
 import copy
 import logging
+import threading
 from logging.handlers import RotatingFileHandler
 
 from astra_bridge.environment import identity
@@ -35,6 +36,7 @@ class Runtime:
         self.graphics=Graphics(installation,self.root)
         self.owner=Ownership();self.session=None;self.input=None;self.live=None
         self.transition=False;self.mutation=asyncio.Lock()
+        self.starting=False;self.start_cancelled=threading.Event();self.start_log_offset=0
         self.artifacts={};self.last_error=None;self.started=time.time()
         self.replay=Replay(self.recordings_root)
         self.atlas_cache={'supported':False}
@@ -42,7 +44,8 @@ class Runtime:
         self.build=json.loads((installation/'runtime-manifest.json').read_text()) if (installation/'runtime-manifest.json').exists() else {}
 
     def running(self):
-        return bool(self.session and self.session.process and self.session.process.poll() is None)
+        session=self.session;process=session.process if session else None
+        return bool(session and getattr(session,'ready',True) and process and process.poll() is None)
 
     def profile_logging(self,enabled=True):
         self.file_logging=enabled
@@ -57,7 +60,10 @@ class Runtime:
         session=self.session
         frame=session.display.frame_stream if session else None
         media=session.display.media_stream if session else None
-        return {'profile':self.profiles.public(),'running':self.running(),'owner':self.owner.public(),'transitioning':self.transition,
+        def reading(stream,field,default=0):
+            try:return getattr(stream,field) if stream else default
+            except (ValueError,BufferError):return default  # A worker may just have closed its mmap.
+        return {'profile':self.profiles.public(),'running':self.running(),'starting':self.starting,'owner':self.owner.public(),'transitioning':self.transition,
                 'active_action':session.control.status() if session else None,
                 'session':session.session_id if session else None,
                 'clocks':session.timeline.clocks() if session else None,
@@ -65,9 +71,9 @@ class Runtime:
                 'recording':session.recorder.status() if session and session.recorder else None,
                 'viewer':self.live.status() if self.live else {'running':False},
                 'graphics':{k:v for k,v in self.graphics.info.items() if k!='probe'},
-                'frames':frame.sequence if frame else 0,'media_samples':media.samples if media else 0,
-                'rendered_frames':frame.rendered_frames if frame else 0,
-                'world_active':media.active if media else False,'uptime_seconds':time.time()-self.started,
+                'frames':reading(frame,'sequence'),'media_samples':reading(media,'samples'),
+                'rendered_frames':reading(frame,'rendered_frames'),
+                'world_active':reading(media,'active',False),'uptime_seconds':time.time()-self.started,
                 'environment':self.build,'error':self.last_error}
 
     def _history(self, event, **fields):
@@ -82,7 +88,9 @@ class Runtime:
         session.desktop_profile=self.profiles.public()
         session.display.env.update(self.graphics.environment)
         self.session=session
+        if self.start_cancelled.is_set():raise BridgeError('startup_cancelled',message='Game startup was cancelled.')
         session.start()
+        if self.start_cancelled.is_set():raise BridgeError('startup_cancelled',message='Game startup was cancelled.')
         self.input=Input(display,self.graphics.environment)
         self._history('engine_started',session=session.session_id)
         self.last_error=None
@@ -97,10 +105,25 @@ class Runtime:
                     raise BridgeError('restart_required_to_change_gpu')
                 return self.status()
             if self.session:await asyncio.to_thread(self._stop_engine)
+            self.starting=True;self.start_cancelled.clear();self.last_error=None
+            log=self.root/'runtime/engine-private.log'
+            self.start_log_offset=log.stat().st_size if log.exists() else 0
             try:await asyncio.to_thread(self._start_engine,gpu)
-            except Exception:
+            except Exception as exc:
                 await asyncio.to_thread(self._stop_engine)
-                raise
+                if self.start_cancelled.is_set():
+                    raise BridgeError('startup_cancelled',message='Game startup was cancelled.') from exc
+                if isinstance(exc,BridgeError) and exc.details.get('message'):
+                    self.last_error=exc.details['message'];raise
+                log=self.root/'runtime/engine-private.log'
+                tail=''
+                if log.exists():
+                    with log.open('rb') as stream:
+                        stream.seek(max(self.start_log_offset,log.stat().st_size-16000));tail=stream.read().decode(errors='replace')
+                fatal=next((line.split('Fatal error:',1)[1].strip() for line in reversed(tail.splitlines()) if 'Fatal error:' in line),None)
+                self.last_error=f'OpenMW could not finish starting: {fatal or str(exc)}. See Diagnostics → engine-private.log.'
+                raise BridgeError('game_start_failed',message=self.last_error) from exc
+            finally:self.starting=False
         return self.status()
 
     def _stop_engine(self):
@@ -120,6 +143,11 @@ class Runtime:
         self.owner.release()
 
     async def stop_engine(self):
+        # A startup worker owns mutation while loading. Cancel it before waiting
+        # for that lock; a hung logo or failed handshake cannot block Stop.
+        if self.starting:
+            self.start_cancelled.set()
+            if self.session:await asyncio.to_thread(self.session.abort_startup)
         async with self.mutation:
             self.transition=True
             try:await asyncio.to_thread(self._stop_engine)

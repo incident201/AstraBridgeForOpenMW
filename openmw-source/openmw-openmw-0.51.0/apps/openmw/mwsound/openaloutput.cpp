@@ -1005,8 +1005,14 @@ namespace MWSound
         // Refill streams before every mix, including the first frame of a voice.
         // The background refill thread may sleep for 50 ms; it must not control
         // progress on the sample clock or cause loopback underruns.
-        std::lock_guard<std::mutex> lock(mStreamThread->mMutex);
-        for (auto* stream : mStreamThread->mStreams) stream->process();
+        // Movie reads may wait for the main thread to consume video pictures.
+        // Let the refill thread handle them without taking its mutex here.
+        std::unique_lock<std::mutex> lock(mStreamThread->mMutex, std::defer_lock);
+        if (!AstraMedia::stream().movie)
+        {
+            lock.lock();
+            for (auto* stream : mStreamThread->mStreams) stream->process();
+        }
         render(mDevice,samples,count);
         if (mAstraMonitor)
         {

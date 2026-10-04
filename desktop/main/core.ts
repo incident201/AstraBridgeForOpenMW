@@ -27,6 +27,7 @@ export interface InstallOptions {game:string; storage:string; encoding:string; g
 export class Core {
   readonly configFile:string;
   managementBusy=false;
+  private lifecycleGeneration=0;
   readonly recordings=new Recordings();
   private daemonStarting:Promise<Installation>|null=null;
   constructor(readonly resources:string,configFile?:string,private progress?:Progress){
@@ -77,8 +78,9 @@ export class Core {
       headers:{Authorization:'Bearer '+config.token,...(config.agentToken?{'X-Astra-Session':config.agentToken}:{}),...init.headers}});
     return response;
   }
-  async api(path:string,method='GET',data?:unknown,config?:Installation):Promise<any>{
+  async api(path:string,method='GET',data?:unknown,config?:Installation,timeoutMs?:number):Promise<any>{
     const response=await this.fetch(path,{method,headers:{'Content-Type':'application/json'},
+      ...(timeoutMs?{signal:AbortSignal.timeout(timeoutMs)}:{}),
       ...(data===undefined?{}:{body:JSON.stringify(data)})},config);
     const body=await response.json() as {ok:boolean;result:unknown;error?:string;message?:string};
     if(!response.ok||!body.ok)throw Object.assign(new Error(body.message??body.error??`HTTP ${response.status}`),{details:body});
@@ -103,6 +105,8 @@ export class Core {
   }
   private async startDaemon(config?:Installation){
     config??=await this.configured();
+    if(config.phase==='removing')throw new Error('Finish removing the installation in Setup before starting');
+    await this.requireStorage(config);
     if(config.transaction)throw new Error('Recover the interrupted runtime update in Setup before starting');
     const backend=this.backend(config);await this.requirePrerequisites(backend,config.gpuDevices);
     const state=await backend.inspect(config.name);
@@ -114,14 +118,18 @@ export class Core {
     await this.ready(config);return config;
   }
   async status(){
-    const config=await this.load();const release=await this.release();
+    const release=await this.release();let config:Installation|null;
+    try{config=await this.load();}catch(error){return {installed:false,configured:true,configError:String(error),release};}
     if(!config)return {installed:false,release};
     let container,error:string|null=null;
     try{container=await this.backend(config).inspect(config.name);}
     catch(e){container={exists:false,running:false};error=String(e);}
+    let storageState=null;
+    try{storageState=await this.backend(config).inspectStorage?.(config)??null;}catch(e){error??=String(e);}
+    const storageMissing=Boolean(storageState&&(!storageState.state||storageState.game===false));
     let runtime=null;
     if(container.running){try{runtime=await this.api('/v1/runtime/status','GET',undefined,config);}catch(e){error=String(e);}}
-    return {profile:runtime?.profile??config.selectedProfile??{id:'default',name:'Default'},installed:config.installed,phase:config.phase,backend:config.backend,container,runtime,error,release,
+    return {configured:true,storageState,storageMissing,removalPending:config.phase==='removing',profile:runtime?.profile??config.selectedProfile??{id:'default',name:'Default'},installed:config.installed,phase:config.phase,backend:config.backend,container,runtime,error,release,
       currentDigest:config.digest,currentVersion:config.version,previousRuntime:config.previous??null,updatePending:Boolean(config.transaction),cleanupPending:Boolean(config.cleanupPending),updateRequired:Boolean(release.digest&&release.digest!==config.digest),
       storageDirectory:config.storageDirectory,recordingsDirectory:config.recordingsDirectory,gameMode:config.gameMode,sourceGame:config.sourceGame};
   }
@@ -166,7 +174,42 @@ export class Core {
     await backend.stop(config.name);config.installed=true;config.phase='ready';await this.save(config);
     return this.status();
   });}
-  async start(gpu?:string,profile?:string){const config=await this.ensureDaemon();
+
+  private async requireStorage(config:Installation){
+    const state=await this.backend(config).inspectStorage?.(config);
+    if(state&&(!state.state||state.game===false))throw Object.assign(new Error('Managed storage is missing. Open Setup to reconnect your storage or reset setup for a new installation.'),{details:{error:'managed_storage_missing',storage:state}});
+  }
+
+  async resetSetup(){return this.exclusive(async()=>{
+    let config:Installation|null=null;
+    try{config=await this.load();}catch{} // An explicit reset also handles malformed configuration.
+    if(config){
+      let running=false;try{running=(await this.backend(config).inspect(config.name)).running;}catch{}
+      if(running)throw new Error('Stop the runtime before resetting setup, or use Remove installation');
+    }
+    await rm(this.configFile,{force:true});return {reset:true};
+  });}
+
+  async uninstall(){return this.exclusive(async()=>{
+    const config=await this.configured(),backend=this.backend(config);
+    config.phase='removing';delete config.agentToken;await this.save(config);
+    const state=await backend.inspect(config.name);
+    if(state.running)await this.stop();
+    if((await backend.inspect(config.name)).exists)await backend.remove(config.name);
+    await backend.removeVolume(config.stateVolume);
+    if(config.gameMode==='copy')await backend.removeVolume(config.gameVolume);
+    const warnings:string[]=[];
+    for(const image of new Set([config.image,config.previous?.image,...config.retiredImages??[]].filter((x):x is string=>Boolean(x)))){
+      try{await backend.removeImage(image);}catch(error){warnings.push(String(error));}
+    }
+    if(backend.cleanupStore){
+      if(!await backend.cleanupStore())warnings.push('Other containers or volumes use this storage; their files and shared cache were kept.');
+    }
+    await rm(this.configFile,{force:true});
+    return {removed:true,recordingsDirectory:config.recordingsDirectory,sourceGame:config.sourceGame,warnings};
+  });}
+  async start(gpu?:string,profile?:string){const generation=this.lifecycleGeneration;const config=await this.ensureDaemon();
+    if(generation!==this.lifecycleGeneration)throw new Error('Game startup was cancelled.');
     const release=await this.release();if(release.digest&&release.digest!==config.digest)throw new Error('Update runtime to match this Desktop before starting the game');
     if(gpu===undefined&&(process.env.__NV_PRIME_RENDER_OFFLOAD==='1'||process.env.__GLX_VENDOR_LIBRARY_NAME==='nvidia')){
       const settings=await this.api('/v1/runtime/config','GET',undefined,config);
@@ -174,11 +217,14 @@ export class Core {
     }
     return this.api('/v1/runtime/engine/start','POST',{...(gpu?{gpu}:{}),...(profile?{profile}:{})},config);
   }
-  async stop(){const config=await this.configured();const backend=this.backend(config);
+  async stop(){this.lifecycleGeneration++;if(this.daemonStarting)await this.daemonStarting.catch(()=>{});
+    const config=await this.configured();const backend=this.backend(config);
     if((await backend.inspect(config.name)).running){
-      try{await this.api('/v1/runtime/engine/stop','POST',{},config);}
+      let starting=false;
+      try{starting=Boolean((await this.api('/v1/runtime/status','GET',undefined,config,3000)).starting);}catch{}
+      try{await this.api('/v1/runtime/engine/stop','POST',{},config,starting?8000:120000);}
       catch(error){this.progress?.(`Runtime API could not stop the game: ${String(error)}. Stopping container.\n`);}
-      await backend.stop(config.name);
+      await backend.stop(config.name,starting?5:120);
     }
     delete config.agentToken;await this.save(config);return this.status();
   }
@@ -208,11 +254,13 @@ export class Core {
   private async recover(config:Installation){
     const transaction=config.transaction;if(!transaction)return this.status();
     const old={...transaction.before};delete old.agentToken;
+    await this.requireStorage(old);
     const backend=this.backend(old);const state=await backend.inspect(old.name);
+    await backend.ensureImage?.(old.image,old.digest);
     if(transaction.replacing){
+      if(!transaction.backedUp)throw new Error('Recovery snapshot is not complete; data were left untouched');
       if(state.running)await backend.stop(old.name);
       if(state.exists)await backend.remove(old.name);
-      if(!transaction.backedUp)throw new Error('Recovery snapshot is not complete; data were left untouched');
       await backend.restore(old.image,old.stateVolume,transaction.snapshot);
       await backend.create(old);
     }else if(!state.exists)await backend.create(old);
@@ -227,6 +275,8 @@ export class Core {
   async update(){return this.exclusive(async()=>{
     const config=await this.configured();const backend=this.backend(config);const release=await this.release();
     await this.requirePrerequisites(backend,config.gpuDevices);
+    if(config.phase==='removing')throw new Error('Finish removing the installation in Setup before updating');
+    await this.requireStorage(config);
     // Persisted transactions always recover the old version before another attempt.
     if(config.transaction)return this.recover(config);
     const parts=(value:string|undefined)=>value?.match(/^(\d+)\.(\d+)\.(\d+)/)?.slice(1).map(Number);
@@ -245,6 +295,8 @@ export class Core {
     if(runtime?.owner.mode==='agent')throw new Error('Image downloaded. Disconnect the agent before applying the runtime update');
     const health=state.running?await this.api('/health','GET',undefined,config):null;
     const old={...config,version:config.version??health?.environment?.project_version};delete old.agentToken;
+    // Ensure rollback/snapshot tooling exists before stopping or replacing anything.
+    await backend.ensureImage?.(old.image,old.digest);
     const transaction:UpdateTransaction={before:old,snapshot:'update-'+Date.now()+'-'+randomUUID().slice(0,8),backedUp:false,replacing:false,
       wasRunning:state.running,gameWasRunning:Boolean(runtime?.running),api:health?{runtime_api:health.runtime_api,game_api:health.game_api}:null};
     delete config.agentToken;config.transaction=transaction;await this.save(config);

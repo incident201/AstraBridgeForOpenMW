@@ -293,3 +293,22 @@ Useful existing checks include [media-clock/transport tests](../runtime/tests/te
 [encoder-selection tests](../runtime/tests/test_encoding.py).
 Many tests use fixtures or mocked adapters. They complement, rather than
 replace, live checks of the affected GUI, action and capture paths in OpenMW.
+
+### Video playback inside the private runtime
+
+`MWGui::WindowManager::playVideo` runs a nested rendering loop outside the normal
+engine frame update. The patch in `runtime/native/patch_engine.py` advances
+AstraMedia, refills/mixes OpenAL loopback audio, and stamps completed movie frames
+inside that loop. Without it, movies with audio can wait indefinitely for an
+audio clock that never advances (including the company logo in a clean Steam
+installation). This preserves logos, introduction videos and other cutscenes;
+it does not skip them. Recording and live view receive their ordinary completed
+frames and audio through FrameStream/MediaStream.
+
+`AstraMedia::MovieScope` marks this nested loop. During movie playback,
+`OpenALOutput::astraMix` leaves stream refill to the existing background thread
+and does not acquire that thread's refill mutex. Movie audio decoding can wait
+for the main thread to consume video pictures; refilling synchronously while
+holding the main loop would deadlock both. Ordinary gameplay keeps the existing
+synchronous refill path. The final movie interval is not mixed again by the
+returning outer engine frame.

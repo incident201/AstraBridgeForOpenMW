@@ -1,4 +1,4 @@
-import {mkdir,readdir,access} from 'node:fs/promises';
+import {mkdir,readdir,access,rmdir,rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import {constants} from 'node:fs';
 import {Readable} from 'node:stream';
@@ -49,6 +49,42 @@ export class PodmanBackend implements RuntimeBackend {
     return checked(await this.command(['image','inspect',image,'--format','{{.Digest}}']));
   }
   async createVolume(name:string){checked(await this.command(['volume','create',resourceName(name)]));}
+  async ensureImage(image:string,digest:string){
+    const local=await this.command(['image','inspect',image,'--format','{{.Digest}}']);
+    if(local.code===0&&local.stdout.trim()===digest)return;
+    if(image.startsWith('localhost/')){await this.localImage(image);return;}
+    const actual=await this.pull(image.split('@')[0]+'@'+digest);
+    if(actual!==digest)throw new Error('Previous runtime digest mismatch');
+  }
+  private async volumeExists(name:string){
+    const result=await this.command(['volume','exists',resourceName(name)]);
+    if(result.code===1)return false;checked(result);return true;
+  }
+  async inspectStorage(spec:RuntimeSpec){
+    return {state:await this.volumeExists(spec.stateVolume),game:spec.gameDirectory?null:await this.volumeExists(spec.gameVolume)};
+  }
+  async removeVolume(name:string){
+    if(await this.volumeExists(name))checked(await this.command(['volume','rm',resourceName(name)]));
+  }
+  async cleanupStore(){
+    // This graph/run root belongs to the selected managed store, never the
+    // user's default Podman store. Preserve any other installation using it.
+    for(const args of [['ps','--all','--quiet'],['volume','ls','--quiet'],['pod','ps','--quiet']])
+      if(checked(await this.command(args)))return false;
+    // Do not use system reset: rootless pause processes can be shared by other
+    // graph roots. Delete this empty store through its UID-mapped namespace.
+    checked(await this.command(['image','prune','--all','--force'],undefined,10*60_000));
+    checked(await this.command(['unshare','unshare','--mount','--propagation','private','sh','-c',
+      'umount -- "$1/overlay" 2>/dev/null || true; rm -rf -- "$1" "$2"',
+      'astra-remove-store',join(this.storage,'containers'),join(this.storage,'run','podman')],undefined,10*60_000));
+    // Podman may recreate empty bookkeeping directories as unshare exits.
+    await rm(join(this.storage,'containers'),{recursive:true,force:true});
+    await rm(join(this.storage,'run','podman'),{recursive:true,force:true});
+    for(const path of [join(this.storage,'run'),this.storage]){
+      try{await rmdir(path);}catch(error){if(!['ENOENT','ENOTEMPTY','EEXIST'].includes((error as NodeJS.ErrnoException).code??''))throw error;}
+    }
+    return true;
+  }
   private async localImage(image:string):Promise<string>{
     if(!image.startsWith('localhost/')||!image.includes('@sha256:'))return image;
     const direct=await this.command(['image','inspect',image,'--format','{{.Id}}']);
@@ -96,7 +132,7 @@ export class PodmanBackend implements RuntimeBackend {
     checked(await this.command(args));
   }
   async start(name:string){checked(await this.command(['start',resourceName(name)]));}
-  async stop(name:string){checked(await this.command(['stop','--time','120',resourceName(name)],undefined,150_000));}
+  async stop(name:string,seconds=120){checked(await this.command(['stop','--time',String(seconds),resourceName(name)],undefined,(seconds+30)*1000));}
   async remove(name:string){checked(await this.command(['rm',resourceName(name)]));}
   async inspect(name:string):Promise<RuntimeInspection>{
     const value=await this.command(['inspect',resourceName(name)]);

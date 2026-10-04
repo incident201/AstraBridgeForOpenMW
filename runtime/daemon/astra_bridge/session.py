@@ -76,6 +76,7 @@ class Session:
         self.sound = sound
         self.display.sound = sound
         self.process = None
+        self.ready = False
         self.condition = threading.Condition()
         self.responses = {}
         self.travel_updates = []
@@ -155,6 +156,7 @@ class Session:
         return self.launch()
 
     def launch(self):
+        self.ready = False
         self.session_id = uuid.uuid4().hex
         self.save_refs = {}
         self.atlas.reset_runtime()
@@ -189,6 +191,7 @@ class Session:
                 "--user-data", str(self.runtime / "userdata"), "--data-local", str(self.runtime / "local-data"),
                 "--resources", str(packaged.parent / "resources"), "--no-sound", "0" if self.sound else "1"]
         if self.production: args.append('--disable-console')
+        if self.control.cancelled.is_set():raise BridgeError('startup_cancelled',message='Game startup was cancelled.')
         self.process = subprocess.Popen(args, cwd=packaged.parent, env=env, stdout=subprocess.PIPE,
                                         stderr=subprocess.STDOUT, start_new_session=True)
         self.reader = threading.Thread(target=self._read_output, args=(self.process, self.session_id), daemon=True)
@@ -204,6 +207,7 @@ class Session:
                 if time.monotonic() >= deadline:
                     raise
                 time.sleep(.1)
+        self.ready = True
         return result
 
     def _read_output(self, process, session_id):
@@ -268,7 +272,8 @@ class Session:
             args={**args,'x':x,'y':y}
             if 'radius' in args:
                 args['radius']=args['radius']*self.display.width/self.display.observation_size()[0]
-        timeout = action_timeout(op, args, max(timeout, 70))
+        # Lifecycle calls must honor their short shutdown/startup budgets.
+        timeout = action_timeout(op, args, timeout if op in {'ping','quit','stop'} else max(timeout, 70))
         if getattr(self,'sequence_guard',None) and op not in {'observe','inspect','ui','mark','stop'}:
             args={**args,'_guard':self.sequence_guard}
         if _save_ref is not None:
@@ -295,6 +300,8 @@ class Session:
         deadline = time.monotonic() + timeout
         with self.condition:
             while cmd_id not in self.responses:
+                if op=='ping' and self.control.cancelled.is_set():
+                    raise BridgeError('startup_cancelled',message='Game startup was cancelled.')
                 self._drain_travel()
                 if self.process.poll() is not None:
                     raise BridgeError("game_exited")
@@ -731,6 +738,7 @@ class Session:
             self.stop_recording()
         if not self.process:
             return
+        if not getattr(self,'ready',True):self.abort_startup()
         if self.process.poll() is None:
             try:
                 self.command("quit", timeout=3)
@@ -745,7 +753,21 @@ class Session:
         if self.reader:
             self.reader.join(timeout=2)
         self.process = None
+        self.ready = False
         self.display.window = None
+
+    def abort_startup(self):
+        """Cancel an uninitialized process without waiting for its Lua inbox."""
+        self.control.interrupt()
+        process=self.process
+        if process and process.poll() is None:
+            try:os.killpg(process.pid,signal.SIGTERM)
+            except ProcessLookupError:return
+            try:process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                try:os.killpg(process.pid,signal.SIGKILL)
+                except ProcessLookupError:pass
+                process.wait(timeout=3)
 
     def close(self):
         self.stop_game()

@@ -370,6 +370,40 @@ media_source=Path(__file__).with_name('astramedia.hpp')
 media_target=root/'components/sdlutil/astramedia.hpp'
 if not media_target.exists() or media_target.read_bytes()!=media_source.read_bytes():
     shutil.copyfile(media_source,media_target)
+replace('apps/openmw/mwgui/windowmanagerimp.cpp', '#include "windowmanagerimp.hpp"',
+        '#include "windowmanagerimp.hpp"\n#include <components/sdlutil/astramedia.hpp>')
+replace('apps/openmw/mwgui/windowmanagerimp.cpp',
+'''    void WindowManager::playVideo(std::string_view name, bool allowSkipping, bool overrideSounds)
+    {''',
+'''    void WindowManager::playVideo(std::string_view name, bool allowSkipping, bool overrideSounds)
+    {
+        AstraMedia::MovieScope astraMovie;''')
+replace('apps/openmw/mwgui/windowmanagerimp.cpp',
+'''                if (mVideoWidget->isPaused())
+                    mVideoWidget->resume();
+
+                mViewer->eventTraversal();''',
+'''                if (mVideoWidget->isPaused())
+                    mVideoWidget->resume();
+
+                // Movies run a nested render loop outside Engine::frame.
+                // Advance loopback audio here too: the decoder uses its audio
+                // clock, and otherwise waits forever at the first movie frame.
+                if (AstraMedia::stream().enabled())
+                {
+                    AstraMedia::stream().begin(dt, true);
+                    AstraMedia::stream().render(mViewer->getFrameStamp()->getFrameNumber());
+                }
+                mViewer->eventTraversal();''')
+replace('apps/openmw/mwgui/windowmanagerimp.cpp',
+'''        mVideoWidget->stop();
+
+        MWBase::Environment::get().getSoundManager()->resumeSounds''',
+'''        mVideoWidget->stop();
+        // Do not mix the final movie interval again in the enclosing frame.
+        if (AstraMedia::stream().enabled()) AstraMedia::stream().begin(0.f, false);
+
+        MWBase::Environment::get().getSoundManager()->resumeSounds''')
 replace('apps/openmw/engine.cpp', '#include "engine.hpp"', '#include "engine.hpp"\n#include <components/sdlutil/astramedia.hpp>')
 replace('apps/openmw/engine.cpp', '            if (mUseSound)\n                mSoundManager->update(frametime);',
         '            if (mUseSound && !AstraMedia::stream().enabled())\n                mSoundManager->update(frametime);')
@@ -433,6 +467,17 @@ replace('apps/openmw/mwsound/openaloutput.cpp', '        mInitialized = true;\n 
         }
         mInitialized = true;
         return true;''')
+movie_refill = '''        // Movie reads may wait for the main thread to consume video pictures.
+        // Let the refill thread handle them without taking its mutex here.
+        std::unique_lock<std::mutex> lock(mStreamThread->mMutex, std::defer_lock);
+        if (!AstraMedia::stream().movie)
+        {
+            lock.lock();
+            for (auto* stream : mStreamThread->mStreams) stream->process();
+        }'''
+if 'void OpenALOutput::astraMix' in (root/'apps/openmw/mwsound/openaloutput.cpp').read_text():
+    replace('apps/openmw/mwsound/openaloutput.cpp',
+            '        std::lock_guard<std::mutex> lock(mStreamThread->mMutex);\n        for (auto* stream : mStreamThread->mStreams) stream->process();', movie_refill)
 replace('apps/openmw/mwsound/openaloutput.cpp', '    void OpenALOutput::deinit()\n    {',
 '''    void OpenALOutput::astraMix(float* samples, unsigned count)
     {
@@ -441,8 +486,14 @@ replace('apps/openmw/mwsound/openaloutput.cpp', '    void OpenALOutput::deinit()
         // Refill streams before every mix, including the first frame of a voice.
         // The background refill thread may sleep for 50 ms; it must not control
         // progress on the sample clock or cause loopback underruns.
-        std::lock_guard<std::mutex> lock(mStreamThread->mMutex);
-        for (auto* stream : mStreamThread->mStreams) stream->process();
+        // Movie reads may wait for the main thread to consume video pictures.
+        // Let the refill thread handle them without taking its mutex here.
+        std::unique_lock<std::mutex> lock(mStreamThread->mMutex, std::defer_lock);
+        if (!AstraMedia::stream().movie)
+        {
+            lock.lock();
+            for (auto* stream : mStreamThread->mStreams) stream->process();
+        }
         render(mDevice,samples,count);
         if (mAstraMonitor)
         {
