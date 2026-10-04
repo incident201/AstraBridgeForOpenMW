@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,rm,symlink} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,rm,symlink,realpath} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {Recordings} from '../main/recordings';
@@ -30,7 +30,7 @@ test('host recordings include all profiles and sidecars without runtime access',
   const recordings=new Recordings(),rows=await recordings.list(root);
   assert.equal(rows.length,2);const row=rows.find(r=>r.profile_id===profile)!;
   assert.equal(row.profile_name,'Journey');assert.ok(row.events);
-  assert.equal(await recordings.path(row.video.split('/').pop()!),join(root,profile,'Journey.mp4'));
+  assert.equal(await recordings.path(row.video.split('/').pop()!),await realpath(join(root,profile,'Journey.mp4')));
   assert.equal(await recordings.path('unregistered'),null);
  }finally{await rm(root,{recursive:true,force:true});}
 });
