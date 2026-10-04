@@ -7,7 +7,7 @@ const argv=process.argv.slice(2);
 function take(name:string){const index=argv.indexOf(name);if(index<0)return undefined;if(index===argv.length-1)throw new Error(`Missing ${name}`);return argv.splice(index,2)[1];}
 const config=take('--config');
 const resources=process.env.ASTRA_RESOURCES??join(dirname(process.execPath),'resources/astra');
-const core=new Core(resources,config,text=>process.stderr.write(text));
+const core=new Core(resources,config,text=>process.stderr.write(typeof text==='string'?text:text.type==='stage'?text.message+'\n':`${text.phase}: ${(text.received/1048576).toFixed(1)} MiB received, ${text.elapsed.toFixed(0)}s elapsed\n`));
 const help=`AstraBridge Desktop and CLI
 
 Usage: astrabridge [--config FILE] <command>

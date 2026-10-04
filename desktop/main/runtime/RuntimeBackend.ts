@@ -35,12 +35,16 @@ export interface RuntimeBackend {
   pruneBackups(image:string,volume:string,keep:string):Promise<void>;
   removeImage(image:string):Promise<void>;
 }
-export type Progress=(message:string)=>void;
+export type {Progress} from './PullProgress';
+import type {Progress} from './PullProgress';
 export interface ProcessResult {code:number; stdout:string; stderr:string}
-export type Runner=(program:string,args:string[],options?:{input?:Readable; timeout?:number; progress?:Progress})=>Promise<ProcessResult>;
+export type Runner=(program:string,args:string[],options?:{input?:Readable; timeout?:number; progress?:Progress; terminal?:boolean})=>Promise<ProcessResult>;
 
 export const run:Runner=(program,args,options={})=>new Promise((resolve,reject)=>{
-  const child=spawn(program,args,{stdio:['pipe','pipe','pipe'],windowsHide:true});
+  const terminal=options.terminal&&process.platform==='linux';
+  const quote=(value:string)=>"'"+value.replaceAll("'","'\"'\"'")+"'";
+  const child=spawn(terminal?'script':program,terminal?['-qefc','stty cols 160 rows 40 && exec '+[program,...args].map(quote).join(' '),'/dev/null']:args,
+    {stdio:['pipe','pipe','pipe'],windowsHide:true,detached:terminal,env:terminal?{...process.env,LC_ALL:'C',TERM:'xterm',COLUMNS:'160'}:process.env});
   let stdout='',stderr='';
   const limit=4*1024*1024;
   const timer=setTimeout(()=>{child.kill();reject(new Error(`${program} timed out`));},options.timeout??120_000);

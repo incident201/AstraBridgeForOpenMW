@@ -271,3 +271,21 @@ Live-view shutdown closes the frame producer's FFmpeg input pipe so a blocked
 read receives EOF. The disposable viewer encoder and relay share a bounded
 shutdown grace period. This is independent of the Recorder, which drains its
 captured frames and audio and finalizes the MP4 before the game process exits.
+
+### Download and update progress
+
+Setup shows native image-layer counters, downloaded bytes, transfer speed,
+reused layers and elapsed time. Linux runs only `podman pull` through util-linux
+`script` to obtain terminal progress while keeping the rest of the backend on
+ordinary process pipes. Terminal control sequences are removed before display.
+The raw installation log remains expandable. WSL output uses the same parser;
+when a backend supplies no byte totals, the UI shows elapsed time and an
+indeterminate indicator rather than estimating a percentage. A prolonged gap in
+counters is shown explicitly; it can mean network waiting or layer extraction.
+Download completion is separate from the later backup, container replacement
+and health-check stages.
+
+Published runtimes reuse a frozen OS dependency base and separate component
+layers. Updating Bridge code does not replace the layer containing the engine,
+FFmpeg or Python dependencies when those components are unchanged. The first
+update from an older image layout may still need to download these new layers.

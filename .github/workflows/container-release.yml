@@ -116,8 +116,13 @@ jobs:
           key: oci-native-v2-${{ hashFiles('runtime/container/**', 'packaging/build_ffmpeg.py') }}-${{ hashFiles('openmw-source/**', 'runtime/native/**') }}
           restore-keys: |
             oci-native-v2-${{ hashFiles('runtime/container/**', 'packaging/build_ffmpeg.py') }}-
+            oci-native-v2-
+      - name: Authenticate frozen dependency base
+        env:
+          REGISTRY_TOKEN: ${{ github.token }}
+        run: printf '%s' "$REGISTRY_TOKEN" | podman login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
       - name: Build engine, FFmpeg and runtime image
-        run: python packaging/build_runtime.py --work "$WORK" --image "$IMAGE" --jobs 3 --cache-builder
+        run: python packaging/build_runtime.py --work "$WORK" --image "$IMAGE" --jobs 3 --cache-builder --base-registry ghcr.io/incident201/astrabridge-runtime
       - name: CPU recording through the production runtime
         run: |
           podman --root "$WORK/containers" --runroot "$WORK/run/podman" run --rm --network=none \

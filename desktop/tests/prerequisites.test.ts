@@ -11,7 +11,7 @@ function fixture(){
   const files=new Map<string,string>([['/etc/subuid','tester:100000:65536'],['/etc/subgid','tester:100000:65536'],
     ['/proc/sys/user/max_user_namespaces','10000'],['/proc/sys/kernel/unprivileged_userns_clone','1'],
     ['/sys/class/drm/renderD128/device/vendor','0x8086'],['/sys/class/drm/renderD128/device/uevent','DRIVER=i915']]);
-  const executables=new Set(['podman','crun','newuidmap','newgidmap','pasta','unshare','umount','rm']);
+  const executables=new Set(['podman','crun','newuidmap','newgidmap','pasta','unshare','umount','rm','script','stty']);
   const devices=new Set(['/dev/dri/renderD128']);const calls:string[][]=[];
   const responses=new Map([['podman','podman version 6.1.2'],['crun','crun version 1.30'],['nvidia-smi','NVIDIA RTX, 615.71.09'],['nvidia-ctk','nvidia.com/gpu=0\nnvidia.com/gpu=all']]);
   const host:HostAccess={platform:'linux',arch:'x64',uid:1000,username:'tester',

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the OCI runtime locally or in CI; never push an image or a Git ref."""
+"""Build the OCI runtime. Base publication is opt-in; release images/refs are never pushed."""
 from __future__ import annotations
 
 import argparse
@@ -13,6 +13,7 @@ import time
 import urllib.request
 
 from source_cache import engine_files
+from runtime_base import prepare_base
 from workspace import check_workspace, environment, podman
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -59,13 +60,13 @@ def download(descriptor,path):
         finally:temporary.unlink(missing_ok=True)
 
 
-def save_builder_cache(run, runner, cache, builder):
+def save_builder_cache(run, runner, cache, builder, base=None):
     # Podman's archive transport refuses to overwrite a restored archive.
     # Retain the previous cache until a fresh export has completed successfully.
     temporary=cache.with_suffix('.partial.tar')
     temporary.unlink(missing_ok=True)
     try:
-        run(*runner,'save','-o',temporary,builder)
+        run(*runner,'save','--multi-image-archive','-o',temporary,builder,*([base] if base else []))
         temporary.replace(cache)
     finally:temporary.unlink(missing_ok=True)
 
@@ -76,6 +77,7 @@ def main():
     parser.add_argument('--image',default='localhost/astrabridge-runtime:dev')
     parser.add_argument('--jobs',type=int,default=3)
     parser.add_argument('--cache-builder',action='store_true')
+    parser.add_argument('--base-registry',help='Reuse/publish a frozen base tag in this repository (CI only; explicitly enables base publication)')
     parser.add_argument('--require-loop',action='store_true',help='Require the selected workspace to be mounted from a loop device')
     parser.add_argument('--no-proxy',action='store_true',help='Do not forward HTTP proxy variables to build containers')
     args=parser.parse_args()
@@ -84,14 +86,16 @@ def main():
     def run(*command,**kw):return subprocess.run([str(x) for x in command],env=env,check=True,**kw)
     def output(*command):return subprocess.check_output([str(x) for x in command],env=env,text=True).strip()
     recipe=ROOT/'runtime/container/Containerfile'
-    builder='localhost/astrabridge-builder:'+hashlib.sha256(recipe.read_bytes().split(b'FROM base AS runtime')[0]).hexdigest()[:16]
     cache=work/'builder-image.tar'
     if args.cache_builder and cache.exists():
         run(*runner,'load','-i',cache,stdout=subprocess.DEVNULL)
+    base=prepare_base(run,output,runner,recipe.with_name('Base.Containerfile'),work,args.base_registry,proxy)
+    base_id=output(*runner,'image','inspect',base,'--format','{{.Id}}')
+    builder='localhost/astrabridge-builder:'+hashlib.sha256(recipe.read_bytes().split(b' AS runtime')[0]+base_id.encode()).hexdigest()[:16]
     exists=subprocess.run([*runner,'image','exists',builder],env=env).returncode==0
-    if not exists:run(*runner,'build',*proxy,'--target','builder','-t',builder,'-f',recipe,ROOT)
+    if not exists:run(*runner,'build',*proxy,'--target','builder','--build-arg',f'RUNTIME_BASE_IMAGE={base}','-t',builder,'-f',recipe,ROOT)
     else:print('Reusing pinned local builder image',flush=True)
-    if args.cache_builder:save_builder_cache(run,runner,cache,builder)
+    if args.cache_builder:save_builder_cache(run,runner,cache,builder,base)
     builder_id=output(*runner,'image','inspect',builder,'--format','{{.Id}}')
     versions=json.loads((ROOT/'runtime/container/versions.json').read_text())
     for key,name in {'ffmpeg':'ffmpeg-9.0.2.tar.xz','mediamtx':'mediamtx_v1.21.1_linux_amd64.tar.gz',
@@ -102,7 +106,7 @@ def main():
     dirty=bool(output('git','-C',ROOT,'status','--porcelain'))
     def inside(*command):
         run(*runner,'run','--rm',*proxy,'-v',f'{ROOT}:/src:ro','-v',f'{work}:/work',
-            '-e','TMPDIR=/work/tmp','-e',f'ASTRA_GIT_COMMIT={commit}',
+            '-e','TMPDIR=/work/tmp','-e',f'ASTRA_RUNTIME_BASE={base}','-e',f'ASTRA_GIT_COMMIT={commit}',
             '-e',f'ASTRA_GIT_TAG={tag.stdout.strip() if tag.returncode==0 and not dirty else ""}',
             builder,*command)
     inputs={'source':tree(ROOT/NATIVE),'native':tree(ROOT/'runtime/native'),'builder':builder_id}
@@ -121,7 +125,7 @@ def main():
     inside('python3','/src/packaging/build_ffmpeg.py')
     inside('python3','/src/packaging/stage_runtime.py')
     version=json.loads((ROOT/'VERSION.json').read_text())
-    run(*runner,'build',*proxy,'--target','runtime','--label',f'org.opencontainers.image.revision={commit}',
+    run(*runner,'build',*proxy,'--target','runtime','--build-arg',f'RUNTIME_BASE_IMAGE={base}','--timestamp','0','--label',f'org.opencontainers.image.revision={commit}',
         '--label',f'org.opencontainers.image.version={version["project_version"]}',
         '-t',args.image,'-f',recipe,work/'image')
     digest=output(*runner,'image','inspect',args.image,'--format','{{.Digest}}')

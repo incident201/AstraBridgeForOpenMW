@@ -1,3 +1,5 @@
+import {imageLayers} from './RegistryManifest';
+import {PullProgress} from './PullProgress';
 import {Readable} from 'node:stream';
 import {checked,resourceName,run,type Runner,type Progress,type ProcessResult,type RuntimeBackend,type RuntimeSpec,type RuntimeInspection} from './RuntimeBackend';
 
@@ -17,7 +19,7 @@ function imageIdentity(info:any,local=false):string {
 /** WSL Containers only. No user distro, Docker daemon or nested Podman. */
 export class WslContainerBackend implements RuntimeBackend {
   readonly kind='wsl' as const;
-  constructor(private runner:Runner=run,private progress?:Progress){}
+  constructor(private runner:Runner=run,private progress?:Progress,private metadata=runner===run?imageLayers:async(_image:string)=>[]){}
   private command(args:string[],input?:Readable,timeout=120_000){return this.runner('wslc.exe',args,{input,timeout,progress:args.includes('pull')?this.progress:undefined});}
   async check(){
     try {const version=checked(await this.command(['version']));return {available:true,version};}
@@ -28,7 +30,10 @@ export class WslContainerBackend implements RuntimeBackend {
       const local=await this.command(['image','inspect',image]);
       if(local.code===0)return imageIdentity(imageInfo(local),true);
     }
-    checked(await this.command(['image','pull',image],undefined,30*60_000));
+    const report=new PullProgress(image,this.progress);let ok=false;
+    report.setLayers(await this.metadata(image));
+    try{checked(await this.runner('wslc.exe',['image','pull',image],{timeout:30*60_000,progress:value=>{if(typeof value==='string')report.feed(value);}}));ok=true;}
+    finally{report.finish(ok);}
     return imageIdentity(imageInfo(await this.command(['image','inspect',image])));
   }
   private async localImage(image:string){

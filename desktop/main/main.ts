@@ -23,7 +23,7 @@ protocol.registerSchemesAsPrivileged([
 let window:BrowserWindow|null=null,events:WebSocket|null=null,quitting=false,closeApproved=false;
 let viewerFullscreen=false,previousWindowFullscreen=false,viewerReview=false;
 const resources=process.env.ASTRA_RESOURCES??join(process.resourcesPath,'astra');
-const core=new Core(resources,undefined,text=>window?.webContents.send('astra:event',{type:'progress',data:text}));
+const core=new Core(resources,undefined,text=>window?.webContents.send('astra:event',{type:typeof text==='string'?'progress':text.type,data:text}));
 async function artifactResponse(path:string,headers:HeadersInit={}){
   const local=await core.recordings.path(path.split('/').pop()!);
   return local?localArtifact(local,new Headers(headers).get('range')):core.fetch(path,{headers});

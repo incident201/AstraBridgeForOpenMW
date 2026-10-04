@@ -43,7 +43,7 @@ export async function checkLinuxHost(runner:Runner=run,host:HostAccess=hostAcces
   }
   add('user','Rootless user',host.uid===0?'error':'ok',host.uid===0?'AstraBridge is running as root.':`Running as ${host.username}.`,
     host.uid===0?'Launch AstraBridge as your regular desktop user, without sudo.':undefined);
-  const tools=await Promise.all(['podman','crun','newuidmap','newgidmap','pasta','slirp4netns','unshare','umount','rm'].map(async name=>[name,await host.executable(name)] as const));
+  const tools=await Promise.all(['podman','crun','newuidmap','newgidmap','pasta','slirp4netns','unshare','umount','rm','script','stty'].map(async name=>[name,await host.executable(name)] as const));
   const has=Object.fromEntries(tools);
   let version='';
   if(has.podman){
@@ -59,6 +59,7 @@ export async function checkLinuxHost(runner:Runner=run,host:HostAccess=hostAcces
   for(const name of ['newuidmap','newgidmap'])add(name,name,has[name]?'ok':'error',has[name]?'Available.':'Not found in PATH.',
     has[name]?undefined:'Install uidmap (Debian/Ubuntu) or shadow (Arch/CachyOS).');
   for(const name of ['unshare','umount','rm'])add('cleanup-'+name,name,has[name]?'ok':'error',has[name]?'Available for rootless storage cleanup.':'Not found in PATH.',has[name]?undefined:`Install ${name==='rm'?'coreutils':'util-linux'}.`);
+  add('pull-progress','Download progress terminal',has.script&&has.stty?'ok':'error',has.script&&has.stty?'script and stty are available.':'script or stty was not found in PATH.',has.script&&has.stty?undefined:'Install util-linux and coreutils (script and stty are used to read Podman download counters).');
   for(const [id,path] of [['subuid','/etc/subuid'],['subgid','/etc/subgid']]){
     const text=await host.read(path).catch(()=>'');
     let found=text.split('\n').some(line=>{

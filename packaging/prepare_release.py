@@ -12,6 +12,10 @@ def version_key(value):
     match=VERSION.fullmatch(value)
     if not match:raise ValueError('Version must be X.Y.Z or X.Y.Z-prerelease')
     identifiers=match[4].split('.') if match[4] else []
+    # This project's historical rc1/rc2 tags are numbered release candidates.
+    # Keep their ordering numeric when the sequence reaches rc10 and beyond.
+    compact_rc=re.fullmatch(r'rc([1-9][0-9]*)',match[4] or '')
+    if compact_rc:identifiers=['rc',compact_rc[1]]
     if any(part.isdigit() and len(part)>1 and part.startswith('0') for part in identifiers):
         raise ValueError('Numeric prerelease identifiers cannot have leading zeroes')
     return (*map(int,match.group(1,2,3)),not identifiers,

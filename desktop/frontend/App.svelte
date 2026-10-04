@@ -1,4 +1,8 @@
 <script lang="ts">
+  import TransferProgress from './TransferProgress.svelte';
+  import type {PullStatus} from '../main/runtime/PullProgress';
+  let transfer:PullStatus|null=null;
+  let progressStage='';
   import {onMount,tick} from 'svelte';
   import RecordingOverlay from './RecordingOverlay.svelte';
   import StreamOverlay from './StreamOverlay.svelte';
@@ -65,7 +69,7 @@
   }
   async function task(action:()=>Promise<any>,message=''){
     closeMenus();
-    busy=true;error='';notice='';
+    busy=true;error='';notice='';progress='';transfer=null;progressStage='';
     try{const result=await action();if(message)notice=message;await refresh();return result;}
     catch(e){error=(e as Error).message;}
     finally{busy=false;}
@@ -247,6 +251,8 @@
       if(message.type==='input.owner')runtime={...runtime,owner:message.data};
       if(message.type==='error')error=message.error;
       if(message.type==='progress')progress=(progress+message.data).slice(-12000);
+      if(message.type==='transfer')transfer=message.data;
+      if(message.type==='stage'){progressStage=message.data.message;progress+=message.data.message+'\n';}
     });
     const recordingFullscreenChanged=()=>recordingFullscreen=document.fullscreenElement===recordingSurface;
     document.addEventListener('fullscreenchange',recordingFullscreenChanged);
@@ -307,7 +313,7 @@
     {#if prerequisites&&!prerequisites.available&&page!=='setup'&&!fullscreen}<div class="banner error" role="status"><span>Required system components are missing or need configuration.</span><button class="banner-action" on:click={showRequirements}>Review requirements</button></div>{/if}
     {#if (error||runtimeError)&&!fullscreen}<div role="alert" class="banner error">{error||runtimeError}<button on:click={()=>{error='';dismissedRuntimeError=runtime.error??'';}} aria-label="Dismiss error">×</button></div>{/if}
     {#if notice&&!fullscreen}<div role="status" class="banner">{notice}<button on:click={()=>notice=''} aria-label="Dismiss notification">×</button></div>{/if}
-    {#if busy}<div class="working" role="status">Working…</div>{/if}
+    {#if busy}<div class="working" role="status">{progressStage||'Working…'}</div>{/if}
     {#if !state.installed&&page!=='setup'}<section class="empty"><h2>Set up your game</h2><p>Import your Morrowind installation and install the AstraBridge runtime.</p><button class="primary" on:click={()=>navigate('setup')}>Open setup</button></section>{/if}
 
     {#if state.installed}
@@ -380,6 +386,7 @@
     {#if page==='setup'}
       <section class="card setup-card">
         <div class="section-heading"><h2>{state.configured||state.installed?'Your installation':'Install AstraBridge runtime'}</h2><button on:click={()=>{requirementsOpen=!requirementsOpen;if(requirementsOpen)void checkPrerequisites();}}>{requirementsOpen?'Back to setup':'System requirements'}</button></div>
+        {#if busy&&progressStage&&(!transfer||transfer.phase==='complete')}<p class="setup-stage" role="status">{progressStage}</p>{/if}
         {#if requirementsOpen}
           <Prerequisites report={prerequisites} checking={checkingPrerequisites} recheck={()=>checkPrerequisites()}/>
         {:else if state.configError}
@@ -401,14 +408,15 @@
             {#if state.previousRuntime}<p class="hint">Recovery copy: {state.previousRuntime.version??'previous runtime'} · {new Date(state.previousRuntime.created).toLocaleDateString()}</p>{/if}
             <p class="hint">Save your game and disconnect the agent before updating. One previous runtime and a copy of its saved data are kept for recovery.</p>
             {/if}
-            {#if busy&&progress}<pre class="setup-progress">{progress}</pre>{/if}
-            <div class="container-management"><h3>Container management</h3><p class="hint">Remove the container while keeping your game, saves, Atlas, notes and recordings.</p><button class="danger" disabled={busy||!state.container?.exists||state.updatePending} on:click={async()=>{const result=await task(()=>window.astra.invoke('remove-container'));if(result?.removed)notice='Container removed. Your stored data are kept.';}}>Remove container</button></div>
+            {#if transfer&&(busy||transfer.phase==='failed')}<TransferProgress status={transfer}/>{/if}
+            {#if progress}<details class="transfer-log"><summary>Installation log</summary><pre class="setup-progress">{progress}</pre></details>{/if}
+            {#if !(busy&&transfer)}<div class="container-management"><h3>Container management</h3><p class="hint">Remove the container while keeping your game, saves, Atlas, notes and recordings.</p><button class="danger" disabled={busy||!state.container?.exists||state.updatePending} on:click={async()=>{const result=await task(()=>window.astra.invoke('remove-container'));if(result?.removed)notice='Container removed. Your stored data are kept.';}}>Remove container</button></div>{/if}
           {:else}
             <dl class="storage-locations"><div><dt>Game files <span>{state.gameMode==='copy'?'Managed copy':'Read-only host folder'}</span></dt><dd><code>{state.sourceGame}</code></dd></div>
             <div><dt>Managed storage</dt><dd><code>{state.storageDirectory}</code></dd></div><div><dt>Recordings</dt><dd><code>{state.recordingsDirectory}</code></dd></div></dl>
             <div class="toolbar"><button on:click={()=>task(()=>window.astra.invoke('open-recordings-folder'))}><Icon name="folder" size={20}/>Open recordings folder</button><button on:click={()=>task(()=>window.astra.invoke('skill-export'),'Skill exported.')}><Icon name="export" size={20}/>Export gameplay skill</button></div>
           {/if}
-          <div class="installation-removal"><h3>Remove or reset installation</h3><p class="hint">Remove managed profiles and the runtime, or clear only the setup reference. Original host game files and recordings are kept.</p><div class="toolbar"><button class="danger" disabled={busy} on:click={()=>removeInstallation('uninstall')}>Remove installation and data</button><button disabled={busy||runtime.running} on:click={()=>removeInstallation('reset-setup')}>Reset setup only</button></div></div>
+          {#if !(busy&&transfer)}<div class="installation-removal"><h3>Remove or reset installation</h3><p class="hint">Remove managed profiles and the runtime, or clear only the setup reference. Original host game files and recordings are kept.</p><div class="toolbar"><button class="danger" disabled={busy} on:click={()=>removeInstallation('uninstall')}>Remove installation and data</button><button disabled={busy||runtime.running} on:click={()=>removeInstallation('reset-setup')}>Reset setup only</button></div></div>{/if}
         {:else}
           <div class="tabs" aria-label="Setup steps"><button class:active={setupStep==='game'} on:click={()=>setupStep='game'}>1. Game</button><button class:active={setupStep==='storage'} on:click={()=>setupStep='storage'}>2. Storage</button></div>
           <div class="setup-fields">
@@ -423,7 +431,8 @@
             <label>Managed storage<div class="field-row"><input bind:value={storage} placeholder="Choose a storage location"><button on:click={()=>choose('storage')}><Icon name="folder" size={17}/>Browse</button></div></label>
             <label>Recordings folder on this computer<div class="field-row"><input bind:value={recordingsDirectory} placeholder="Defaults to recordings inside managed storage"><button on:click={()=>choose('recordings')}><Icon name="folder" size={17}/>Browse</button></div></label>
             <label class="checkbox"><input type="checkbox" bind:checked={development}>Development mode (console and runtime overrides)</label>
-            {#if progress}<pre class="setup-progress">{progress}</pre>{/if}
+            {#if transfer}<TransferProgress status={transfer}/>{/if}
+            {#if progress}<details class="transfer-log"><summary>Installation log</summary><pre class="setup-progress">{progress}</pre></details>{/if}
           {/if}
           </div>
           <div class="card-footer toolbar">

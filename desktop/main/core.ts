@@ -154,19 +154,19 @@ export class Core {
     const backend=this.backend(config);await this.requirePrerequisites(backend,config.gpuDevices);
     await mkdir(config.recordingsDirectory,{recursive:true,mode:0o700});
     if(config.buildDirectory)await mkdir(config.buildDirectory,{recursive:true});
-    config.phase='pulling';await this.save(config);this.progress?.('Pulling runtime image…\n');
+    config.phase='pulling';await this.save(config);this.progress?.({type:'stage',message:'Pulling runtime image…'});
     const digest=await backend.pull(release.image);
     if(release.digest&&digest!==release.digest)throw new Error('Pulled image does not match the Desktop release digest');
     config.digest=digest;config.image=release.image.split('@')[0]+'@'+digest;
     if(config.gameMode==='copy')await backend.createVolume(config.gameVolume);
     await backend.createVolume(config.stateVolume);
     if(config.gameMode==='copy'&&!config.gameImported){
-      config.phase='importing';await this.save(config);this.progress?.(`Copying ${game} into managed game storage…\n`);
+      config.phase='importing';await this.save(config);this.progress?.({type:'stage',message:`Copying ${game} into managed game storage…`});
       const archive=tar.c({cwd:game,portable:true,follow:false},['.']);
       await backend.importGame(config.image,config.gameVolume,archive as unknown as Readable);
       config.gameImported=true;await this.save(config);
     }
-    config.phase='configuring';await this.save(config);
+    config.phase='configuring';await this.save(config);this.progress?.({type:'stage',message:'Creating and checking the runtime…'});
     if(!(await backend.inspect(config.name)).exists)await backend.create(config);
     await backend.start(config.name);await this.ready(config);
     await this.api('/v1/runtime/import-ini','POST',{encoding:options.encoding,data_relative:dataRelative},config);
@@ -308,13 +308,13 @@ export class Core {
       previous:{image:old.image,digest:old.digest,version:old.version,snapshot:transaction.snapshot,created:Date.now()},
       retiredImages:[...old.retiredImages??[],...(old.previous?[old.previous.image]:[])]};
     try{
-      this.progress?.('Stopping runtime and completing recording…\n');
+      this.progress?.({type:'stage',message:'Stopping runtime and completing recording…'});
       if(state.running)await this.stop();
-      this.progress?.('Backing up saves, profile, Atlas and session data…\n');
+      this.progress?.({type:'stage',message:'Backing up saves, profile, Atlas and session data…'});
       await backend.backup(old.image,old.stateVolume,transaction.snapshot);
       transaction.backedUp=true;transaction.replacing=true;await this.save(config);
       if((await backend.inspect(old.name)).exists)await backend.remove(old.name);
-      this.progress?.('Creating and checking the new runtime…\n');
+      this.progress?.({type:'stage',message:'Creating and checking the new runtime…'});
       await backend.create(candidate);await backend.start(candidate.name);await this.ready(candidate);
       if(transaction.gameWasRunning)await this.api('/v1/runtime/engine/start','POST',{},candidate);
       if(!transaction.wasRunning)await backend.stop(candidate.name);

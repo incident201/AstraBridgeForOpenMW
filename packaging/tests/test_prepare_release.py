@@ -29,3 +29,7 @@ def test_invalid_release_versions_are_rejected(value):
 
 def test_numeric_prereleases_use_semver_precedence():
     assert release.version_key('0.3.0-rc.2')<release.version_key('0.3.0-rc.10')<release.version_key('0.3.0')
+
+
+def test_existing_compact_rc_series_continues_past_nine():
+    assert release.version_key('0.3.0-rc9')<release.version_key('0.3.0-rc10')<release.version_key('0.3.0-rc11')<release.version_key('0.3.0')

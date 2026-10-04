@@ -10,6 +10,7 @@ import subprocess
 import tarfile
 
 root=Path('/src');work=Path('/work');stage=work/'image/stage'
+shutil.rmtree(stage,ignore_errors=True)
 stage.mkdir(parents=True,exist_ok=True)
 native=work/'build/native/engine';engine=stage/'engine';engine.mkdir(exist_ok=True)
 for name in ('openmw','defaults.bin','gamecontrollerdb.txt','openmw.cfg'):
@@ -38,10 +39,19 @@ if hashlib.sha256(archive.read_bytes()).hexdigest()!=versions['mediamtx']['sha25
 with tarfile.open(archive) as package:
     with package.extractfile('mediamtx') as src,(bin/'mediamtx').open('wb') as dst:shutil.copyfileobj(src,dst)
 (bin/'mediamtx').chmod(0o755)
-python=stage/'python'
-if not python.exists():subprocess.run(['python3','-m','venv',str(python)],check=True)
-subprocess.run([str(python/'bin/python'),'-m','pip','install','--cache-dir','/work/cache/pip','--require-hashes',
-                '-r',str(root/'runtime/requirements.lock')],check=True)
+# Cache dependencies by their inputs, separately from the frequently changing app.
+python=work/'build/python-runtime'
+inputs=hashlib.sha256((root/'runtime/requirements.lock').read_bytes()+os.environ['ASTRA_RUNTIME_BASE'].encode()).hexdigest()
+receipt=work/'build/python-runtime.inputs'
+if not receipt.exists() or receipt.read_text()!=inputs or not python.exists():
+    shutil.rmtree(python,ignore_errors=True)
+    subprocess.run(['python3','-m','venv',str(python)],check=True)
+    subprocess.run([str(python/'bin/python'),'-m','pip','install','--no-compile','--cache-dir','/work/cache/pip','--require-hashes',
+                    '-r',str(root/'runtime/requirements.lock')],check=True)
+    # Bytecode embeds source mtimes; distribute sources for deterministic layers.
+    for directory in python.rglob('__pycache__'):shutil.rmtree(directory)
+    receipt.write_text(inputs)
+shutil.copytree(python,stage/'python',symlinks=True)
 shutil.copytree(root/'LICENSES',stage/'LICENSES',dirs_exist_ok=True)
 shutil.copy2(root/'openmw-source/openmw-openmw-0.51.0/LICENSE',stage/'LICENSES/OpenMW.txt')
 shutil.copy2(root/'VERSION.json',stage/'VERSION.json')
@@ -49,7 +59,7 @@ packages=subprocess.check_output(['dpkg-query','-W','-f=${Package}=${Version}\n'
 (stage/'runtime-packages.txt').write_text(packages)
 version=json.loads((root/'VERSION.json').read_text())
 manifest={**version,'platform':'linux','architecture':'x86_64','engine_sha256':hashlib.sha256((engine/'openmw').read_bytes()).hexdigest(),
-          'runtime_api':1,'game_api':1,'ffmpeg':json.loads((work/'build/ffmpeg-prefix/build.json').read_text()),
+          'runtime_api':1,'game_api':1,'runtime_base':os.environ['ASTRA_RUNTIME_BASE'],'ffmpeg':json.loads((work/'build/ffmpeg-prefix/build.json').read_text()),
           'mediamtx':versions['mediamtx'],'base_image':versions['base_image'],
           'packages_sha256':hashlib.sha256(packages.encode()).hexdigest()}
 manifest['ffmpeg'].pop('inputs',None)

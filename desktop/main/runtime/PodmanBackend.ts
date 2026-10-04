@@ -1,13 +1,15 @@
 import {mkdir,readdir,access,rmdir,rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import {constants} from 'node:fs';
+import {imageLayers} from './RegistryManifest';
+import {PullProgress} from './PullProgress';
 import {Readable} from 'node:stream';
 import {checkLinuxHost,prerequisiteReport,hostAccess,type HostAccess} from './LinuxPrerequisites';
 import {checked,resourceName,run,type Runner,type Progress,type RuntimeBackend,type RuntimeSpec,type RuntimeInspection} from './RuntimeBackend';
 
 export class PodmanBackend implements RuntimeBackend {
   readonly kind='podman' as const;
-  constructor(readonly storage:string,private runner:Runner=run,private progress?:Progress,private host:HostAccess=hostAccess){}
+  constructor(readonly storage:string,private runner:Runner=run,private progress?:Progress,private host:HostAccess=hostAccess,private metadata=runner===run?imageLayers:async(_image:string)=>[]){}
   private async args(){
     const graph=join(this.storage,'containers');
     const state=join(this.storage,'run','podman');
@@ -45,7 +47,11 @@ export class PodmanBackend implements RuntimeBackend {
       const local=await this.command(['image','inspect',image,'--format','{{.Digest}}']);
       if(local.code===0&&local.stdout.trim())return local.stdout.trim();
     }
-    checked(await this.command(['pull',image],undefined,30*60_000));
+    const report=new PullProgress(image,this.progress);let ok=false;
+    report.setLayers(await this.metadata(image));
+    try{
+      checked(await this.runner('podman',[...await this.args(),'pull',image],{timeout:30*60_000,terminal:true,progress:value=>{if(typeof value==='string')report.feed(value);}}));ok=true;
+    }finally{report.finish(ok);}
     return checked(await this.command(['image','inspect',image,'--format','{{.Digest}}']));
   }
   async createVolume(name:string){checked(await this.command(['volume','create',resourceName(name)]));}

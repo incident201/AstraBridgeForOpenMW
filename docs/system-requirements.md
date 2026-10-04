@@ -29,6 +29,7 @@ manager reports a package name.
 | OCI runtime | `crun` | `crun` |
 | Default rootless networking (`pasta`) | `passt` | `passt` |
 | UID/GID mapping helpers | `uidmap` | `shadow` |
+| Download terminal and storage tools | `util-linux`, `coreutils` | `util-linux`, `coreutils` |
 | NVIDIA container integration, when exposing NVIDIA | `nvidia-container-toolkit` from NVIDIA's supported repository | `nvidia-container-toolkit` |
 
 Podman's package dependencies provide its monitor/network/configuration tools,
@@ -256,8 +257,12 @@ save. CPU recording tests need neither game data nor GPU hardware.
 
 ### Managed-storage removal on Linux
 
-Keep `unshare` and `umount` (util-linux) and `rm` (coreutils) installed alongside
+Keep `script`, `unshare` and `umount` (util-linux) and `rm`/`stty` (coreutils) installed alongside
 Podman. The prerequisite checker verifies these commands. They let Desktop clean
 UID-mapped files in its selected managed store without sudo; original game files,
 recordings and other stores are retained. The standard packages on supported
 Linux desktop distributions normally already provide these tools.
+
+`script` and `stty` provide a private terminal for Podman's image download counters. It is
+checked before installation and startup. No host graphical terminal or display
+session is needed for this progress reporting.

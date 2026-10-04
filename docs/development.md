@@ -45,7 +45,25 @@ Unchanged OpenMW inputs and builder identity reuse a verified engine receipt.
 Changed native files retain Ninja/ccache state, including fetched dependency
 sources. Python, Lua, Desktop and documentation changes do not require rebuilding
 the engine. The FFmpeg prefix has its own pinned input receipt. `--cache-builder`
-also exports/restores a builder image for CI caches.
+also exports/restores the builder and runtime dependency base for CI caches.
+
+`runtime/container/Base.Containerfile` defines the frozen distribution dependency
+base. Local builds reuse its recipe-keyed image. Release CI checks a
+`base-<recipe hash>` tag in the runtime GHCR repository and resolves it to an
+immutable digest; it builds and publishes that base only when the tag does not
+exist. A registry/network error stops the build instead of replacing the tag.
+To refresh distribution packages deliberately, update the base recipe or its
+revision comment. Routine application releases reuse the existing base even
+when CI build caches have expired. `--base-registry REPOSITORY` explicitly enables
+that base publication; ordinary local builds do not push anything.
+
+The final OCI image separates Python dependencies, FFmpeg, MediaMTX, OpenMW,
+licenses, Bridge code/resources and release metadata. New layer timestamps are
+normalized with Podman's `--timestamp 0`; the release version/commit lives in
+metadata, not in every component layer. Python dependencies are cached by the
+locked requirements and base identity, without timestamp-dependent bytecode.
+Staging starts clean so removed source files cannot survive in a later image.
+This lets unchanged layer blobs be reused even when an earlier component changes.
 
 The build creates a local OCI image and `WORK/dist/release.json`. It does not push
 images, tags, commits or releases. Copy that release metadata to

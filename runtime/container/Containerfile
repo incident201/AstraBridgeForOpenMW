@@ -1,20 +1,5 @@
-ARG BASE_IMAGE=docker.io/library/ubuntu@sha256:496754492fb28b4d3049432f2ca787449331e23fb14f0dd3fffea86bf5a93eb4
-FROM ${BASE_IMAGE} AS base
-ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates python3 python3-venv tini \
-    weston xwayland xauth xdotool x11-utils mesa-utils pciutils \
-    libgl1-mesa-dri libglx-mesa0 libegl-mesa0 mesa-va-drivers intel-media-va-driver vainfo \
-    libva2 libva-drm2 libva-x11-2 libx264-164 libopus0 \
-    libopenscenegraph161 libcollada-dom2.5-dp0 libbullet3.24 \
-    libsdl2-2.0-0 libopenal1 libyaml-cpp0.8 libluajit-5.1-2 \
-    libboost-program-options1.83.0 libboost-filesystem1.83.0 libboost-iostreams1.83.0 \
-    libavcodec60 libavformat60 libavutil58 libswscale7 libswresample4 \
-    libicu74 libsqlite3-0 libfreetype6 libpng16-16t64 liblz4-1 \
-    libxcb-composite0 libxcomposite1 libxrandr2 libxcursor1 libxi6 \
-    && rm -rf /var/lib/apt/lists/*
-
-FROM base AS builder
+ARG RUNTIME_BASE_IMAGE
+FROM ${RUNTIME_BASE_IMAGE} AS builder
 RUN apt-get update && apt-get install -y --no-install-recommends \
     g++ cmake ninja-build ccache git python3-pip pkg-config binutils curl xz-utils \
     libboost-program-options-dev libboost-filesystem-dev libboost-iostreams-dev \
@@ -28,11 +13,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV CCACHE_DIR=/work/cache/ccache PYTHONDONTWRITEBYTECODE=1
 WORKDIR /src
 
-FROM base AS runtime
+FROM ${RUNTIME_BASE_IMAGE} AS runtime
 LABEL org.opencontainers.image.source="https://github.com/incident201/AstraBridgeForOpenMW" \
       org.opencontainers.image.description="AstraBridge container runtime for modified OpenMW" \
       org.opencontainers.image.licenses="GPL-3.0-or-later"
-COPY stage/ /opt/astrabridge/
+# Stable components have separate content-addressed layers. Release identity is last.
+COPY stage/python/ /opt/astrabridge/python/
+COPY stage/bin/ffmpeg stage/bin/ffprobe /opt/astrabridge/bin/
+COPY stage/bin/mediamtx /opt/astrabridge/bin/
+COPY stage/engine/ /opt/astrabridge/engine/
+COPY stage/LICENSES/ /opt/astrabridge/LICENSES/
+COPY stage/runtime/ /opt/astrabridge/runtime/
+COPY stage/VERSION.json stage/runtime-manifest.json /opt/astrabridge/
 RUN dpkg-query -W '-f=${Package}=${Version}\n' > /opt/astrabridge/runtime-packages.txt \
     && python3 -c "import json,hashlib; from pathlib import Path; p=Path('/opt/astrabridge/runtime-manifest.json'); m=json.loads(p.read_text()); m['packages_sha256']=hashlib.sha256(p.with_name('runtime-packages.txt').read_bytes()).hexdigest(); p.write_text(json.dumps(m,indent=2)+'\n')"
 ENV PYTHONPATH=/opt/astrabridge/runtime/daemon \
