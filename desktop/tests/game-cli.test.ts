@@ -43,9 +43,11 @@ test('summary receipt queries and movement expectations reach the Game API uncha
   assert.deepEqual(parseGame(catalog,['sequence',JSON.stringify(args)]).args,args);
 });
 
-test('documented response wrapper retains movement, blockers, screenshots and errors',()=>{
-  const source=readFileSync('../skill/references/commands.md','utf8').match(/```js\n([\s\S]*?)```/)![1];
-  const execute=new Function('stdout','stderr','process','console',source);
+for(const ending of ['\n','\r\n'])test(`documented response wrapper preserves diagnostics with ${ending==='\n'?'LF':'CRLF'} line endings`,()=>{
+  const markdown=readFileSync('../skill/references/commands.md','utf8').replace(/\r?\n/g,ending);
+  const match=markdown.match(/```js\r?\n([\s\S]*?)```/);
+  assert.ok(match,'The response wrapper code block must be discoverable');
+  const execute=new Function('stdout','stderr','process','console',match[1]);
   const success={ok:true,result:{request_id:'request',summary:{termination:'time_limit',encountered_blockers:['actor']},
     feedback:{status:'partial'},action:{motion:{forward_m:0,vertical_m:-.46}},observation:{screenshot:'/observed.png'}}};
   for(const packet of [success,{ok:false,error:'game_operation_timeout',request_id:'request'}]){
