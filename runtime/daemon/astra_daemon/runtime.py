@@ -35,6 +35,7 @@ class Runtime:
         self.storage=Storage(self.root,game,installation)
         self.graphics=Graphics(installation,self.root)
         self.owner=Ownership();self.session=None;self.input=None;self.live=None
+        self.viewer_generation=0
         self.transition=False;self.mutation=asyncio.Lock()
         self.starting=False;self.start_cancelled=threading.Event();self.start_log_offset=0
         self.artifacts={};self.last_error=None;self.started=time.time()
@@ -212,7 +213,10 @@ class Runtime:
         return self.project(await asyncio.to_thread(self.session.control.execute,op,args))
 
     async def viewer(self, enabled, quality=None):
+        self.viewer_generation+=1;generation=self.viewer_generation
+        if not enabled and self.live is None:return {'running':False}
         async with self.mutation:
+            if generation!=self.viewer_generation:return self.live.status() if self.live else {'running':False}
             if self.live and (not enabled or quality and self.live.quality!=quality or not self.live.status()['running']):
                 await asyncio.to_thread(self.live.close);self.live=None
             if enabled and not self.live:
@@ -221,6 +225,8 @@ class Runtime:
                 try:await asyncio.to_thread(live.start)
                 except Exception:
                     await asyncio.to_thread(live.close);raise
+                if generation!=self.viewer_generation:
+                    await asyncio.to_thread(live.close);return {'running':False}
                 self.live=live
         return self.live.status() if self.live else {'running':False}
 

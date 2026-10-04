@@ -10,7 +10,7 @@
   import {ReplayViewer,type ReplayInfo} from './replay';
   import {Viewer,artifact,pointer} from './viewer';
   const pages=[['play','Play'],['atlas','Atlas'],['recordings','Recordings'],['profiles','Profiles'],['settings','Settings'],['diagnostics','Diagnostics'],['setup','Setup']];
-  let dismissedRuntimeError='';
+  let dismissedRuntimeError='',stopping=false;
   let page='play',state:any={installed:false},runtime:any={},busy=false,error='',notice='',progress='';
   let prerequisites:PrerequisiteReport|null=null,checkingPrerequisites=false,requirementsOpen=false;
   let game='',storage='',recordingsDirectory='',encoding='win1252',dataRelative='',development=false;
@@ -31,7 +31,7 @@
   let profiles:any[]=[],selectedProfile:any=null,profileForm='',profileName='',lastProfile='';
   let mapView:AtlasMap,mapRevision=0;
   $: if(preferencesReady){localStorage.setItem('overlayComments',String(showComments));localStorage.setItem('overlayActions',String(showActions));localStorage.setItem('overlayClocks',String(showClocks));}
-  $: if(video&&runtime.running&&!viewerDisabled&&!watching&&!connecting&&!viewerClosing&&!busy)void autoWatch();
+  $: if(video&&runtime.running&&!viewerDisabled&&!watching&&!connecting&&!viewerClosing&&!busy&&!stopping)void autoWatch();
   $: if(!runtime.running&&(watching||connecting)&&!viewerClosing&&!busy)void endWatch();
   $: if(runtime.game_fps!=null)lastFps=Math.max(0,runtime.game_fps);
   $: filteredRecordings=recordings.filter(row=>recordingsScope==='all'||row.profile_id===runtime.profile?.id);
@@ -69,6 +69,11 @@
     try{const result=await action();if(message)notice=message;await refresh();return result;}
     catch(e){error=(e as Error).message;}
     finally{busy=false;}
+  }
+  async function stopRuntime(restart=false){
+    if(stopping)return;stopping=true;
+    try{await task(async()=>{const request=window.astra.invoke('stop');await Promise.all([endWatch(),request]);if(restart)return window.astra.invoke('start');});}
+    finally{stopping=false;}
   }
   async function navigate(next:string){
     closeMenus();
@@ -277,13 +282,13 @@
       {#if runtime.profile}<span class="selected-profile" title={runtime.profile.name}><Icon name="profiles" size={16}/><span>Selected profile: <strong>{runtime.profile.name}</strong></span></span>{/if}</div>
       <div class="toolbar">
         {#if state.installed}
-          <span class="game-state"><span class="dot" class:online={runtime.running&&runtime.clocks?.game_active}></span>{runtime.starting?'Starting game…':!runtime.running?'Game stopped':runtime.clocks?.game_active?'Gameplay running':'Game paused'}</span>
+          <span class="game-state"><span class="dot" class:online={runtime.running&&runtime.clocks?.game_active}></span>{stopping?'Stopping…':runtime.starting?'Starting game…':!runtime.running?'Game stopped':runtime.clocks?.game_active?'Gameplay running':'Game paused'}</span>
           <details class="dropdown session-menu"><summary aria-label="Session options"><Icon name="more" size={19}/><span>Session</span></summary>
             <div class="menu-popover">
               <div class="menu-label">Runtime</div>
               <button disabled={busy||runtime.running||!state.container?.exists} on:click={()=>task(()=>window.astra.invoke('start'))}><Icon name="play" size={17}/>Start game</button>
-              <button disabled={(!state.container?.running&&!runtime.starting)||(busy&&!runtime.starting)} on:click={()=>task(async()=>{await endWatch();return window.astra.invoke('stop');})}><Icon name="stop" size={17}/>Stop runtime</button>
-              <button disabled={busy} on:click={()=>task(async()=>{await endWatch();return window.astra.invoke('restart');})}><Icon name="restart" size={17}/>Restart</button>
+              <button disabled={(!state.container?.running&&!runtime.starting)||(busy&&!runtime.starting)} on:click={()=>stopRuntime()}><Icon name="stop" size={17}/>Stop runtime</button>
+              <button disabled={busy} on:click={()=>stopRuntime(true)}><Icon name="restart" size={17}/>Restart</button>
               <div class="menu-divider"></div>
               <button on:click={()=>task(()=>window.astra.invoke('skill-export'),'Skill exported. Give the exported folder to your agent.')}><Icon name="export" size={17}/>Export gameplay skill</button>
               {#if owner==='agent'}<button class="danger" on:click={()=>task(()=>window.astra.invoke('agent-end'),'Agent session ended. Manual control is now available.')}><Icon name="disconnect" size={17}/>End agent session</button>{/if}

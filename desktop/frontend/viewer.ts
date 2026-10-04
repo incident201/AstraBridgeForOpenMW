@@ -8,7 +8,7 @@ export class Viewer {
     await this.close(false);
     const generation=this.generation;
     const check=()=>{if(generation!==this.generation)throw new DOMException('Viewer closed','AbortError');};
-    await window.astra.invoke('live-start',{quality});
+    try{await window.astra.invoke('live-start',{quality});}catch(error){check();throw error;}
     check();this.video=video;
     const peer=new RTCPeerConnection({iceServers:[]});this.peer=peer;
     peer.onconnectionstatechange=()=>{if(generation===this.generation&&peer.connectionState==='failed')this.lost();};
@@ -25,11 +25,11 @@ export class Viewer {
     for(let attempt=0;attempt<12;attempt++){
       check();
       try{response=await window.astra.invoke('whep',{path:'/v1/runtime/live/whep',method:'POST',body:peer.localDescription!.sdp});break;}
-      catch(error){if(attempt===11){peer.close();throw error;}await new Promise(resolve=>setTimeout(resolve,250));}
+      catch(error){check();if(attempt===11){peer.close();throw error;}await new Promise(resolve=>setTimeout(resolve,250));}
     }
     if(generation!==this.generation){peer.close();if(response.location)void window.astra.invoke('whep',{path:response.location,method:'DELETE'}).catch(()=>{});check();}
     this.location=response.location;
-    await peer.setRemoteDescription({type:'answer',sdp:response.body});check();
+    try{await peer.setRemoteDescription({type:'answer',sdp:response.body});}catch(error){check();throw error;}check();
   }
   async close(stop=true){
     this.generation++;this.peer?.close();this.peer=null;

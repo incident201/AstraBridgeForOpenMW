@@ -7,7 +7,8 @@ const browser=await chromium.launch();const page=await browser.newPage({viewport
 await page.addInitScript(()=>{
  const runtime={running:false,starting:false,profile:{id:'default',name:'Default'},owner:{mode:'idle'}};
  const state={installed:true,configured:true,storageMissing:true,updatePending:true,container:{exists:false,running:false},runtime,release:{version:'test'},sourceGame:'/chosen/game',storageDirectory:'/chosen/storage',recordingsDirectory:'/chosen/videos'};
- let handlers=[],rejectStart;
+ let handlers=[],rejectStart,closeViewer;
+
  window.fixture={state,runtime,calls:[],emit:()=>handlers.forEach(fn=>fn({type:'status',data:structuredClone(runtime)}))};
  window.astra={subscribe:fn=>{handlers.push(fn);return()=>{};},input:()=>{},invoke:async(op)=>{
   window.fixture.calls.push(op);
@@ -15,7 +16,8 @@ await page.addInitScript(()=>{
   if(op==='prerequisites')return {available:true};
   if(op==='reset-setup'){state.installed=false;state.configured=false;state.storageMissing=false;state.updatePending=false;return {reset:true};}
   if(op==='start'){runtime.starting=true;state.container.running=true;window.fixture.emit();return new Promise((_resolve,reject)=>rejectStart=reject);}
-  if(op==='stop'){runtime.starting=false;runtime.running=false;state.container.running=false;window.fixture.emit();rejectStart?.(Error('Game startup was cancelled.'));return {};}
+  if(op==='live-stop'&&runtime.starting)return new Promise(resolve=>closeViewer=resolve);
+  if(op==='stop'){closeViewer?.({});runtime.starting=false;runtime.running=false;state.container.running=false;window.fixture.emit();rejectStart?.(Error('Game startup was cancelled.'));return {};}
   return {};
  }};
 });

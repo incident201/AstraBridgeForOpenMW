@@ -30,3 +30,26 @@ async def test_startup_failure_retains_actionable_error_without_reporting_runnin
     with pytest.raises(BridgeError,match='content_load_order'):await r.start_engine()
     assert not r.running() and not r.starting
     assert 'must load after' in r.status()['error']
+
+
+@pytest.mark.asyncio
+async def test_disconnecting_absent_viewer_does_not_wait_for_startup_lock(tmp_path):
+    r=Runtime(tmp_path/'install',tmp_path/'state',tmp_path/'game')
+    async with r.mutation:
+        result=await asyncio.wait_for(r.viewer(False),.1)
+    assert result=={'running':False}
+
+
+@pytest.mark.asyncio
+async def test_viewer_disconnect_cancels_pending_encoder_start(tmp_path,monkeypatch):
+    entered=threading.Event();resume=threading.Event();closed=[]
+    class PendingLive:
+        def __init__(self,*_):pass
+        def start(self):entered.set();assert resume.wait(2)
+        def close(self):closed.append(True)
+        def status(self):return {'running':True}
+    monkeypatch.setattr('astra_daemon.runtime.Live',PendingLive)
+    r=Runtime(tmp_path/'install',tmp_path/'state',tmp_path/'game');r.running=lambda:True
+    task=asyncio.create_task(r.viewer(True,'720p30'));await asyncio.to_thread(entered.wait,1)
+    assert await asyncio.wait_for(r.viewer(False),.1)=={'running':False}
+    resume.set();assert await task=={'running':False};assert closed and r.live is None
