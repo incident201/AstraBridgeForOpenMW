@@ -4,7 +4,13 @@ This document summarizes practical results from running different AI models with
 
 These results describe how the models behave specifically when playing Morrowind through AstraBridge. They should not be treated as a general ranking of the models.
 
-## GPT-6 Astra (xhigh)
+## GPT models
+
+All tests of Astra, Sol, and Luna were run through Codex CLI as the harness on Linux.
+
+All three models handle context compaction well: they retain the current goal and continue working after compaction. Tests with longer context windows did not produce a visible improvement in quality.
+
+### GPT-6 Astra (xhigh)
 
 **Excellent results.**
 
@@ -16,7 +22,7 @@ It also understands AstraBridge control commands reliably and generally uses the
 
 Overall, Astra currently provides the best and most consistent results.
 
-## GPT-6.1 Sol (xhigh)
+### GPT-6.1 Sol (xhigh)
 
 **Very close to Astra.**
 
@@ -26,7 +32,7 @@ It can use screenshots, previous observations, and route information to maintain
 
 Sol sometimes spends more time reasoning before taking an action, but in terms of actual in-game progress it performs at roughly the same level as Astra.
 
-## GPT-6 Luna (max)
+### GPT-6 Luna (max)
 
 **Understands the controls, but has major navigation problems.**
 
@@ -42,15 +48,13 @@ It usually remembers and can describe the overall objective, but has great diffi
 
 **Better than Luna in practice, but still far behind the frontier models.**
 
-Gemini sometimes has problems understanding how individual AstraBridge controls should be used.
+Tests were run through agy CLI as the harness on Linux.
 
-It actively uses screenshots for navigation, but has difficulty combining separate observations into a stable representation of the environment. As a result, it often repeats routes it has already taken.
+Gemini understands AstraBridge command syntax very well and uses the available tools effectively.
 
-Gemini also tends to perform very large numbers of small movements and micro-actions without much clear progress.
+It shows signs of understanding its surroundings through game screenshots. However, it still has difficulty combining separate observations into a stable representation of the environment. As a result, it often repeats routes it has already taken.
 
-It usually remembers the global objective, but often reaches its destination through brute-force exploration rather than deliberate navigation and planning.
-
-Despite these problems, it has performed better than Luna in the current tests.
+The agent remembers the overall objective and can achieve it, but often needs more actions than frontier models such as Astra.
 
 ## DeepSeek 4.1 Flash (max)
 
@@ -66,15 +70,13 @@ Because of the combination of context growth and information loss after compacti
 
 ## Grok 4.7
 
-**Testing is still in progress. Early results are poor.**
+Tests were run through Grok Build as the harness on Linux.
 
-In the first tests, Grok has had serious problems establishing a stable observation-action loop.
+The model receives game screenshots but, for an unknown reason, refuses to open or inspect them. It also tends to repeat "observe" requests unnecessarily and fails to establish a stable observation-action loop.
 
-It tends to repeat "observe" requests unnecessarily and often fails to connect visual observations with the results of its previous actions.
+This is likely a harness issue, although the cause has not been confirmed.
 
-The main problem currently looks like a broken control loop rather than simple navigation difficulty. Grok does not appear to use the AstraBridge skill correctly or consistently in its current form.
-
-More testing is required to determine whether this is a model limitation, a skill compatibility issue, or something specific to the current integration.
+A possible solution is to use the Grok API directly. This has not been tested yet because it would require an additional adapter specifically for Grok.
 
 ## Claude
 
