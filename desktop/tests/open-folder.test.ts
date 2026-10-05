@@ -8,7 +8,7 @@ import {openFolder} from '../main/open-folder';
 import {Core} from '../main/core';
 
 test('Linux opens an encoded file URL and never awaits the broken OpenPath',async()=>{
-  const directory="/recordings/Мой профиль #1 % ' & $(text)";
+  const directory=join(tmpdir(),"recordings","Мой профиль #1 % ' & $(text)");
   let called=false;
   await openFolder(directory,{
     openPath:async()=>{assert.fail('Linux must not call shell.openPath');},
