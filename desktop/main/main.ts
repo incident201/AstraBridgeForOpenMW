@@ -9,6 +9,7 @@ import {Core} from './core';
 import {StopSessionRequest} from './stop-session';
 import {CloseRequest,type CloseChoice} from './close';
 import {localArtifact} from './local-artifact';
+import {openFolder} from './open-folder';
 
 app.setName('AstraBridge');
 app.commandLine.appendSwitch('autoplay-policy','no-user-gesture-required');
@@ -174,7 +175,7 @@ app.whenReady().then(async()=>{
       }
       if(operation==='recordings')return core.recordings.list((await core.configured()).recordingsDirectory);
       if(operation==='open-recordings-folder'){
-        const directory=await core.recordingsFolder();const error=await shell.openPath(directory);if(error)throw new Error(error);return directory;
+        const directory=await core.recordingsFolder();await openFolder(directory,shell);return directory;
       }
       if(operation==='record'){
         if(!['start','stop','status'].includes(args.action))throw new Error('Invalid recording operation');
