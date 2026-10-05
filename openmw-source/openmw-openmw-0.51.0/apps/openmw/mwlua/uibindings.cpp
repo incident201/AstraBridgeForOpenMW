@@ -18,6 +18,7 @@
 #include "../mwbase/environment.hpp"
 #include "../mwbase/windowmanager.hpp"
 #include "astraui.hpp"
+#include "../mwgui/mapwindow.hpp"
 #include "astracombat.hpp"
 #include "../mwworld/datetimemanager.hpp"
 #include "../mwbase/inputmanager.hpp"
@@ -192,6 +193,39 @@ namespace MWLua
             // Exact engine implementation of RA/ResetActors, no console or eval.
             MWBase::Environment::get().getWorld()->resetActors();
             return true;
+        };
+        api["_astraMap"] = [context, windowManager](sol::this_state state, const std::string& action,
+            float dx, float dy, float factor, bool fit) {
+            if (context.mType != Context::Local || !context.mLuaManager->isSynchronizedUpdateRunning())
+                throw std::runtime_error("Astra map requires player onFrame");
+            sol::table out(sol::state_view(state), sol::create);
+            if (!windowManager->isAllowed(MWGui::GW_Map)) { out["error"] = "view_unavailable"; return out; }
+            if (MyGUI::InputManager::getInstance().isModalAny() || windowManager->isConsoleMode())
+            { out["error"] = "ui_open"; return out; }
+            if (windowManager->getMode() != MWGui::GM_Inventory)
+            { out["error"] = "map_not_open"; return out; }
+            MWGui::MapWindow* map = nullptr;
+            for (auto* window : windowManager->getGuiModeWindows(MWGui::GM_Inventory))
+                if (auto* candidate = dynamic_cast<MWGui::MapWindow*>(window); candidate && candidate->isVisible()) map = candidate;
+            if (!map) { out["error"] = "map_not_open"; return out; }
+            bool limited = map->astraMapControl(action, dx, dy, factor, fit);
+            const auto view = map->astraMapView();
+            out["view_mode"] = view.world ? "world" : "local";
+            out["fullscreen"] = view.fullscreen; out["zoom"] = view.zoom;
+            out["min_zoom"] = view.minZoom; out["max_zoom"] = view.maxZoom; out["limit_reached"] = limited;
+            out["can_pan_left"] = view.left; out["can_pan_right"] = view.right;
+            out["can_pan_up"] = view.up; out["can_pan_down"] = view.down;
+            sol::table markers(sol::state_view(state), sol::create);
+            for (size_t i = 0; i < view.markers.size(); ++i)
+            {
+                const auto& marker = view.markers[i];
+                sol::table row(sol::state_view(state), sol::create);
+                row["text"] = marker.text; row["description"] = marker.notes;
+                row["image_x"] = marker.x; row["image_y"] = marker.y;
+                markers[i + 1] = row;
+            }
+            out["markers"] = markers;
+            return out;
         };
         api["_astraUiEdit"] = [context, windowManager](const std::string& ref, const std::string& value) {
             if (!context.mLuaManager->isSynchronizedUpdateRunning()) throw std::runtime_error("Astra UI requires onFrame");

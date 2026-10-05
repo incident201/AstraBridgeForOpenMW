@@ -1965,6 +1965,7 @@ namespace MWGui
 
     void WindowManager::onWindowChangeCoord(MyGUI::Window* window)
     {
+        if (window->getUserString("AstraTemporaryFullscreen") == "true") return;
         // If using controller menus, don't persist changes to size of the stats or magic
         // windows.
         if (Settings::gui().mControllerMenus

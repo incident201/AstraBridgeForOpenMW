@@ -90,7 +90,7 @@ class FrameStream:
                 time.sleep(.002)
         raise BridgeError('engine_frame_unavailable_rebuild_engine')
 
-    def capture(self, path):
+    def capture(self, path, *, native_size=False):
         from .screenshots import save_bgra
         frame = self.fresh()
-        return save_bgra(path, frame['bgra'], frame['width'], frame['height'], bottom_up=True)
+        return save_bgra(path, frame['bgra'], frame['width'], frame['height'], bottom_up=True, native_size=native_size)

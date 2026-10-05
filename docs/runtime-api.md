@@ -61,6 +61,23 @@ mutations after a connection failure; use the existing action receipt mechanism.
 | `PATCH/DELETE /v1/runtime/live/whep/{id}` | WHEP session signaling/cleanup. |
 | `GET /v1/events` | WebSocket events, telemetry and authenticated manual input. |
 
+### Game map views
+
+The Game API operation `map` accepts optional `action`: `local`, `world`, `view`,
+`pan`, `zoom`, `center`, `markers` or `close`. With no action it opens the regular
+game window. Local/world open the same window at full render size; the viewer
+and recorder show these changes as ordinary UI interactions.
+
+`pan` takes `dx`/`dy` in viewport widths/heights; `zoom` takes `factor` or `fit`.
+Images are returned through `result.map.image` as normal registered artifacts,
+at native frame resolution. Regular observation/click coordinates stay at 720p.
+The map response includes zoom bounds, available pan directions and
+`limit_reached`. `markers` supports `query`, `page` and `limit` without capturing
+another image. Only visible, normally readable tooltip labels are returned,
+with positions normalized to the full map image. These positions are not world
+coordinates or movement targets. The complete command contract is in the
+[map reference](../skill/references/maps.md).
+
 The Game API preserves the existing observation projection, object recognition,
 normal UI callbacks and action validation. Runtime management does not become
 an alternate gameplay knowledge API; the skill still restricts gameplay agents

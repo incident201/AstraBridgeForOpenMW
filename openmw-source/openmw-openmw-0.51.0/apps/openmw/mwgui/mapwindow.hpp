@@ -238,6 +238,16 @@ namespace MWGui
         void setAlpha(float alpha) override;
         void setVisible(bool visible) override;
 
+        struct AstraMapMarker { std::string text, notes; float x = 0, y = 0; };
+        struct AstraMapView
+        {
+            bool world = false, fullscreen = false, left = false, right = false, up = false, down = false;
+            float zoom = 1, minZoom = 1, maxZoom = 4;
+            std::vector<AstraMapMarker> markers;
+        };
+        bool astraMapControl(const std::string& action, float dx, float dy, float factor, bool fit);
+        AstraMapView astraMapView() const;
+        void astraRestoreMapView();
         void renderGlobalMap();
 
         /// adds the marker to the global map
@@ -314,6 +324,9 @@ namespace MWGui
         MyGUI::Button* mEventBoxGlobal;
         MyGUI::Button* mEventBoxLocal;
 
+        bool mAstraMapFullscreen = false;
+        MyGUI::IntCoord mAstraMapWindow;
+        std::pair<float, float> astraZoomRange() const;
         float mGlobalMapZoom = 1.0f;
         std::unique_ptr<MWRender::GlobalMap> mGlobalMapRender;
 

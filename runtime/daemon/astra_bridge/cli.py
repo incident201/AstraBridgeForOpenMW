@@ -134,6 +134,15 @@ def build_parser():
         if name=='ui':
             p.add_argument('--query');p.add_argument('--page',type=int,default=0);p.add_argument('--limit',type=int,default=20)
             p.add_argument('--panel');p.add_argument('--role');p.add_argument('--control')
+        if name=='map':
+            p.description='View the ordinary game map. Local/world open a large map; pan/zoom use the open view.'
+            p.add_argument('action',nargs='?',choices=['local','world','view','pan','zoom','center','markers','close'])
+            p.add_argument('--dx',type=float,help='Viewport widths to move right (negative: left), only with pan')
+            p.add_argument('--dy',type=float,help='Viewport heights to move down (negative: up), only with pan')
+            zoom=p.add_mutually_exclusive_group()
+            zoom.add_argument('--factor',type=float,help='Zoom multiplier about the viewport center')
+            zoom.add_argument('--fit',action='store_true',default=None,help='Widest allowed view, without switching map type')
+            p.add_argument('--query');p.add_argument('--page',type=int);p.add_argument('--limit',type=int)
     p=commands.add_parser('details',description='Page the latest public observation. For inventory, journal or spells use inspect.');p.add_argument('section',help='One of: '+', '.join(SECTIONS));p.add_argument('--observation',type=int)
     p.add_argument('--query');p.add_argument('--page',type=int,default=0);p.add_argument('--limit',type=int,default=20)
     p=commands.add_parser('action-result');p.add_argument('ref',nargs='?')

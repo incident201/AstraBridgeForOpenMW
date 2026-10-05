@@ -10,10 +10,19 @@ they also affect how a playthrough behaves.
 | Yet Another Idle Animation Fix (YAIAF) 1.1 | Third-party animation assets by Qlonever | Shipped in the Lua mod's data directory; additional animation sources enabled in the private profile. |
 | Dark Brotherhood / Tribunal delay | AstraBridge-generated script override | Enabled when `Tribunal.esm` is active, unless `delay_tribunal` is explicitly disabled. |
 | Combat defaults | OpenMW settings chosen by AstraBridge | New profiles start with `difficulty = 0` and `best attack = true`; users may change both. |
+| Map zoom | OpenMW UI setting applied by AstraBridge | `allow zooming = true` in the private profile enables normal map zoom controls. |
 | Synchronous physics at action boundaries | OpenMW setting applied by AstraBridge | `async num threads = 0` in the runtime profile. |
 | Idle-camera stabilization | AstraBridge Lua policy using OpenMW camera interfaces | Disables automatic vanity/standing-preview behavior during controlled play. |
 | Jump and fall controls | AstraBridge Lua adapter using normal actor controls | One jump impulse, directional air steering, observed flight state and stopping on landing; ordinary game physics and skill effects remain in force. |
 | NPC placement recovery | Explicit public command using native ResetActors | Never an automatic part of navigation; the skill restricts its use to observed malfunctions. |
+
+## Map interaction settings
+
+AstraBridge applies `[Map] allow zooming = true` when preparing both new and
+existing private profiles. This enables OpenMW's existing map zoom controls and
+supports the specialized local/world map commands. It does not remove fog,
+reveal markers or increase the map texture resolution. The large map is a
+temporary UI layout; closing it restores the ordinary window rectangle.
 
 ## Yet Another Idle Animation Fix
 

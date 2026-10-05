@@ -3,6 +3,14 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {parseGame,type Catalog} from '../main/game-cli';
 const catalog:Catalog=JSON.parse(readFileSync('resources/game-commands.json','utf8'));
+test('map actions preserve optional defaults and viewport controls',()=>{
+  assert.deepEqual(parseGame(catalog,['map']).args,{});
+  assert.deepEqual(parseGame(catalog,['map','local']).args,{action:'local'});
+  assert.deepEqual(parseGame(catalog,['map','pan','--dx','-.5','--dy','1']).args,{action:'pan',dx:-.5,dy:1});
+  assert.deepEqual(parseGame(catalog,['map','zoom','--fit']).args,{action:'zoom',fit:true});
+  assert.deepEqual(parseGame(catalog,['map','markers','--query','Balmora','--page','1']).args,{action:'markers',query:'Balmora',page:1});
+  assert.throws(()=>parseGame(catalog,['map','zoom','--fit','--factor','2']),/only one/);
+});
 test('game command parsing preserves movement values, booleans and JSON',()=>{
   assert.deepEqual(parseGame(catalog,['move-local','-1.5','--sideways-m','2','--run']).args,
     {under_fire:false,run:true,seconds:30,sideways_m:2,forward_m:-1.5});

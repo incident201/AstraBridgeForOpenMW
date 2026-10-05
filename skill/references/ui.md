@@ -7,7 +7,7 @@ Use these commands for an open menu, conversation, book or service. For a popup 
 | Syntax | Arguments and behavior |
 |---|---|
 | `trigger NAME` | Exact allowed names: `Activate`, `ToggleWeapon`, `ToggleSpell`, `Jump`, `Inventory`, `Journal`, `GameMenu`, `Rest`. Toggle names toggle state; check current stance/menu first. |
-| `map` | Open the game's Map window; this is distinct from `atlas`. |
+| `map` | Open the game's regular Map window. Use `map local` / `map world` for the large view; see [maps](maps.md). This is distinct from `atlas`. |
 | `choose UI_REF` | Invoke an enabled control in the currently open menu, including list rows outside the viewport. |
 | `choose "EXACT_CAPTION"` | Resolve a current caption. Prefer a ref for ambiguity; same-caption buttons are preferred over other control types. |
 | `edit UI_REF "TEXT"` | Replace a visible input's contents, up to 1000 characters. It does not press its confirmation button. |

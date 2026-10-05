@@ -695,6 +695,17 @@ local function finish()
     if not err and p.cmd.op == 'observe' then result = observation(p.cmd.args) end
     if not err and p.cmd.op == 'inspect' then result,err = inspect(p.cmd.args) end
     if not err and p.cmd.op=='ui' then result=uiState() end
+    if not err and p.cmd.op=='map' and ui._astraMap then
+        local args=p.cmd.args
+        local action=args.action or 'windowed'
+        local map=ui._astraMap(action,args.dx or 0,args.dy or 0,args.factor or 1,args.fit or false)
+        if map.error then err=map.error
+        else
+            map.markers=P.array(map.markers)
+            result={map=map,paused=true}
+            if action=='close' then I.UI.setMode(nil);result={paused=true,closed=true} end
+        end
+    end
     pending=nil
     bus:set('response', {session=p.cmd.session,id=p.cmd.id,result=result,error=err})
 end
@@ -797,8 +808,13 @@ local function dispatch(cmd)
     elseif op=='unlock' then targetLock=nil;pause(cmd,{})
     elseif op=='map' then
         if not windowAllowed('Map') then pause(cmd,nil,'view_unavailable');return end
+        if uiState().modal then pause(cmd,nil,'ui_open');return end
         if I.UI.getMode() and I.UI.getMode()~=I.UI.MODE.Interface then pause(cmd,nil,'ui_open');return end
-        I.UI.setMode(I.UI.MODE.Interface,{windows={'Map'}})
+        local action=args.action or 'windowed'
+        if action~='windowed' and not ui._astraMap then pause(cmd,nil,'native_ui_unavailable');return end
+        if action=='windowed' or action=='local' or action=='world' then
+            I.UI.setMode(I.UI.MODE.Interface,{windows={'Map'}})
+        elseif I.UI.getMode()~=I.UI.MODE.Interface then pause(cmd,nil,'map_not_open');return end
         pause(cmd,{})
     elseif op=='ui_scroll' then
         if not ui._astraUiScroll then pause(cmd,nil,'native_ui_unavailable');return end

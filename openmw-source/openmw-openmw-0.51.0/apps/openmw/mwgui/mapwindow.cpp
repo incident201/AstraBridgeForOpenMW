@@ -32,6 +32,7 @@
 #include "../mwrender/localmap.hpp"
 
 #include "confirmationdialog.hpp"
+#include "../mwlua/astramap.hpp"
 
 #include <numeric>
 
@@ -1055,6 +1056,8 @@ namespace MWGui
 
     void MapWindow::setVisible(bool visible)
     {
+        if (!visible || MWBase::Environment::get().getWindowManager()->getMode() != GM_Inventory)
+            astraRestoreMapView();
         WindowBase::setVisible(visible);
         MWGui::GuiMode mode = MWBase::Environment::get().getWindowManager()->getMode();
         mButton->setVisible(visible && mode != MWGui::GM_None);
@@ -1355,6 +1358,7 @@ namespace MWGui
 
     void MapWindow::clear()
     {
+        astraRestoreMapView();
         mMarkers.clear();
 
         mGlobalMapRender->clear();

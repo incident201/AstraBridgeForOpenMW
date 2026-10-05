@@ -141,6 +141,11 @@ ERRORS.update({'levitation_required','flight_requires_fly'})
 ERRORS.add('swimming_required')
 ERRORS.update({'jump_requires_ground','airborne_required','swimming_requires_swim'})
 ERRORS.update({'document_not_open', 'stale_document_ref'})
+ERRORS.add('map_not_open')
+DICT_KEYS.add('map')
+LIST_KEYS.add('markers')
+LEAF_KEYS.update({'fullscreen','zoom','min_zoom','max_zoom','limit_reached',
+                 'can_pan_left','can_pan_right','can_pan_up','can_pan_down','image_x','image_y','closed'})
 
 
 def check_result(value, depth=0):
@@ -209,7 +214,7 @@ def validate(op: str, args: dict) -> None:
         "act": {"seconds", "move", "strafe", "yaw", "pitch", "attack", "run", "sneak", "trigger", "target"},
         "jump":{"direction","run","seconds"}, "air_move":{"direction","run","seconds"},
         "look":{"heading_deg","pitch_deg"},
-        "ui":set(),"map":set(),"choose":{"ref"},"focus":{"ref","wait_ready"},"approach":{"ref","reach","run","under_fire","seconds"},"interact":{"ref","approach","run","seconds","under_fire","adjust_viewpoint"},
+        "ui":set(),"map":{'action','dx','dy','factor','fit'},"choose":{"ref"},"focus":{"ref","wait_ready"},"approach":{"ref","reach","run","under_fire","seconds"},"interact":{"ref","approach","run","seconds","under_fire","adjust_viewpoint"},
         "pick":{"x","y","radius","observation"},"target_info":{"ref"},
         "walk":{"x","y","ref","observation","run","under_fire","seconds"},
         "survey":set(),"ground":set(),"mark":set(),"go":{"ref","run","seconds","under_fire"},
@@ -226,6 +231,19 @@ def validate(op: str, args: dict) -> None:
     }
     if op not in fields or args.keys() - fields[op]:
         raise BridgeError("invalid_arguments")
+    if op=='map':
+        action=args.get('action')
+        allowed={None:set(),'local':set(),'world':set(),'view':set(),'center':set(),'markers':set(),'close':set(),
+                 'pan':{'dx','dy'},'zoom':{'factor','fit'}}
+        if not isinstance(action,(str,type(None))) or action not in allowed or args.keys()-({'action'}|allowed[action]):
+            raise BridgeError('invalid_arguments')
+        if action=='pan':
+            number(args.get('dx',0),-10,10);number(args.get('dy',0),-10,10)
+            if not args.get('dx',0) and not args.get('dy',0):raise BridgeError('invalid_arguments')
+        if action=='zoom':
+            if ('factor' in args)==('fit' in args):raise BridgeError('invalid_arguments')
+            if 'factor' in args:number(args['factor'],.25,4)
+            if 'fit' in args and args['fit'] is not True:raise BridgeError('invalid_arguments')
     if op=='pick':
         for key in ('x','y'):number(args.get(key),0,16383)
         number(args.get('radius',0),0,160)

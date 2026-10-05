@@ -13,7 +13,7 @@ local function quote(s)
 end
 local arrays = {items=true,spells=true,entries=true,saves=true,available=true,skills=true,topics=true,
     objects=true,actions=true,elements=true,rect=true,aim_point=true,messages=true,
-    samples=true,rays=true,passages=true,steps=true,effects=true,ground_targets=true}
+    samples=true,rays=true,passages=true,steps=true,effects=true,ground_targets=true,markers=true}
 function M.encode(v, field)
     local t = type(v)
     if t == 'nil' then return 'null' end

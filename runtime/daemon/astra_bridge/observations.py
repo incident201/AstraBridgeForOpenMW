@@ -111,7 +111,7 @@ def prune_screenshots(directory, memory, keep=128):
     frames, maps = [], []
     for p in directory.iterdir():
         if not p.is_file() or p.resolve() in pinned: continue
-        if re.fullmatch(r'[a-f0-9]{8}-\d+\.png', p.name): frames.append(p)
+        if re.fullmatch(r'[a-f0-9]{8}-\d+(?:-map)?\.png', p.name): frames.append(p)
         elif re.fullmatch(r'(?:[a-f0-9]{8}-\d+(?:-atlas)?|space_[a-zA-Z0-9_]+-archive)\.(?:svg|png)',p.name): maps.append(p)
     removed = 0
     for group, limit in ((frames, keep), (maps, 8)):

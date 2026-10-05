@@ -99,6 +99,7 @@ A fresh profile starts empty; an explicit profile duplicate copies memory once.
 | Approach/talk/open/pick up | `interact REF --approach`; [navigation](references/navigation.md) |
 | Jump, steer while falling, fly or swim | `jump`, `air-move`, `fly`, `swim`; [navigation](references/navigation.md) |
 | Return to known terrain | `atlas` → `revisit`, or `recall` → `return-to`; [navigation](references/navigation.md) |
+| Read the in-game map | `map local` / `map world` → open `map.image`; pan, zoom and visible labels in [maps](references/maps.md) |
 | Menus, dialogue, books, repair and services | `ui`, `choose`, `read`, `repair`, `rest`, `buy`, `travel`; [UI](references/ui.md) |
 | Combat, spells and evasion | `strike`, `cast`, `chain`, `evade`; [combat](references/combat.md) |
 | Several already-decided actions | `sequence` with `expect`; [examples](references/sequences.md) |

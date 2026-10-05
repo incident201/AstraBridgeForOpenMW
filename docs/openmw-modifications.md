@@ -7,7 +7,7 @@ is in [openmw-source/openmw-openmw-0.51.0](../openmw-source/openmw-openmw-0.51.0
 The upstream reference is the
 [openmw-0.51.0 tag archive](https://codeload.github.com/OpenMW/openmw/tar.gz/refs/tags/openmw-0.51.0).
 
-There are **36 modified existing files and four added native headers**, apart
+There are **38 modified existing files and five added native headers**, apart
 from omitted upstream documentation and development-support files. The patch
 recipe is designed to be idempotent and the vendored tree includes these changes.
 
@@ -79,6 +79,32 @@ Control identities follow menu meaning and state. Tooltip appearance, fading
 notifications or scrolling alone need not invalidate an unchanged action.
 Selection is revalidated against a fresh snapshot before the callback runs.
 Console and postprocessing/debug UI are excluded.
+
+### Large in-game maps
+
+The `_astraMap` adapter operates on the existing `MWGui::MapWindow`. It selects
+local/world views, changes zoom and scroll offset, centers on the game's player
+arrow and temporarily expands the window to the render viewport. It does not
+implement a separate map renderer or export map textures or world geometry.
+
+`mapwindow.hpp/.cpp` declare the adapter and restore the previous window rectangle
+on close, UI exit and clearing save state. Its implementation is maintained in
+[astramap.hpp](../runtime/native/astramap.hpp), compiled with `mapwindow.cpp`.
+`windowmanagerimp.cpp` prevents the temporary fullscreen rectangle from replacing
+the user's saved window layout. `uibindings.cpp` registers the synchronized
+player-only binding and checks map availability, modal state and the open UI.
+
+Labels are read from visible map tooltip widgets in the current viewport.
+`MapMarker` labels pass the same `isPositionExplored()` check as ordinary game
+tooltips. Hidden world-marker group members are not enumerated. Only displayed
+text, tooltip notes and normalized image positions cross the public interface;
+cell indices and world coordinates remain internal. The normal world-map base,
+exploration overlay, local fog and player/custom markers remain rendered by
+OpenMW. Zoom commands clamp to the current map's range without switching map type.
+
+Python obtains large map PNGs from the existing completed-frame stream at native
+resolution, while regular observations and click coordinates retain 720p.
+Map UI interactions use the same media timeline as other recorded menus.
 
 ### Open documents and dialogue
 
@@ -208,6 +234,7 @@ documented in the [skill reference](../skill/references/commands.md).
 | `_astraUiSnapshot`, `_astraUiChoose` | Current game UI projection and revalidated control selection. |
 | `_astraUiEdit`, `_astraUiAdjust` | Existing text inputs and sliders; respect enabled state and bounds. |
 | `_astraUiHover`, `_astraUiScroll` | Native GUI pointer/wheel behavior and modal checks. |
+| `_astraMap` | Ordinary map presentation, pan/zoom and visible tooltip labels; no hidden markers or world-coordinate output. |
 | `_astraReadDocument` | Text of the currently opened formatted book/scroll. |
 | `_astraOwnedItemInfo` | Player-owned inventory details and opaque item-instance identity. |
 | `_astraDoorDescription` | Tooltip for a door/container; callers must apply the inspection gate. |
@@ -223,18 +250,19 @@ documented in the [skill reference](../skill/references/commands.md).
 ## Complete changed-file inventory
 
 Paths below are relative to the vendored OpenMW tree. The groups account for
-all 35 modified files in the upstream comparison; helper headers are listed
+all 38 modified files in the upstream comparison; helper headers are listed
 separately afterward.
 
 | Changed files | Purpose |
 |---|---|
 | [apps/openmw/mwlua/uibindings.cpp](../openmw-source/openmw-openmw-0.51.0/apps/openmw/mwlua/uibindings.cpp) | Register the native adapter functions. |
+| [mwgui/mapwindow.hpp](../openmw-source/openmw-openmw-0.51.0/apps/openmw/mwgui/mapwindow.hpp), [mapwindow.cpp](../openmw-source/openmw-openmw-0.51.0/apps/openmw/mwgui/mapwindow.cpp) | Temporary large map, typed view controls and visible tooltip projection. |
 | [mwgui/waitdialog.cpp](../openmw-source/openmw-openmw-0.51.0/apps/openmw/mwgui/waitdialog.cpp), [countdialog.cpp](../openmw-source/openmw-openmw-0.51.0/apps/openmw/mwgui/countdialog.cpp), [tradewindow.cpp](../openmw-source/openmw-openmw-0.51.0/apps/openmw/mwgui/tradewindow.cpp) | Rest, quantity and barter controls and values. |
 | [mwgui/dialogue.cpp](../openmw-source/openmw-openmw-0.51.0/apps/openmw/mwgui/dialogue.cpp), [travelwindow.cpp](../openmw-source/openmw-openmw-0.51.0/apps/openmw/mwgui/travelwindow.cpp) | Service roles and localized travel destinations. |
 | [components/widgets/list.hpp](../openmw-source/openmw-openmw-0.51.0/components/widgets/list.hpp), [list.cpp](../openmw-source/openmw-openmw-0.51.0/components/widgets/list.cpp) | Carry service/control semantics into generated list rows. |
 | [mwgui/trainingwindow.cpp](../openmw-source/openmw-openmw-0.51.0/apps/openmw/mwgui/trainingwindow.cpp), [spellbuyingwindow.cpp](../openmw-source/openmw-openmw-0.51.0/apps/openmw/mwgui/spellbuyingwindow.cpp) | Preserve the already computed insufficient-gold condition. |
 | [mwgui/widgets.cpp](../openmw-source/openmw-openmw-0.51.0/apps/openmw/mwgui/widgets.cpp) | Accessible stat, spell and known/unknown effect captions. |
-| [mwgui/messagebox.cpp](../openmw-source/openmw-openmw-0.51.0/apps/openmw/mwgui/messagebox.cpp), [windowmanagerimp.cpp](../openmw-source/openmw-openmw-0.51.0/apps/openmw/mwgui/windowmanagerimp.cpp) | Notification semantics and the top modal. |
+| [mwgui/messagebox.cpp](../openmw-source/openmw-openmw-0.51.0/apps/openmw/mwgui/messagebox.cpp), [windowmanagerimp.cpp](../openmw-source/openmw-openmw-0.51.0/apps/openmw/mwgui/windowmanagerimp.cpp) | Notification semantics, the top modal and preserving saved window geometry during temporary large-map viewing. |
 | [mwgui/itemview.hpp](../openmw-source/openmw-openmw-0.51.0/apps/openmw/mwgui/itemview.hpp), [itemchargeview.hpp](../openmw-source/openmw-openmw-0.51.0/apps/openmw/mwgui/itemchargeview.hpp) | Access the current item-view scroll area and recharge rows. |
 | [mwgui/bookpage.hpp](../openmw-source/openmw-openmw-0.51.0/apps/openmw/mwgui/bookpage.hpp), [bookpage.cpp](../openmw-source/openmw-openmw-0.51.0/apps/openmw/mwgui/bookpage.cpp), [bookwindow.cpp](../openmw-source/openmw-openmw-0.51.0/apps/openmw/mwgui/bookwindow.cpp), [scrollwindow.cpp](../openmw-source/openmw-openmw-0.51.0/apps/openmw/mwgui/scrollwindow.cpp) | Formatted text, links and opened-document identity. |
 | [mwbase/inputmanager.hpp](../openmw-source/openmw-openmw-0.51.0/apps/openmw/mwbase/inputmanager.hpp), [mwinput/inputmanagerimp.hpp](../openmw-source/openmw-openmw-0.51.0/apps/openmw/mwinput/inputmanagerimp.hpp), [inputmanagerimp.cpp](../openmw-source/openmw-openmw-0.51.0/apps/openmw/mwinput/inputmanagerimp.cpp), [mousemanager.hpp](../openmw-source/openmw-openmw-0.51.0/apps/openmw/mwinput/mousemanager.hpp) | Native UI cursor injection for hover. |
@@ -251,6 +279,7 @@ Added headers and their maintained sources:
 | Added engine file | Maintained source |
 |---|---|
 | `apps/openmw/mwlua/astraui.hpp` | [runtime/native/astraui.hpp](../runtime/native/astraui.hpp) |
+| `apps/openmw/mwlua/astramap.hpp` | [runtime/native/astramap.hpp](../runtime/native/astramap.hpp), compiled by `mapwindow.cpp` |
 | `apps/openmw/mwlua/astracombat.hpp` | [runtime/native/astracombat.hpp](../runtime/native/astracombat.hpp) |
 | `components/sdlutil/astraframe.hpp` | [runtime/native/astraframe.hpp](../runtime/native/astraframe.hpp) |
 | `components/sdlutil/astramedia.hpp` | [runtime/native/astramedia.hpp](../runtime/native/astramedia.hpp) |

@@ -26,6 +26,7 @@ from .observations import prune_screenshots, present_response
 from .outcomes import summarize
 from . import workflows
 from . import information
+from .game_map import view_map
 from .knowledge import Knowledge
 from .autosave import Autosave
 from .tribunal import prepare_tribunal_delay
@@ -120,6 +121,9 @@ class Session:
         profile_settings = configparser.ConfigParser(interpolation=None, strict=False)
         profile_settings.read(settings_path)
         settings_changed = False
+        if not profile_settings.has_section('Map'): profile_settings.add_section('Map')
+        if profile_settings.get('Map','allow zooming',fallback=None) != 'true':
+            profile_settings.set('Map','allow zooming','true'); settings_changed = True
         # Game/video are 1080p; the public screenshot coordinate space is 720p.
         if not profile_settings.has_section('Video'): profile_settings.add_section('Video')
         for key,value in {'resolution x':'1920','resolution y':'1080'}.items():
@@ -503,6 +507,7 @@ class Session:
                     branch_reason=self.memory.data.get('branch_reason'),place_lookup=self._checkpoint_place)
             if op=='autosave':return self.autosave.configure(args)
             if op=='ui':return information.query_ui(self,args)
+            if op=='map' and args.get('action') is not None:return view_map(self,args)
             if op=='inspect' and args.get('view') in {'journal','conversations'} and ('query' in args or 'limit' in args):return information.inspect_text(self,args)
             if op=='inspect' and args.get('view') in {'inventory','spells'}:
                 if args.keys()-{'view','query','page','limit','topic'}:raise BridgeError('invalid_arguments')

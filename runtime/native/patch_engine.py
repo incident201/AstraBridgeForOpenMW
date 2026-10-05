@@ -582,3 +582,77 @@ replace('apps/openmw/mwlua/luamanagerimp.cpp',
 '''        const std::string& consoleMode, const std::string& command, const MWWorld::Ptr& selectedPtr)
     {
         if (MWBase::Environment::get().getWindowManager()->isConsoleDisabled()) return;''')
+
+# The specialized map remains the game's MapWindow, with normal fog and UI
+# tooltips. No map textures, world coordinates or raw marker records are exposed.
+copy_header('astramap.hpp')
+replace('apps/openmw/mwgui/mapwindow.hpp',
+    '        void renderGlobalMap();', '''        struct AstraMapMarker { std::string text, notes; float x = 0, y = 0; };
+        struct AstraMapView
+        {
+            bool world = false, fullscreen = false, left = false, right = false, up = false, down = false;
+            float zoom = 1, minZoom = 1, maxZoom = 4;
+            std::vector<AstraMapMarker> markers;
+        };
+        bool astraMapControl(const std::string& action, float dx, float dy, float factor, bool fit);
+        AstraMapView astraMapView() const;
+        void astraRestoreMapView();
+        void renderGlobalMap();''')
+replace('apps/openmw/mwgui/mapwindow.hpp', '        float mGlobalMapZoom = 1.0f;',
+'''        bool mAstraMapFullscreen = false;
+        MyGUI::IntCoord mAstraMapWindow;
+        std::pair<float, float> astraZoomRange() const;
+        float mGlobalMapZoom = 1.0f;''')
+replace('apps/openmw/mwgui/mapwindow.cpp', '#include "confirmationdialog.hpp"',
+        '#include "confirmationdialog.hpp"\n#include "../mwlua/astramap.hpp"')
+replace('apps/openmw/mwgui/mapwindow.cpp', '    void MapWindow::setVisible(bool visible)\n    {',
+'''    void MapWindow::setVisible(bool visible)
+    {
+        if (!visible || MWBase::Environment::get().getWindowManager()->getMode() != GM_Inventory)
+            astraRestoreMapView();''')
+replace('apps/openmw/mwgui/mapwindow.cpp', '    void MapWindow::clear()\n    {',
+'''    void MapWindow::clear()
+    {
+        astraRestoreMapView();''')
+replace('apps/openmw/mwgui/windowmanagerimp.cpp',
+    '    void WindowManager::onWindowChangeCoord(MyGUI::Window* window)\n    {',
+'''    void WindowManager::onWindowChangeCoord(MyGUI::Window* window)
+    {
+        if (window->getUserString("AstraTemporaryFullscreen") == "true") return;''')
+replace('apps/openmw/mwlua/uibindings.cpp', '#include "astraui.hpp"',
+        '#include "astraui.hpp"\n#include "../mwgui/mapwindow.hpp"')
+replace('apps/openmw/mwlua/uibindings.cpp', '        api["_astraUiEdit"]',
+'''        api["_astraMap"] = [context, windowManager](sol::this_state state, const std::string& action,
+            float dx, float dy, float factor, bool fit) {
+            if (context.mType != Context::Local || !context.mLuaManager->isSynchronizedUpdateRunning())
+                throw std::runtime_error("Astra map requires player onFrame");
+            sol::table out(sol::state_view(state), sol::create);
+            if (!windowManager->isAllowed(MWGui::GW_Map)) { out["error"] = "view_unavailable"; return out; }
+            if (MyGUI::InputManager::getInstance().isModalAny() || windowManager->isConsoleMode())
+            { out["error"] = "ui_open"; return out; }
+            if (windowManager->getMode() != MWGui::GM_Inventory)
+            { out["error"] = "map_not_open"; return out; }
+            MWGui::MapWindow* map = nullptr;
+            for (auto* window : windowManager->getGuiModeWindows(MWGui::GM_Inventory))
+                if (auto* candidate = dynamic_cast<MWGui::MapWindow*>(window); candidate && candidate->isVisible()) map = candidate;
+            if (!map) { out["error"] = "map_not_open"; return out; }
+            bool limited = map->astraMapControl(action, dx, dy, factor, fit);
+            const auto view = map->astraMapView();
+            out["view_mode"] = view.world ? "world" : "local";
+            out["fullscreen"] = view.fullscreen; out["zoom"] = view.zoom;
+            out["min_zoom"] = view.minZoom; out["max_zoom"] = view.maxZoom; out["limit_reached"] = limited;
+            out["can_pan_left"] = view.left; out["can_pan_right"] = view.right;
+            out["can_pan_up"] = view.up; out["can_pan_down"] = view.down;
+            sol::table markers(sol::state_view(state), sol::create);
+            for (size_t i = 0; i < view.markers.size(); ++i)
+            {
+                const auto& marker = view.markers[i];
+                sol::table row(sol::state_view(state), sol::create);
+                row["text"] = marker.text; row["description"] = marker.notes;
+                row["image_x"] = marker.x; row["image_y"] = marker.y;
+                markers[i + 1] = row;
+            }
+            out["markers"] = markers;
+            return out;
+        };
+        api["_astraUiEdit"]''')
