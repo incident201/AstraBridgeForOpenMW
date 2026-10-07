@@ -88,4 +88,6 @@ Both models behaved very similarly. They showed clear navigation difficulties ev
 
 They also frequently truncated AstraBridge responses and discarded useful information in the process.
 
-Further testing is needed to understand the causes of these problems.
+As with Grok, these problems are likely to be caused by characteristics of the harness itself, although this has not been confirmed.
+
+To isolate the models' behavior from harness effects, they need to be tested directly through the API. Such tests have not been conducted yet.
