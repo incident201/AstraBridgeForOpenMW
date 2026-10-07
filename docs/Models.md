@@ -58,15 +58,17 @@ The agent remembers the overall objective and can achieve it, but often needs mo
 
 ## DeepSeek 4.1 Flash (max)
 
-**Poor fit for AstraBridge in its current form.**
+**Poor results.**
 
-DeepSeek's stateless API requires previous screenshots and other context to be repeatedly sent back with new requests. During long gameplay sessions this causes the request context to grow very quickly.
+Tests were run through the Codex harness.
 
-To keep the session running, AstraBridge has to use aggressive context compaction. This regularly causes what can effectively be described as compaction amnesia: information that was previously established is lost or no longer connected correctly with new observations.
+The default integration was unusable for these tests. Because of the API's handling of image context, every request had to resend all images the model had previously viewed.
 
-DeepSeek also has difficulty linking what it currently sees with previously verified facts. It may forget NPC names, confuse characters it has already met, or lose track of its current location.
+A local proxy was introduced for testing. It removed older images from API requests, keeping only a few recent screenshots. Older images remained available to the model on request, as before.
 
-Because of the combination of context growth and information loss after compaction, DeepSeek 4.1 Flash is currently not recommended for AstraBridge.
+With this setup, the model frequently hallucinated and invented strange explanations for its mistakes. It was reluctant to read AstraBridge responses in full and often discarded useful information from them.
+
+It also tended to write unhelpful automation scripts for route finding. These attempts often led to walking in circles and showed severe spatial disorientation.
 
 ## Grok 4.7
 
@@ -80,4 +82,10 @@ A possible solution is to use the Grok API directly. This has not been tested ye
 
 ## Claude
 
-Claude models have not been tested yet.
+Opus 5.5 and Sonnet 5.5 were tested through Claude CLI.
+
+Both models behaved very similarly. They showed clear navigation difficulties even during the tutorial, struggled to keep track of passages, and repeatedly returned to the same places.
+
+They also frequently truncated AstraBridge responses and discarded useful information in the process.
+
+Further testing is needed to understand the causes of these problems.
