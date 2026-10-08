@@ -19,6 +19,11 @@ packaged release. Game files must be supplied by the user.
 
 ### Container packages
 
+The optional [direct DeepSeek runner](deepseek-runner.md) additionally requires
+host Python 3.11+ and its installed Python dependencies, plus HTTPS access to the
+configured DeepSeek endpoint. Python is not required merely to use the packaged
+Desktop or its normal CLI.
+
 Install the host packages appropriate for your distribution; the application
 checks the actual tools and configuration, not whether one particular package
 manager reports a package name.

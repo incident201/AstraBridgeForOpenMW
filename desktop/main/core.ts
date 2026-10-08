@@ -424,7 +424,7 @@ export class Core {
     if((await backend.inspect(config.name)).running){try{return await this.api('/v1/runtime/logs?name='+encodeURIComponent(name??'daemon.log'));}catch{}}
     return {name:'container',text:await backend.logs(config.name)};
   }
-  async exportSkill(destination:string){
+  async exportSkill(destination:string,mode:'cli'|'tools'='cli'){
     const config=await this.configured();
     const release=await this.release();
     if(release.digest&&release.digest!==config.digest)throw Error('Update the runtime to match this application before exporting the gameplay skill.');
@@ -435,9 +435,10 @@ export class Core {
     const connection={...(registered?{command:'astrabridge'}:{}),executable,config:this.configFile};
     destination=resolve(destination);try{await access(destination);throw new Error('Skill destination already exists; choose a new directory');}
     catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
-    await cp(join(this.resources,'skill'),destination,{recursive:true,errorOnExist:true});
-    await writeFile(join(destination,'installation.json'),JSON.stringify(connection,null,2)+'\n');
-    return {skill:join(destination,'SKILL.md'),...connection};
+    await cp(join(this.resources,mode==='tools'?'api-skill':'skill'),destination,{recursive:true,errorOnExist:true});
+    const metadata={...connection,...(mode==='tools'?{interface:'tools'}:{})};
+    await writeFile(join(destination,'installation.json'),JSON.stringify(metadata,null,2)+'\n');
+    return {skill:join(destination,'SKILL.md'),...metadata};
   }
   async profiles(){await this.ensureDaemon();return this.api('/v1/runtime/profiles');}
   async profile(operation:string,args:Record<string,unknown>){return this.exclusive(async()=>{

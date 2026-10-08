@@ -11,6 +11,10 @@ await cp('../skill','resources/skill',{recursive:true});
 const python=process.env.ASTRA_BUILD_PYTHON??(process.platform==='win32'?'python':'python3');
 const catalog=execFileSync(python,['-B','-m','astra_daemon.commands'],{env:{...process.env,PYTHONPATH:resolve('../runtime/daemon')},encoding:'utf8'});
 await writeFile('resources/game-commands.json',catalog);
+const tools=execFileSync(python,['-B','-m','astra_daemon.commands','--tools'],{env:{...process.env,PYTHONPATH:resolve('../runtime/daemon')},encoding:'utf8'});
+await writeFile('resources/game-tools.json',tools);
+execFileSync(python,['-B','-m','astra_daemon.api_skill',resolve('../skill'),resolve('resources/api-skill')],
+  {env:{...process.env,PYTHONPATH:resolve('../runtime/daemon')},stdio:'inherit'});
 try{await access('resources/release.json');}catch{
   await writeFile('resources/release.json',JSON.stringify({version:version.project_version,
     image:'localhost/astrabridge-runtime:dev',digest:'',development:true,runtime_api:1,game_api:1},null,2)+'\n');

@@ -163,6 +163,39 @@ jobs:
           path: |
             ${{ env.WORK }}/dist/release.json
             ${{ env.WORK }}/dist/*-source.tar.gz
+  deepseek-runner:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      PYTHONPATH: runtime/daemon
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-source
+          path: release-source
+      - name: Use exact release sources
+        run: |
+          git fetch release-source/release.bundle "refs/tags/$RELEASE_VERSION:refs/tags/$RELEASE_VERSION"
+          git checkout --detach "$RELEASE_VERSION"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test and package the optional API runner
+        run: |
+          python -m pip install -r runtime/requirements-dev.txt
+          python -m pip install -e './deepseek-runner[test]'
+          python -m pytest -q deepseek-runner/tests
+          python -m pip wheel --no-deps --wheel-dir dist ./deepseek-runner
+          python -m pip install --no-deps --target "$RUNNER_TEMP/runner-check" dist/*.whl
+          PYTHONPATH="$RUNNER_TEMP/runner-check" python -m deepseek_runner.main --help
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deepseek-runner-release
+          path: dist/*.whl
+          if-no-files-found: error
   desktop:
     needs: runtime
     strategy:
@@ -252,6 +285,9 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or -not $actual.ok) { throw 'Packaged CLI failed' }
           $expected = Get-Content resources/release.json -Raw | ConvertFrom-Json
           if ($actual.result.digest -ne $expected.digest) { throw 'Packaged runtime identity differs' }
+          $tools = & (Join-Path $destination 'astrabridge.exe') agent tools --json | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or -not $tools.ok -or $tools.result.schema_version -ne 1 -or $tools.result.tools.Count -eq 0) { throw 'Packaged native tool export failed' }
+          if ($tools.result.release.digest -ne $expected.digest) { throw 'Tool catalog runtime identity differs' }
           $cliDirectory = Join-Path $env:RUNNER_TEMP 'AstraBridge CLI проверка'
           New-Item -ItemType Directory -Force $cliDirectory | Out-Null
           $cli = Join-Path $cliDirectory 'astrabridge.exe'
@@ -273,7 +309,7 @@ jobs:
             desktop/release/*-windows-x86_64.zip
           if-no-files-found: error
   draft:
-    needs: [runtime, desktop]
+    needs: [runtime, desktop, deepseek-runner]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -298,12 +334,16 @@ jobs:
         with:
           name: runtime-release
           path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: deepseek-runner-release
+          path: dist
       - name: Publish the release tag and draft assets
         run: |
           set -euo pipefail
           git fetch "$RUNNER_TEMP/source/release.bundle" "refs/tags/$RELEASE_VERSION:refs/tags/$RELEASE_VERSION"
           git checkout --detach "$RELEASE_VERSION"
-          (cd dist && sha256sum *.AppImage *-windows-x86_64.zip *-source.tar.gz release.json > SHA256SUMS)
+          (cd dist && sha256sum *.AppImage *-windows-x86_64.zip *-source.tar.gz *.whl release.json > SHA256SUMS)
           git push origin "refs/tags/$RELEASE_VERSION"
           notes="packaging/notes/$RELEASE_VERSION.md"
           if [ ! -f "$notes" ]; then notes=packaging/notes/default.md; fi

@@ -16,6 +16,7 @@ from .protocol import BridgeError, action_timeout, AIR_DIRECTIONS
 from .session import Session
 from .environment import identity
 from .information import SECTIONS
+from .argument_specs import COMMAND_DESCRIPTIONS, CLI_REQUEST_TIMEOUT
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNTIME = ROOT / "runtime"
@@ -36,7 +37,7 @@ def emit(value):
     print(json.dumps(value, ensure_ascii=False, indent=2 if PRETTY else None))
 
 
-def request(op, args=None, timeout=130):
+def request(op, args=None, timeout=CLI_REQUEST_TIMEOUT):
     with socket.socket(socket.AF_UNIX) as connection:
         connection.settimeout(action_timeout(op, args or {}, timeout))
         try:
@@ -242,6 +243,8 @@ def build_parser():
     for name, field in (("key", "key"), ("text", "text"), ("scroll", "steps")):
         p = commands.add_parser(name); p.add_argument(field, type=int if name == "scroll" else str); p.add_argument("--observation", type=int, required=True)
     for name,command_parser in commands.choices.items():
+        if name in COMMAND_DESCRIPTIONS and not command_parser.description:
+            command_parser.description=COMMAND_DESCRIPTIONS[name]
         if name not in {'start','serve','comment'}:
             command_parser.add_argument('--full',action='store_true',default=argparse.SUPPRESS)
             command_parser.add_argument('--request-id',default=argparse.SUPPRESS)

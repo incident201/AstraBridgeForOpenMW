@@ -57,3 +57,11 @@ node_modules/
 /desktop/release/
 /desktop/resources/
 *.AppImage
+
+# Private direct-API sessions and credentials
+deepseek-sessions/
+/deepseek-runner/.env
+/deepseek-runner/*.egg-info/
+/deepseek-runner/src/*.egg-info/
+/deepseek-runner/build/
+/deepseek-runner/dist/

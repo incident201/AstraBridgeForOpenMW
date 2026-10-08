@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "astrabridge-deepseek-runner"
+version = "0.1.0"
+description = "Minimal direct DeepSeek 4.1 Flash runner for AstraBridge native tools"
+requires-python = ">=3.11"
+license = "GPL-3.0-or-later"
+dependencies = ["httpx==0.28.1", "jsonschema==4.26.0"]
+
+[project.optional-dependencies]
+test = ["pytest==9.0.2"]
+
+[project.scripts]
+deepseek-runner = "deepseek_runner.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

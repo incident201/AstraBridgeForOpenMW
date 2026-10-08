@@ -15,9 +15,11 @@ export function parseGame(catalog:Catalog, argv:string[]){
     if(field.choices&&!field.choices.includes(value))throw new Error(`Invalid ${field.name}: choose ${field.choices.join(', ')}`);
     return value;
   };
+  let positionalOnly=false;
   for(let i=0;i<tokens.length;i++){
     const token=tokens[i];
-    if(token.startsWith('--')){
+    if(token==='--'&&!positionalOnly){positionalOnly=true;continue;}
+    if(token.startsWith('--')&&!positionalOnly){
       const equals=token.indexOf('=');const flag=equals<0?token:token.slice(0,equals);
       const field=command.fields.find(field=>field.options.includes(flag));
       if(!field)throw new Error(`Unknown option ${flag}`);

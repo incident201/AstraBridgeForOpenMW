@@ -3,6 +3,12 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {parseGame,type Catalog} from '../main/game-cli';
 const catalog:Catalog=JSON.parse(readFileSync('resources/game-commands.json','utf8'));
+test('positionals after the separator remain data, including host flags and help',()=>{
+  for(const value of ['--config','--help','--pretty','-h','quotes " ; $() кириллица'])
+    assert.deepEqual(parseGame(catalog,['comment','--',value]).args,{text:value});
+  assert.deepEqual(parseGame(catalog,['act','--request-id=test','--','{"move":1,"seconds":0.2}']).args,
+    {move:1,seconds:.2,request_id:'test'});
+});
 test('map actions preserve optional defaults and viewport controls',()=>{
   assert.deepEqual(parseGame(catalog,['map']).args,{});
   assert.deepEqual(parseGame(catalog,['map','local']).args,{action:'local'});

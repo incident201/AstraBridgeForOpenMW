@@ -1,6 +1,6 @@
 {
   "name": "astrabridge",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "private": true,
   "description": "AstraBridge Desktop and CLI for OpenMW",
   "author": "AstraBridge contributors",

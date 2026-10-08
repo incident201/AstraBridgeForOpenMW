@@ -4,10 +4,15 @@ import math
 
 from .outcomes import horizontal_displacement
 from .protocol import BridgeError, number
+from .argument_specs import SELECTOR_SCHEMA, EXPECT_SCHEMA
 
 REF_OPS={'focus','approach','interact','lock','track','strike','cast','target_info',
          'fly','swim','choose','edit','adjust','use_item','select_spell','select_enchanted'}
 META={'select','bind','expect'}
+
+
+def source_for(op):
+    return 'ui' if op in {'choose','edit','adjust'} else 'spells' if op=='select_spell' else 'inventory' if op in {'use_item','select_enchanted'} else 'scene'
 
 
 def validate_step(step, bindings):
@@ -16,8 +21,8 @@ def validate_step(step, bindings):
     selector=step.get('select')
     if selector is not None:
         if op not in REF_OPS or 'ref' in params or not isinstance(selector,dict):raise BridgeError('invalid_selector')
-        if selector.keys()-{'source','name','contains','kind','actor_kind','panel','role','control','instance','nearest'}:raise BridgeError('invalid_selector')
-        default='ui' if op in {'choose','edit','adjust'} else 'spells' if op=='select_spell' else 'inventory' if op in {'use_item','select_enchanted'} else 'scene'
+        if selector.keys()-SELECTOR_SCHEMA['properties'].keys():raise BridgeError('invalid_selector')
+        default=source_for(op)
         if selector.get('source',default)!=default:raise BridgeError('invalid_selector_source')
         if not any(k in selector for k in ('name','contains','control','instance','kind','actor_kind')):raise BridgeError('invalid_selector')
         if 'actor_kind' in selector and (default!='scene' or selector['actor_kind'] not in {'npc','creature'}):raise BridgeError('invalid_selector')
@@ -35,7 +40,7 @@ def validate_step(step, bindings):
         if selector is None or not isinstance(name,str) or not re.fullmatch(r'[A-Za-z][A-Za-z0-9_]*',name):raise BridgeError('invalid_sequence_binding')
         bindings.add(name)
     expectation=step.get('expect',{})
-    if not isinstance(expectation,dict) or expectation.keys()-{'ui_mode','location','location_changed','outcome','inventory_delta','gold_delta','min_horizontal_displacement_m'}:raise BridgeError('invalid_expectation')
+    if not isinstance(expectation,dict) or expectation.keys()-EXPECT_SCHEMA['properties'].keys():raise BridgeError('invalid_expectation')
     for key,value in expectation.items():
         if key=='location_changed':
             if type(value) is not bool:raise BridgeError('invalid_expectation')
@@ -54,7 +59,7 @@ def resolve_step(session, step, bindings):
     selector=step.get('select')
     if selector is None:return params,None
     op=step['op']
-    source=selector.get('source','ui' if op in {'choose','edit','adjust'} else 'spells' if op=='select_spell' else 'inventory' if op in {'use_item','select_enchanted'} else 'scene')
+    source=selector.get('source',source_for(op))
     if source=='scene':rows=session.observe(capture=False).get('scene',{}).get('objects',[])
     elif source=='ui':rows=session.command('ui').get('elements',[])
     else:rows=session.command('inspect',{'view':source}).get('spells' if source=='spells' else 'items',[])

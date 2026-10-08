@@ -1,5 +1,11 @@
 # Sessions, saves and recovery
 
+Host integrations can obtain native function schemas through application
+`astrabridge agent tools --json`. For a tool-based API harness, the host exports
+`astrabridge skill export DIRECTORY --interface tools`; that edition describes
+direct tools instead of terminal invocation. Ordinary skill exports still use
+the calling convention below. Setup and credentials remain the host's job.
+
 Read this for connection/profile issues, save/load, handoff or recovery. Commands follow `astrabridge game` unless marked as application commands.
 
 ## Reproducible environment

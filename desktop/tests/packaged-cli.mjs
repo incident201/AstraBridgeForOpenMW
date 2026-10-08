@@ -20,10 +20,17 @@ async function call(executable,args){
 const app=(...args)=>call(application,['--config',config,...args]);
 try{
  const release=await app('version');
+ const tools=await app('agent','tools','--json');
+ assert.equal(tools.schema_version,1);assert.equal(tools.release.digest,release.digest);
+ assert.ok(tools.tools.some(tool=>tool.name==='astra_observe'&&tool.input_schema.type==='object'));
  await writeFile(config,JSON.stringify({name:'packaged-cli-test',installed:true,digest:release.digest}));
  assert.equal((await app('cli','status')).shadowedBy,null,'AppRun must not report its own command as a conflict');
  await app('skill','export',join(root,'without-command'));
  assert.deepEqual(JSON.parse(await readFile(join(root,'without-command/installation.json'),'utf8')),{executable:application,config});
+ await app('skill','export',join(root,'native-tools'),'--interface','tools');
+ assert.deepEqual(JSON.parse(await readFile(join(root,'native-tools/installation.json'),'utf8')),{executable:application,config,interface:'tools'});
+ const nativeSkill=await readFile(join(root,'native-tools/SKILL.md'),'utf8');
+ assert.ok(nativeSkill.includes('read_skill_reference'));assert.ok(!nativeSkill.includes('astrabridge game'));
  const installed=await app('cli','install');
  assert.equal(installed.enabled,true);assert.equal(installed.pathReady,true);assert.equal(installed.shadowedBy,null);
  assert.equal((await app('cli','status')).pathReady,true);

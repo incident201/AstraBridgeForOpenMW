@@ -137,8 +137,8 @@ knowledge from verified current conditions. Update the single checkpoint after
 meaningful progress, a changed approach and before ending the session; avoid
 rewriting it after every small movement. Save important game milestones separately.
 Use `finish-session` for explicit save/finalize/close, or application
-`astrabridge agent disconnect` for handoff. Application stop/restart does not
-save progress automatically. For an uncertain mutation, recover its receipt
+`astrabridge agent disconnect` for handoff. Application stop attempts a save;
+restart does not save automatically. For an uncertain mutation, recover its receipt
 before retrying; reusing a request ID retrieves the old result rather than
 executing again.
 

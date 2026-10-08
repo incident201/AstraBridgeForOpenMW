@@ -7,6 +7,7 @@ import uuid
 
 from .information import page_rows
 from .protocol import BridgeError, check_result
+from .argument_specs import CHECKPOINT_SCHEMA, KNOWLEDGE_ACTION_FIELDS
 
 
 class Knowledge:
@@ -177,11 +178,11 @@ class Knowledge:
 
     def working_state(self, args, profile, branch, branch_reason=None, place_lookup=None):
         action=args.get('action')
-        fields={'action','checkpoint'} if action=='checkpoint' else {'action'}
+        fields=KNOWLEDGE_ACTION_FIELDS.get(action,{'action'})
         if args.keys()-fields or not profile or not branch:raise BridgeError('invalid_arguments')
         if action=='checkpoint':
             payload=args.get('checkpoint')
-            allowed={'goal','next_step','status','evidence_refs','note_refs','object_refs','place_refs','failed_attempts'}
+            allowed=CHECKPOINT_SCHEMA['properties'].keys()
             if not isinstance(payload,dict) or payload.keys()-allowed:raise BridgeError('invalid_checkpoint')
             payload={**payload,'status':payload.get('status','open')}
             if not isinstance(payload['status'],str) or payload['status'] not in {'open','done','abandoned'}:raise BridgeError('invalid_checkpoint')

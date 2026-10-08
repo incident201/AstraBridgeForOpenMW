@@ -60,6 +60,9 @@ unavailable, choose **Stop without saving** or **Cancel**.
 
 ## Connect an agent
 
+For a direct DeepSeek API connection, see the optional
+[DeepSeek runner](docs/deepseek-runner.md).
+
 In **Setup → Storage and skill**, select **Enable CLI command** to register
 `astrabridge` for your user. Linux uses `~/.local/bin`; add it to PATH if Setup
 requests it. On Windows the user PATH is registered automatically. Restart the

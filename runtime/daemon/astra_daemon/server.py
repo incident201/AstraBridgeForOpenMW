@@ -85,7 +85,7 @@ def application(runtime: Runtime, token: str):
         return answer(await runtime.game(request.headers.get('X-Astra-Session'),value['op'],args))
     async def schema(request):return answer(commands)
     async def agent(request):
-        action=request.match_info['action']
+        action=request.match_info.get('action','status')
         if action=='connect':
             data=await body(request);return answer(await runtime.acquire_agent(data.get('name','Gameplay agent'),data.get('profile')))
         if action=='disconnect':return answer(await runtime.release(request.headers.get('X-Astra-Session')))

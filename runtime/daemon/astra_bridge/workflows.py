@@ -5,15 +5,11 @@ import re
 from .protocol import BridgeError, number, validate, ACTION_DEFAULTS
 from . import selectors
 from .outcomes import MotionSpan, summarize, step_result, TIME_LIMITS
-
-
-SEQUENCE_OPS = {'jump','air_move','act','look','go','walk','revisit','return_to','approach','interact','move_local',
-                'use_item','select_spell','select_enchanted','cast','strike','chain','wait_until',
-                'trigger','choose','edit','adjust','focus','fly','swim','target_info','rest','buy','travel','unlock','lock'}
+from .argument_specs import SEQUENCE_OPS, SEQUENCE_PROPERTIES
 
 
 def validate_sequence(args):
-    if args.keys()-{'actions','max_seconds','stop_health_pct','stop_on_damage'}: raise BridgeError('invalid_arguments')
+    if args.keys()-SEQUENCE_PROPERTIES.keys(): raise BridgeError('invalid_arguments')
     steps = args.get('actions')
     if not isinstance(steps,list) or not steps: raise BridgeError('invalid_arguments')
     number(args.get('max_seconds',60),.02,math.inf)

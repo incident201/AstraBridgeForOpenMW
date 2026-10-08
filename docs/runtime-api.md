@@ -14,6 +14,31 @@ The Windows backend reads WSLC's structured inspection results. Container
 existence does not depend on the language of Windows diagnostic messages;
 service/connection failures are reported rather than treated as missing data.
 
+## Native-tool definitions
+
+`astrabridge agent tools --json` exports the compiled game-tool catalog without
+starting a game or daemon. The normal CLI response envelope contains
+`schema_version`, release identity and `tools`. Each tool has a name,
+description, JSON Schema `input_schema` and an `invocation` binding to the
+existing `game` command, including JSON/boolean encoding and timeout policy.
+
+Definitions are generated from the maintained parser and shared declarative
+composition arguments. Existing game-state validation remains authoritative.
+Presentation and transport fields such as `pretty` and `request_id` are not
+model arguments. JSON-valued actions are exposed as structured parameters,
+not strings that a model must parse or construct manually.
+
+`astrabridge skill export DIRECTORY --interface tools` exports the native-tool
+presentation of the gameplay skill. The default remains `--interface cli`.
+Game rules and reference prose are reused; host setup and terminal parsing
+examples are omitted from the model-facing edition. See the
+[direct DeepSeek runner](deepseek-runner.md) for host setup and media/history
+handling.
+
+The CLI accepts `--` before positional game arguments. Global configuration
+and help options are not recognized after this separator, so positional text
+such as `--config` stays data.
+
 ## Connection
 
 The default host ports are `127.0.0.1:18770` for HTTP/WebSocket and

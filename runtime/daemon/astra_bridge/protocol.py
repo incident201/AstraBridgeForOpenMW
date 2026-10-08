@@ -5,6 +5,9 @@ import math
 import os
 import time
 from pathlib import Path
+from .argument_specs import (ACTION_DEFAULTS, TRIGGERS, ACT_SCHEMA, ACT_LIMITS,
+                             ACT_BOOLEANS, CHAIN_SCHEMA, CHAIN_STEPS, CHAIN_MOVEMENT, MAP_ARGUMENT_FIELDS,
+                             LONG_ACTION_TIMEOUT, ACTION_TIMEOUT_MULTIPLIER)
 
 
 class BridgeError(Exception):
@@ -183,23 +186,14 @@ def number(value, low, high):
 
 AIR_DIRECTIONS = ('none','forward','back','left','right','forward-left','forward-right','back-left','back-right')
 
-ACTION_DEFAULTS = {'jump':8, 'air_move':.5, 'act':.25, 'track':1, 'go':12, 'walk':8, 'approach':30,
-                   'interact':30, 'move_local':30, 'fly':10, 'evade':4, 'chain':12,
-                   'wait_until':30, 'sequence':60, 'revisit':60, 'return_to':60}
-ACTION_DEFAULTS.update(rest=30,buy=30,travel=30,swim=30)
-
-
 def action_timeout(op, args, base):
     """Watchdogs bound stalled requests, not caller-selected action durations."""
-    if op in {'record_stop','finish_session','shutdown'}: return max(base,600)
+    if op in {'record_stop','finish_session','shutdown'}: return max(base,LONG_ACTION_TIMEOUT)
     if op in ACTION_DEFAULTS and isinstance(args, dict):
         seconds = args.get('max_seconds' if op in {'chain','sequence'} else 'seconds', ACTION_DEFAULTS[op])
         number(seconds, .02, math.inf)
-        return base + 2 * seconds
+        return base + ACTION_TIMEOUT_MULTIPLIER * seconds
     return base
-
-
-TRIGGERS = {"Activate", "ToggleWeapon", "ToggleSpell", "Jump", "Inventory", "Journal", "GameMenu", "Rest"}
 
 
 def validate(op: str, args: dict) -> None:
@@ -211,7 +205,7 @@ def validate(op: str, args: dict) -> None:
         "inspect": {"view", "page", "topic"}, "use_item": {"ref"}, "select_spell": {"ref"}, "select_enchanted":{"ref"},
         "trigger": {"name"},
         "read": {"ref", "offset", "limit"}, "resetNPC": {"reason"},
-        "act": {"seconds", "move", "strafe", "yaw", "pitch", "attack", "run", "sneak", "trigger", "target"},
+        "act": set(ACT_SCHEMA['properties']),
         "jump":{"direction","run","seconds"}, "air_move":{"direction","run","seconds"},
         "look":{"heading_deg","pitch_deg"},
         "ui":set(),"map":{'action','dx','dy','factor','fit'},"choose":{"ref"},"focus":{"ref","wait_ready"},"approach":{"ref","reach","run","under_fire","seconds"},"interact":{"ref","approach","run","seconds","under_fire","adjust_viewpoint"},
@@ -227,14 +221,13 @@ def validate(op: str, args: dict) -> None:
         "track":{"ref","seconds","attack"},
         "lock":{"ref"},"unlock":set(),
         "strike":{"ref","charge","air"},"cast":{"ref","air"},
-        "chain":{"ref","air","actions","max_seconds","movement","stop_health_pct","pursue"},
+        "chain":set(CHAIN_SCHEMA['properties']),
     }
     if op not in fields or args.keys() - fields[op]:
         raise BridgeError("invalid_arguments")
     if op=='map':
         action=args.get('action')
-        allowed={None:set(),'local':set(),'world':set(),'view':set(),'center':set(),'markers':set(),'close':set(),
-                 'pan':{'dx','dy'},'zoom':{'factor','fit'}}
+        allowed=MAP_ARGUMENT_FIELDS
         if not isinstance(action,(str,type(None))) or action not in allowed or args.keys()-({'action'}|allowed[action]):
             raise BridgeError('invalid_arguments')
         if action=='pan':
@@ -270,11 +263,10 @@ def validate(op: str, args: dict) -> None:
         if 'pitch_deg' in args:number(args['pitch_deg'],-80,80)
     if op=='focus' and 'wait_ready' in args and type(args['wait_ready']) is not bool:raise BridgeError('invalid_arguments')
     if op == "act":
-        for key, lo, hi in [("seconds", .02, math.inf), ("move", -1, 1), ("strafe", -1, 1),
-                            ("yaw", -180, 180), ("pitch", -90, 90)]:
+        for key, (lo, hi) in ACT_LIMITS.items():
             if key in args:
-                number(args[key], lo, hi)
-        for key in ("attack", "run", "sneak"):
+                number(args[key], lo, math.inf if hi is None else hi)
+        for key in ACT_BOOLEANS:
             if key in args and type(args[key]) is not bool:
                 raise BridgeError("invalid_arguments")
         if "trigger" in args and args["trigger"] not in TRIGGERS:
@@ -343,28 +335,33 @@ def validate(op: str, args: dict) -> None:
         if args.get('air') and 'ref' in args:raise BridgeError('invalid_arguments')
         if op=='strike':number(args.get('charge',.8),.1,1.5)
     if op=='chain':
-        number(args.get('max_seconds',12),.5,math.inf)
-        number(args.get('stop_health_pct',0),0,100)
+        for key in ('max_seconds','stop_health_pct'):
+            spec=CHAIN_SCHEMA['properties'][key]
+            number(args.get(key,spec['default']),spec['minimum'],spec.get('maximum',math.inf))
         if 'pursue' in args and type(args['pursue']) is not bool:raise BridgeError('invalid_arguments')
         if args.get('pursue') and (args.get('air') or 'movement' in args):raise BridgeError('invalid_arguments')
         if 'movement' in args:
             m=args['movement']
-            if not isinstance(m,dict) or m.keys()-{'direction','meters','run','face_target'}:raise BridgeError('invalid_arguments')
-            if m.get('direction') not in {'forward','back','left','right'}:raise BridgeError('invalid_arguments')
-            number(m.get('meters',2),.25,math.inf)
+            if not isinstance(m,dict) or m.keys()-CHAIN_MOVEMENT['properties'].keys():raise BridgeError('invalid_arguments')
+            if m.get('direction') not in CHAIN_MOVEMENT['properties']['direction']['enum']:raise BridgeError('invalid_arguments')
+            spec=CHAIN_MOVEMENT['properties']['meters'];number(m.get('meters',spec['default']),spec['minimum'],math.inf)
             for k in ('run','face_target'):
                 if k in m and type(m[k]) is not bool:raise BridgeError('invalid_arguments')
             if m.get('face_target') is False and 'ref' in args:raise BridgeError('invalid_arguments')
         actions=args.get('actions')
         if not isinstance(actions,list) or not len(actions)>=1:raise BridgeError('invalid_arguments')
         for step in actions:
-            if not isinstance(step,dict) or step.get('op') not in {'strike','cast','wait'}:raise BridgeError('invalid_arguments')
-            fields={'op','charge'} if step['op']=='strike' else {'op','seconds'} if step['op']=='wait' else {'op','spell','item'}
+            if not isinstance(step,dict) or step.get('op') not in CHAIN_STEPS:raise BridgeError('invalid_arguments')
+            fields=CHAIN_STEPS[step['op']]['properties'].keys()
             if step.keys()-fields or 'spell' in step and 'item' in step:raise BridgeError('invalid_arguments')
-            if step['op']=='strike':number(step.get('charge',.8),.1,1.5)
-            if step['op']=='wait':number(step.get('seconds',.5),.02,math.inf)
+            for key in ('charge','seconds'):
+                if key in CHAIN_STEPS[step['op']]['properties']:
+                    spec=CHAIN_STEPS[step['op']]['properties'][key]
+                    number(step.get(key,spec['default']),spec['minimum'],spec.get('maximum',math.inf))
             for key in ('spell','item'):
-                if key in step and (not isinstance(step[key],str) or not 1<=len(step[key])<=200):raise BridgeError('invalid_arguments')
+                if key in step:
+                    spec=CHAIN_STEPS[step['op']]['properties'][key]
+                    if not isinstance(step[key],str) or not spec['minLength']<=len(step[key])<=spec['maxLength']:raise BridgeError('invalid_arguments')
     if op == 'read':
         for key, default, low, high in (('offset', 0, 0, 100000000), ('limit', 4000, 1, 8000)):
             value = args.get(key, default)

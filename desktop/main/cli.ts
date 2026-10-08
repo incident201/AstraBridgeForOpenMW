@@ -4,7 +4,7 @@ import {Core} from './core';
 import {gameHelp,parseGame,type Catalog} from './game-cli';
 
 const argv=process.argv.slice(2);
-function take(name:string){const index=argv.indexOf(name);if(index<0)return undefined;if(index===argv.length-1)throw new Error(`Missing ${name}`);return argv.splice(index,2)[1];}
+function take(name:string){const index=argv.indexOf(name),end=argv.indexOf('--');if(index<0||end>=0&&index>=end)return undefined;if(index===argv.length-1)throw new Error(`Missing ${name}`);return argv.splice(index,2)[1];}
 const config=take('--config');
 const resources=process.env.ASTRA_RESOURCES??join(dirname(process.execPath),'resources/astra');
 const core=new Core(resources,config,text=>process.stderr.write(typeof text==='string'?text:text.type==='stage'?text.message+'\n':`${text.phase}: ${(text.received/1048576).toFixed(1)} MiB received, ${text.elapsed.toFixed(0)}s elapsed\n`));
@@ -15,14 +15,14 @@ Usage: astrabridge [--config FILE] <command>
           [--game-mode mount|copy] [--recordings DIRECTORY] [--data-relative "Data Files"]
           [--development --repository DIRECTORY]
   start [--gpu auto|nvidia|GPU_ID] | stop [--without-save | --cancel] | restart [--gpu auto|nvidia|GPU_ID] | status | update
-  agent connect [--name NAME] [--profile ID] | disconnect | status
+  agent connect [--name NAME] [--profile ID] | disconnect | status | tools --json
   game <command> [arguments]
   config show | set JSON
   gpus
   recordings
   logs [--name FILE]
   cli install | status | uninstall
-  skill export DIRECTORY
+  skill export DIRECTORY [--interface cli|tools]
   version
 
 Run astrabridge without arguments to open Desktop.
@@ -35,7 +35,8 @@ async function main(){
   let result:any;let pretty=Boolean(argv.includes('--pretty'));
   if(command==='game'){
     const catalog:Catalog=JSON.parse(await readFile(join(resources,'game-commands.json'),'utf8'));
-    if(argv.includes('--help')||argv.includes('-h')||!argv.length){console.log(gameHelp(catalog,argv[0]?.startsWith('-')?undefined:argv[0]));return;}
+    const end=argv.indexOf('--'),options=end<0?argv:argv.slice(0,end);
+    if(options.includes('--help')||options.includes('-h')||!argv.length){console.log(gameHelp(catalog,argv[0]?.startsWith('-')?undefined:argv[0]));return;}
     const request=parseGame(catalog,argv);pretty=request.pretty;result=await core.game(request.op,request.args);
   }else if(command==='install'){
     const game=take('--game'),storage=take('--storage'),encoding=take('--encoding');
@@ -60,10 +61,14 @@ async function main(){
     else throw Error('Use cli install, cli status or cli uninstall');
   }else if(command==='agent'){
     const action=argv.shift();
-    if(action==='connect')result=await core.connect(take('--name'),take('--profile'));
+    if(action==='tools'){
+      if(argv.some(v=>v!=='--json'))throw Error('Use agent tools --json');
+      result={...JSON.parse(await readFile(join(resources,'game-tools.json'),'utf8')),release:await core.release()};
+    }
+    else if(action==='connect')result=await core.connect(take('--name'),take('--profile'));
     else if(action==='disconnect')result=await core.disconnect();
     else if(action==='status')result=await core.agentStatus();
-    else throw new Error('Use agent connect, disconnect or status');
+    else throw new Error('Use agent connect, disconnect, status or tools --json');
   }else if(command==='config'){
     const action=argv.shift();await core.ensureDaemon();
     if(action==='show')result=await core.api('/v1/runtime/config');
@@ -77,8 +82,9 @@ async function main(){
   }
   else if(command==='logs')result=await core.logs(take('--name'));
   else if(command==='skill'&&argv.shift()==='export'){
+    const mode=take('--interface')??'cli';if(!['cli','tools'].includes(mode))throw Error('Use --interface cli or tools');
     if(!argv[0])throw new Error('Provide a skill destination directory');
-    result=await core.exportSkill(argv[0]);
+    result=await core.exportSkill(argv[0],mode as 'cli'|'tools');
   }else if(command==='version'||command==='--version')result=await core.release();
   else throw new Error(`Unknown command ${command}. Use --help.`);
   console.log(JSON.stringify({ok:true,result},null,pretty?2:undefined));
