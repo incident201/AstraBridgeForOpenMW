@@ -163,7 +163,7 @@ jobs:
           path: |
             ${{ env.WORK }}/dist/release.json
             ${{ env.WORK }}/dist/*-source.tar.gz
-  deepseek-runner:
+  agent-runner:
     needs: prepare
     runs-on: ubuntu-24.04
     env:
@@ -186,14 +186,14 @@ jobs:
       - name: Test and package the optional API runner
         run: |
           python -m pip install -r runtime/requirements-dev.txt
-          python -m pip install -e './deepseek-runner[test]'
-          python -m pytest -q deepseek-runner/tests
-          python -m pip wheel --no-deps --wheel-dir dist ./deepseek-runner
+          python -m pip install -e './agent-runner[test]'
+          python -m pytest -q agent-runner/tests
+          python -m pip wheel --no-deps --wheel-dir dist ./agent-runner
           python -m pip install --no-deps --target "$RUNNER_TEMP/runner-check" dist/*.whl
-          PYTHONPATH="$RUNNER_TEMP/runner-check" python -m deepseek_runner.main --help
+          PYTHONPATH="$RUNNER_TEMP/runner-check" python -m astrabridge_runner.main --help
       - uses: actions/upload-artifact@v4
         with:
-          name: deepseek-runner-release
+          name: agent-runner-release
           path: dist/*.whl
           if-no-files-found: error
   desktop:
@@ -309,7 +309,7 @@ jobs:
             desktop/release/*-windows-x86_64.zip
           if-no-files-found: error
   draft:
-    needs: [runtime, desktop, deepseek-runner]
+    needs: [runtime, desktop, agent-runner]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -336,7 +336,7 @@ jobs:
           path: dist
       - uses: actions/download-artifact@v4
         with:
-          name: deepseek-runner-release
+          name: agent-runner-release
           path: dist
       - name: Publish the release tag and draft assets
         run: |

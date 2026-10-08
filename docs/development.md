@@ -10,8 +10,9 @@
   and the patched OpenMW 0.51.0 source snapshot.
 - `runtime/container` and `runtime/graphics`: image dependencies and private display.
 - `desktop`: Application Core, Podman/WSL backends, Electron preload and Svelte UI.
-- `deepseek-runner`: optional direct DeepSeek host client, with native tools,
-  full text history and a bounded image context. It uses the existing CLI.
+- `agent-runner`: optional host client for ChatGPT OAuth/Responses and DeepSeek,
+  with native provider history, checkpoint compaction and session continuation.
+  It executes game tools through the existing CLI.
 
 The runtime API and Desktop are one application generation. There is no portable
 Python installer or separate standalone gameplay CLI product. The internal
@@ -20,8 +21,10 @@ Python command module remains useful for schema generation and development tests
 The build also generates `game-tools.json` and the API skill edition from those
 definitions and the maintained skill. Runner schemas are not a second copy of
 game definitions. To run its host-side checks, install
-`./deepseek-runner[test]` and include `deepseek-runner/tests` in pytest alongside
-the runtime and packaging suites. No API key is required for these tests.
+`./agent-runner[test]` and include `agent-runner/tests` in pytest alongside
+the runtime and packaging suites. Tests use local/mock OAuth and API servers;
+they require no real credentials or subscription. The optional runner is one
+Python wheel and is independent of the OCI runtime dependencies.
 
 ## Workspace and native build
 

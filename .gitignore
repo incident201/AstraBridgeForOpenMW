@@ -60,8 +60,10 @@ node_modules/
 
 # Private direct-API sessions and credentials
 deepseek-sessions/
-/deepseek-runner/.env
-/deepseek-runner/*.egg-info/
-/deepseek-runner/src/*.egg-info/
-/deepseek-runner/build/
-/deepseek-runner/dist/
+astrabridge-sessions/
+chatgpt-auth.json
+/agent-runner/.env
+/agent-runner/*.egg-info/
+/agent-runner/src/*.egg-info/
+/agent-runner/build/
+/agent-runner/dist/

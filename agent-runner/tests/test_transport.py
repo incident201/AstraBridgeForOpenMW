@@ -7,9 +7,11 @@ import pytest
 from jsonschema import Draft202012Validator
 
 from astra_bridge.cli import build_parser
-from deepseek_runner.bridge import BridgeFailure, invocation, tool_timeout
-from deepseek_runner.resources import Resources, ResourceFailure
-from deepseek_runner.history import History
+from astrabridge_runner.bridge import BridgeFailure, invocation, tool_timeout
+from astrabridge_runner.resources import Resources, ResourceFailure
+from astrabridge_runner.history import History
+from astrabridge_runner.providers.deepseek import DeepSeek
+from astrabridge_runner.types import Reply, ToolCall
 
 
 def calls(f):return [json.loads(line) for line in (f['root']/'calls.jsonl').read_text().splitlines()]
@@ -43,7 +45,7 @@ def test_catalog_validation_errors_and_unknown_tools_have_no_execution(fixture,m
     assert len(calls(f))==before
     monkeypatch.setenv('DEEPSEEK_API_KEY','secret-test-key')
     # A fresh bridge strips the key from all spawned child processes.
-    from deepseek_runner.bridge import Bridge
+    from astrabridge_runner.bridge import Bridge
     child=Bridge(f['skill'],f['journal']);child.load_tools();child.connect();child.call('astra_act','{"move":1,"seconds":0.2}','call');child.disconnect()
     assert not any(c['has_key'] for c in calls(f))
 
@@ -67,19 +69,19 @@ def test_time_budgets_come_from_bridge_not_a_short_global_timeout(fixture):
 
 def test_images_are_archived_before_source_cleanup_and_only_latest_is_sent(fixture):
     f=fixture;b=f['bridge'];b.load_tools();b.connect();r=Resources(f['skill'],f['journal'])
-    history=History('rules',f['journal'],r)
-    history.assistant({'role':'assistant','content':None,'reasoning_content':'reasoning retained','tool_calls':[]})
+    history=History(DeepSeek('secret-test-key',f['journal']),'rules',f['journal'],r,image_limit=1)
+    history.assistant(Reply([{'role':'assistant','content':None,'reasoning_content':'reasoning retained','tool_calls':[]}],''),[])
     refs=[]
     for i in range(2):
         result=b.call('astra_observe','{}',f'call{i}')
         result,ref=r.collect(result,b.image_roots,f'call{i}');refs.append(ref)
-        history.tool(f'call{i}',result);history.image(ref,f'call{i}')
+        history.tool(ToolCall(f'call{i}','astra_observe','{}'),result,ref)
     assert len(refs)==2 and refs[0]!=refs[1]
     for p in (f['storage']/'exports/default').glob('*.png'):p.unlink()
     payload=history.payload();images=[part for m in payload if isinstance(m['content'],list) for part in m['content'] if part['type']=='image_url']
     assert len(images)==1 and len([m for m in payload if m['role']=='tool'])==2
-    assert payload[1]['reasoning_content']=='reasoning retained'
-    old,_=r.saved_image(refs[0]);history.tool('old',old);history.image(refs[0],'old',True)
+    assert payload[0]['reasoning_content']=='reasoning retained'
+    old,_=r.saved_image(refs[0]);history.tool(ToolCall('old','view_saved_image','{}'),old,refs[0],True)
     selected=[part for m in history.payload() if isinstance(m['content'],list) for part in m['content'] if part['type']=='image_url']
     assert len(selected)==1
     data=base64.b64decode(selected[0]['image_url']['url'].split(',',1)[1])

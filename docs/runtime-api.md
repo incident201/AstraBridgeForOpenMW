@@ -32,7 +32,7 @@ not strings that a model must parse or construct manually.
 presentation of the gameplay skill. The default remains `--interface cli`.
 Game rules and reference prose are reused; host setup and terminal parsing
 examples are omitted from the model-facing edition. See the
-[direct DeepSeek runner](deepseek-runner.md) for host setup and media/history
+[AstraBridge Runner](agent-runner.md) for host setup and media/history
 handling.
 
 The CLI accepts `--` before positional game arguments. Global configuration

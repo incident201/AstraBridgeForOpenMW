@@ -4,11 +4,31 @@ This document summarizes practical results from running different AI models with
 
 These results describe how the models behave specifically when playing Morrowind through AstraBridge. They should not be treated as a general ranking of the models.
 
+## Current status
+
+| Model | Status | Recommended harness |
+| --- | --- | --- |
+| GPT-6 Astra | Great. Fully playable. | Codex CLI |
+| GPT-6.1 Sol | Great. Fully playable. | Codex CLI |
+| GPT-6 Luna | Very bad. Playable. | Codex CLI |
+| Gemini 3.8 Flash | Mediocre. Playable. | agy CLI |
+| Grok 4.7 | Not playable. | N/A |
+| DeepSeek 4.1 Flash | Bad. Playable. | [astrabridge-runner](agent-runner.md) |
+| Claude (Opus 5.5 / Sonnet 5.5) | Mediocre. Playable. | Claude CLI |
+
 ## GPT models
 
-All tests of Astra, Sol, and Luna were run through Codex CLI as the harness on Linux.
+Initial tests of Astra, Sol, and Luna were run through Codex CLI as the harness on Linux.
 
 All three models handle context compaction well: they retain the current goal and continue working after compaction. Tests with longer context windows did not produce a visible improvement in quality.
+
+### Harness comparison
+
+GPT-6.1 Sol (xhigh) and GPT-6 Luna (max) were also tested on Linux through AstraBridge's own runner, connected directly to the OpenAI Responses API. The runner presented AstraBridge controls as native tools, returned complete structured results, and supplied screenshots automatically.
+
+These tests did not show a meaningful difference in gameplay quality compared with Codex CLI. Luna continued to struggle with navigation and repeat familiar routes, even in the opening tutorial. Sol continued to navigate and progress through the tutorial without significant difficulty.
+
+These results support using Codex CLI as a suitable harness for GPT models playing through AstraBridge. The custom runner is primarily useful for more controlled experimental comparisons between models; Codex CLI remains a practical choice for ordinary play.
 
 ### GPT-6 Astra (xhigh)
 

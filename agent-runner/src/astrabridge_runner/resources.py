@@ -15,6 +15,15 @@ class Resources:
         self.references={p.stem:p.resolve() for p in (self.skill/'references').glob('*.md')
                          if p.resolve().is_relative_to(self.skill)}
 
+    def restore(self):
+        path=self.journal.root/'images.json'
+        if not path.exists():return
+        self.images=json.loads(path.read_text(encoding='utf-8'))
+        for ref,info in self.images.items():
+            if ref!=info['image_ref'] or not Path(info['path']).resolve().is_relative_to((self.journal.root/'images').resolve()):
+                raise ResourceFailure('Invalid image archive in saved session.')
+        self.paths={(info['original_path'],info['sha256']):ref for ref,info in self.images.items()}
+
     def read_reference(self,ref):
         if ref not in self.references:raise ResourceFailure('Unknown skill reference ID.')
         path=self.references[ref]

@@ -5,6 +5,7 @@ import subprocess
 import time
 import uuid
 import tempfile
+import shutil
 from pathlib import Path
 
 from jsonschema import Draft202012Validator
@@ -55,14 +56,15 @@ def tool_timeout(tool,args):
 
 
 class Bridge:
-    def __init__(self,skill,journal,executable=None):
+    def __init__(self,skill,journal,executable=None,agent_label='AstraBridge Runner'):
         self.skill=Path(skill).resolve();self.journal=journal;self.owned=False;self.active=None
         meta=load_json((self.skill/'installation.json').read_text(encoding='utf-8'))
         if meta.get('interface')!='tools':raise BridgeFailure('Export the native-tool skill with --interface tools first.')
         self.prefix=[str(executable or meta['executable']),'--config',meta['config']]
         self.original_prefix=list(self.prefix);self.private=None
-        self.agent_name='DeepSeek 4.1 Flash '+self.journal.root.name
-        self.env={k:v for k,v in os.environ.items() if k!='DEEPSEEK_API_KEY'}
+        self.agent_name=agent_label+' '+self.journal.root.name
+        private={'DEEPSEEK_API_KEY','OPENAI_API_KEY','ACCESS_TOKEN','REFRESH_TOKEN','OPENAI_ACCESS_TOKEN','OPENAI_REFRESH_TOKEN'}
+        self.env={k:v for k,v in os.environ.items() if k.upper() not in private}
         self.tools={};self.validators={};self.image_roots=[];self.status=None
 
     def run(self,args,timeout=130,original=False):
@@ -124,6 +126,7 @@ class Bridge:
         data=Path(self.original_prefix[2]).read_bytes()
         fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
         with os.fdopen(fd,'wb') as out:out.write(data)
+        self.journal.write('connection.json',{'name':self.agent_name,'config':str(path)})
         self.prefix=[self.original_prefix[0],'--config',str(path)]
         profile=(self.status.get('profile') or (self.status.get('runtime') or {}).get('profile') or {}).get('id')
         args=['agent','connect','--name',self.agent_name]
@@ -134,6 +137,28 @@ class Bridge:
         if profile:self.image_roots=[self.image_roots[0]/profile]
         self.journal.event('connected',result=connected)
         return connected
+
+    def recover_lease(self):
+        owner=(self.status.get('runtime') or {}).get('owner',{})
+        marker=self.journal.root/'connection.json'
+        if owner.get('mode')!='agent' or owner.get('name')!=self.agent_name or not marker.exists():return
+        if self.status.get('session_end'):return
+        value=load_json(marker.read_text(encoding='utf-8'))
+        path=Path(value['config']).resolve()
+        if value.get('name')!=self.agent_name or not path.is_relative_to(self.journal.root.parent.resolve()) or not path.parent.name.startswith('.connection-') or path.name!='installation.json':
+            raise BridgeFailure('Invalid saved connection descriptor.')
+        if not path.exists():raise BridgeFailure('The previous agent connection still owns control. End that connection in Desktop before resuming.')
+        cfg=load_json(path.read_text(encoding='utf-8'));original=load_json(Path(self.original_prefix[2]).read_text(encoding='utf-8'))
+        if any(cfg.get(key)!=original.get(key) for key in ('name','stateVolume')):raise BridgeFailure('Saved connection belongs to another installation.')
+        prefix=self.prefix
+        try:
+            self.prefix=[prefix[0],'--config',str(path)]
+            result=self.run(['agent','disconnect'],30)
+            if not result['ok']:raise BridgeFailure('Unable to release the interrupted connection. End it in Desktop before resuming.',result)
+            self.journal.event('interrupted_connection_released',result=result)
+            shutil.rmtree(path.parent);marker.unlink(missing_ok=True)
+            self.status['runtime']['owner']={'mode':'idle','name':None}
+        finally:self.prefix=prefix
 
     def check_connection(self):
         result=self.run(['agent','status'],30,original=True)
@@ -147,7 +172,7 @@ class Bridge:
             return {'ok':False,'error':'agent_not_connected','message':'This runner no longer owns the agent connection.'}
         return None
 
-    def call(self,name,arguments,call_id):
+    def call(self,name,arguments,call_id,execution_id=None):
         if name not in self.tools:return {'ok':False,'error':'unknown_tool'}
         try:
             args=load_json(arguments)
@@ -156,16 +181,17 @@ class Bridge:
         except (ValueError,TypeError) as exc:return {'ok':False,'error':'invalid_tool_arguments','message':str(exc)}
         request_id=uuid.uuid4().hex
         tool=self.tools[name]
-        self.journal.event('tool_start',name=name,call_id=call_id,request_id=request_id,arguments=args)
+        self.journal.event('tool_start',name=name,call_id=call_id,execution_id=execution_id,request_id=request_id,arguments=args)
         try:result=self.run(invocation(tool,args,request_id),tool_timeout(tool,args))
         except BridgeFailure as exc:result={**(exc.result or {'ok':False,'error':'tool_transport_failed'}),'request_id':request_id}
-        self.journal.event('tool_result',name=name,call_id=call_id,result=result)
+        self.journal.event('tool_result',name=name,call_id=call_id,execution_id=execution_id,result=result)
         return result
 
     def disconnect(self):
         if not self.owned:
             if self.active and self.active.poll() is None:self.active.terminate()
             if self.private:self.private.cleanup();self.private=None
+            (self.journal.root/'connection.json').unlink(missing_ok=True)
             return
         try:
             if self.active:
@@ -179,3 +205,4 @@ class Bridge:
         finally:
             self.owned=False
             if self.private:self.private.cleanup();self.private=None
+            (self.journal.root/'connection.json').unlink(missing_ok=True)

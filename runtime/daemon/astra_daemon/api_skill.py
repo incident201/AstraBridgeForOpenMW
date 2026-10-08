@@ -122,9 +122,11 @@ before deciding on a dependent action. Do not invent handles or hidden knowledge
 Tool results are structured objects. Preserve and read their `summary`,
 `feedback`, movement diagnostics, errors and observations. `ok:true` confirms a
 returned request, not successful gameplay. New screenshots are displayed
-automatically. Only the most recently selected image is present in the model
-context; earlier text remains. Use `view_saved_image` with a supplied `image_ref`
-to see an earlier frame. Historical frames are not current game state.
+automatically. A small recent image window is present in the model context;
+earlier images remain available in the archive. Use `view_saved_image` with a supplied `image_ref`
+to see an earlier frame. Historical frames are not current game state. A runner
+may replace older text with a model-written context checkpoint. After resuming
+or restoring context, verify current state and obtain fresh interaction handles.
 
 If `user_requested_stop` is returned, stop taking game actions and notify the
 host. Never restart or reconnect behind the user's back. Host installation,

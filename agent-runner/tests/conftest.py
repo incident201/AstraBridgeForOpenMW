@@ -6,8 +6,8 @@ import pytest
 
 from astra_daemon.commands import tools_catalog
 from astra_daemon.api_skill import build_api_skill
-from deepseek_runner.journal import Journal
-from deepseek_runner.bridge import Bridge
+from astrabridge_runner.journal import Journal
+from astrabridge_runner.bridge import Bridge
 
 
 @pytest.fixture
@@ -28,7 +28,7 @@ with (root/'calls.jsonl').open('a') as f:f.write(json.dumps({'args':args,'has_ke
 state_file=root/'state.json';state=json.loads(state_file.read_text()) if state_file.exists() else {'images':0,'moves':0}
 def emit(result):print(json.dumps({'ok':True,'result':result}));state_file.write_text(json.dumps(state));sys.exit(0)
 if args[:2]==['agent','tools']:emit(json.loads((root/'tools.json').read_text()))
-if args==['status']:emit({'storageDirectory':str(root/'storage'),'runtime':{'owner':{'mode':'idle'}}})
+if args==['status']:emit({'storageDirectory':str(root/'storage'),'runtime':{'owner':state.get('owner',{'mode':'idle'})}})
 if args[:2]==['agent','connect']:
  state['owner']={'mode':'agent','name':args[args.index('--name')+1]};emit({'profile':{'id':'default','name':'Fixture'}})
 if args==['agent','status']:emit(state.get('owner',{'mode':'idle','name':None}))

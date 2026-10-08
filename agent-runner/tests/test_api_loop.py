@@ -6,8 +6,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import httpx
 import pytest
 
-from deepseek_runner.client import DeepSeek, APIError
-from deepseek_runner.runner import Runner
+from astrabridge_runner.providers.deepseek import DeepSeek
+from astrabridge_runner.types import ProviderError as APIError
+from astrabridge_runner.runner import Runner
 
 
 def call(name,args,identifier='call'):
@@ -31,7 +32,7 @@ class FakeDeepSeek:
             def do_GET(self):
                 assert self.path=='/models'
                 self.send({'data':[{'id':'deepseek-flash','name':'DeepSeek-V4.1-Flash',
-                    'input_modalities':['text','image'],'effort':{'supported_levels':['low','high','max']}}]})
+                    'context_window':1048576,'input_modalities':['text','image'],'effort':{'supported_levels':['low','high','max']}}]})
             def do_POST(self):
                 assert self.path=='/chat/completions'
                 payload=json.loads(self.rfile.read(int(self.headers['Content-Length'])))
@@ -62,7 +63,7 @@ def test_complete_native_loop_preserves_text_reasoning_and_only_one_image(fixtur
         reply(8,content='Second goal done.'),
     ]
     server=FakeDeepSeek(responses);api=DeepSeek('secret-test-key',f['journal'],server.url)
-    output=[];runner=Runner(f['skill'],f['journal'],api,output=output.append)
+    output=[];runner=Runner(f['skill'],f['journal'],api,output=output.append,image_limit=1)
     try:
         runner.prepare();runner.turn('First goal');runner.turn('Second goal')
         assert output==['First goal done.','Second goal done.']
@@ -111,13 +112,13 @@ def test_context_error_keeps_history_without_compaction(fixture):
     f=fixture;api=DeepSeek('secret-test-key',f['journal'])
     def handler(request):
         return httpx.Response(400,json={'error':{'message':'context length exceeded'}})
-    api.client.close();api.client=httpx.Client(transport=httpx.MockTransport(handler),base_url='https://api.deepseek.com/')
+    api.client.close();api.http.client=httpx.Client(transport=httpx.MockTransport(handler),base_url='https://api.deepseek.com/')
     try:
         history=[{'role':'user','content':'The full goal and observations.'}]
-        with pytest.raises(APIError,match='HTTP 400'):api.complete(history,[])
+        with pytest.raises(APIError,match='HTTP 400'):api.complete('Rules',history,[])
         assert history==[{'role':'user','content':'The full goal and observations.'}]
         data=json.loads(gzip.open(next((f['journal'].root/'api').glob('*request*')),'rt').read())
-        assert data['body']['messages']==history
+        assert data['body']['messages'][1:]==history
     finally:api.close()
 
 

@@ -17,12 +17,13 @@ packaged release. Game files must be supplied by the user.
 | AppImage | Kernel FUSE access for mounted execution. The pinned static AppImage runtime bundles its userspace FUSE library. On systems without FUSE, use `APPIMAGE_EXTRACT_AND_RUN=1` and a writable temporary directory. |
 | Network | HTTPS access to GitHub Releases and GHCR for installation/explicit updates. Normal gameplay uses loopback HTTP/WebSocket and WebRTC TCP, ports 18770 and 18771. Only one default installation may be running on these ports at a time. |
 
-### Container packages
-
-The optional [direct DeepSeek runner](deepseek-runner.md) additionally requires
-host Python 3.11+ and its installed Python dependencies, plus HTTPS access to the
-configured DeepSeek endpoint. Python is not required merely to use the packaged
+The optional [AstraBridge Runner](agent-runner.md) additionally requires
+host Python 3.11+ and its installed Python dependencies, plus HTTPS access to
+OpenAI's authentication/API endpoints or the selected DeepSeek endpoint.
+Python is not required merely to use the packaged
 Desktop or its normal CLI.
+
+### Container packages
 
 Install the host packages appropriate for your distribution; the application
 checks the actual tools and configuration, not whether one particular package
