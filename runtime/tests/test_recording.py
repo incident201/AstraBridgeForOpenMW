@@ -37,8 +37,55 @@ def test_paused_camera_motion_is_recorded_without_thinking_time():
     assert clock.elapsed()==2.5
 
 from astra_bridge.recording import FramePacer
+from astra_bridge.recording import FrameIntervals
 from astra_bridge.frame_stream import FrameStream
 import struct
+
+
+def test_lifetime_intervals_preserve_percentiles_and_exact_stall_maximum():
+    now=[0.];stats=FrameIntervals(lambda:now[0])
+    assert stats.status() is None
+    for value in range(1,101):stats.add(float(value))
+    assert stats.status()=={'median':50.5,'p95':96.,'max':100.}
+    stats.add(2582.192)
+    assert stats.status()['max']==2582.192
+    now[0]=1.1
+    result=stats.status()
+    assert result['median']==51. and result['p95']==96.
+
+
+def test_long_recording_statistics_do_not_retain_frame_history():
+    stats=FrameIntervals()
+    for _ in range(100000):
+        for value in (16.7,16.8,17.,20.):stats.add(value)
+    assert stats.count==400000 and len(stats.bins)==4
+    assert stats.status()=={'median':16.9,'p95':20.,'max':20.}
+    # Simulate a day of the same distribution without millions of test frames.
+    for index in stats.bins:stats.bins[index]*=13
+    stats.count*=13;stats.cached=None
+    assert stats.count==5200000 and len(stats.bins)==4
+    assert stats.status()=={'median':16.9,'p95':20.,'max':20.}
+
+
+def test_slow_frame_percentiles_remain_close_and_maximum_is_exact():
+    stats=FrameIntervals()
+    for _ in range(100):stats.add(250.123)
+    stats.add(9000.)
+    result=stats.status()
+    assert abs(result['median']/250.123-1)<.01
+    assert abs(result['p95']/250.123-1)<.01
+    assert result['max']==9000.
+
+
+def test_interval_cache_is_not_refreshed_for_unchanged_capture():
+    now=[0.];stats=FrameIntervals(lambda:now[0]);stats.add(16.7)
+    assert stats.status()['median']==16.7
+    stats.add(33.3)
+    assert stats.status()['median']==16.7 and stats.status()['max']==33.3
+    now[0]=1.1
+    assert stats.status()['median']==25.
+    original=stats.cached;now[0]=100000.
+    stats.status();assert stats.cached is original
 
 
 def test_timestamp_projection_retains_frames_delivered_after_pause():

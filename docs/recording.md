@@ -31,6 +31,13 @@ Thinking pauses do not advance this clock. FramePacer produces a constant
 is lower. Metadata reports actual rendered/repeated/lost frames. Missing expected
 audio is an error; it is not silently replaced with silence.
 
+Capture interval statistics use a bounded lifetime histogram rather than
+retaining and sorting every frame interval. `frame_interval_ms.median` and
+`p95` are estimates: bins are 0.01 ms wide through 100 ms and grow by 1% above
+that. `max` retains the exact observed maximum, rounded to three decimal places.
+Percentiles refresh at most once per second; reading telemetry does not become
+more expensive as frame counts grow.
+
 Live subscribers can request PCM independently of recording. Recording's native
 start/end acknowledgements remain separate. Recorder clips shared audio blocks
 to its acknowledged sample interval, including when a live subscriber was

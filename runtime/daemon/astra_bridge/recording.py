@@ -12,13 +12,62 @@ import math
 import os
 from pathlib import Path
 import queue
-import statistics
 import subprocess
 import threading
 import time
 
 from .protocol import BridgeError
 from .encoding import VIDEO_FILTER, select
+
+
+class FrameIntervals:
+    """Bounded lifetime histogram; telemetry never sorts per-frame history.
+
+    Bins are 0.01 ms wide through 100 ms and grow by 1% above that.
+    Percentiles are estimates; the lifetime maximum remains exact.
+    """
+    linear_limit = 10000
+    log_limit = math.log(100)
+    log_step = math.log1p(.01)
+
+    def __init__(self, now=time.monotonic):
+        self.now = now
+        self.lock = threading.Lock()
+        self.bins = {}
+        self.count = 0
+        self.maximum = 0.
+        self.cached = None
+        self.cached_count = 0
+        self.updated = 0.
+
+    def add(self, milliseconds):
+        if not math.isfinite(milliseconds) or milliseconds < 0: return
+        index = (round(milliseconds*100) if milliseconds <= 100 else
+                 self.linear_limit+1+int((math.log(milliseconds)-self.log_limit)/self.log_step))
+        with self.lock:
+            self.bins[index] = self.bins.get(index, 0)+1
+            self.count += 1
+            self.maximum = max(self.maximum, milliseconds)
+
+    def status(self):
+        with self.lock:
+            if not self.count: return None
+            now = self.now()
+            if self.cached is None or (self.cached_count != self.count and now-self.updated >= 1):
+                ranks = ((self.count-1)//2, self.count//2, min(self.count-1, self.count*95//100))
+                values = []; cumulative = 0
+                for index, count in sorted(self.bins.items()):
+                    cumulative += count
+                    while len(values) < 3 and ranks[len(values)] < cumulative:
+                        if index <= self.linear_limit: value = index/100
+                        else:
+                            midpoint = self.log_limit+(index-self.linear_limit-.5)*self.log_step
+                            value = self.maximum if midpoint >= math.log(self.maximum) else math.exp(midpoint)
+                        values.append(value)
+                    if len(values) == 3: break
+                self.cached = {'median':round((values[0]+values[1])/2,3), 'p95':round(values[2],3)}
+                self.cached_count, self.updated = self.count, now
+            return {**self.cached, 'max':round(self.maximum,3)}
 
 
 class ActiveClock:
@@ -116,7 +165,7 @@ class Recorder:
         self.input_frames = 0
         self.ring_dropped = 0
         self.queue_high_water = 0
-        self.intervals_ms = []
+        self.intervals = FrameIntervals()
         self.pacer = FramePacer(fps, self._enqueue)
         self.queue = queue.Queue(maxsize=120)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -233,7 +282,7 @@ class Recorder:
                         if active:
                             self.input_frames += 1
                             if previous_timestamp is not None:
-                                self.intervals_ms.append((frame['timestamp']-previous_timestamp)*1000)
+                                self.intervals.add((frame['timestamp']-previous_timestamp)*1000)
                             previous_timestamp = frame['timestamp']
                             self.pacer.push(t, frame)
                         else:
@@ -284,8 +333,8 @@ class Recorder:
             self.log.close()
 
     def status(self):
+        intervals = self.intervals.status()
         with self.condition:
-            times = sorted(self.intervals_ms)
             return {'path': str(self.path), 'fps': self.fps, 'frames': self.frames,
                     'duration': round(self.frames/self.fps, 3), 'recording': not self.closing,
                     'capturing': self.media.active, 'audio': self.has_audio, 'error': self.error,
@@ -303,9 +352,7 @@ class Recorder:
                     **self.encoding,
                     'rendered_frames':self.input_frames, 'repeated_frames':self.pacer.repeated,
                     'ring_dropped_frames':self.ring_dropped, 'encoder_queue_peak':self.queue_high_water,
-                    'frame_interval_ms': {'median':round(statistics.median(times),3),
-                        'p95':round(times[min(len(times)-1, math.floor(len(times)*.95))],3),
-                        'max':round(times[-1],3)} if times else None}
+                    'frame_interval_ms': intervals}
 
     def stop(self):
         try:

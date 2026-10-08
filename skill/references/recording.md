@@ -33,6 +33,10 @@ Keep the private engine render resolution stable during recording. Resizing Desk
 
 Recording is fragmented while active for crash recovery. Normal stop prepares the upload file; if finalization fails, the original capture is preserved and the error is reported. Do not claim a recording succeeded without checking its final status. No automatic upload or file-size limit is imposed.
 
+`frame_interval_ms.median` and `p95` are lifetime estimates from a bounded
+histogram, refreshed at most once per second; `max` is the exact observed
+maximum rounded to three decimal places. Frame totals remain lifetime counts.
+
 ## Commentary and action timeline
 
 `astrabridge game comment "I will check the eastern door next."` publishes a
