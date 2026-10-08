@@ -58,17 +58,27 @@ The agent remembers the overall objective and can achieve it, but often needs mo
 
 ## DeepSeek 4.1 Flash (max)
 
-**Poor results.**
+**Tool use improved; overall results remain poor.**
 
-Tests were run through the Codex harness.
+### Earlier Codex tests
 
-The default integration was unusable for these tests. Because of the API's handling of image context, every request had to resend all images the model had previously viewed.
+Earlier tests were run through the Codex harness. The default integration was unusable because every request resent all previously viewed images. A local proxy removed older images from API requests, keeping only a few recent screenshots. Older images remained available on request.
 
-A local proxy was introduced for testing. It removed older images from API requests, keeping only a few recent screenshots. Older images remained available to the model on request, as before.
+With this setup, DeepSeek frequently hallucinated and invented strange explanations for its mistakes. It often truncated AstraBridge JSON responses through its own output-processing wrappers, discarding useful information. It also wrote unhelpful Python automation scripts for route finding, repeatedly walked in circles, and showed severe spatial disorientation.
 
-With this setup, the model frequently hallucinated and invented strange explanations for its mistakes. It was reluctant to read AstraBridge responses in full and often discarded useful information from them.
+### Custom harness test
 
-It also tended to write unhelpful automation scripts for route finding. These attempts often led to walking in circles and showed severe spatial disorientation.
+A follow-up test was run on Linux through a minimal custom harness connected directly to the DeepSeek API. AstraBridge controls were presented as native tools. The harness returned complete structured JSON results and supplied screenshots automatically. Only the latest selected image was included in API requests; older images remained available on request. The full text history, including reasoning, was retained without context compaction. The model had no shell or Python scripting tools.
+
+DeepSeek stopped truncating AstraBridge JSON output and used tools more reliably. Navigation improved overall compared with the Codex tests. Removing the ability to write ineffective Python automation scripts had a positive effect: the model more often examined screenshots and tried to orient itself in the game world.
+
+It independently started a new game, completed character creation and the opening tutorial, and saved successfully when saving became available. It handled tutorial popups and checked that its save existed.
+
+The next task was to reach Caius Cosades in Balmora. The model spent roughly 27 minutes circling the silt strider in Seyda Neen, repeatedly trying to interact with it from below and confusing an ordinary pier with its boarding area. The run was stopped without reaching Balmora.
+
+These improvements did not fundamentally raise the quality of play. DeepSeek still tends to treat an expected outcome as an established fact. It interprets screenshots as confirmation of its current hypothesis and does not consistently use them as the source of truth for building and testing an understanding of its surroundings.
+
+It repeatedly claimed to understand the layout while returning to approaches that had already failed. Revising an incorrect explanation and choosing a different strategy remain major weaknesses. These failures occurred with the full conversation preserved and no compaction, so they cannot be explained by information being removed during compaction in this test.
 
 ## Grok 4.7
 
