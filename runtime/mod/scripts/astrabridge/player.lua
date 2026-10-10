@@ -1780,8 +1780,15 @@ local function onFrame(dt)
                         local N=require('scripts.astrabridge.navigation')
                         local stall
                         if p.navigator then stall=N.stalled(p.navigator,p.elapsed)
-                        elseif p.destination then stall=require('scripts.astrabridge.progress').update(p,p.elapsed,
-                            (p.destination-self.position):length(),self.position.x,self.position.y,self.position.z) end
+                        elseif p.destination then
+                            -- move-local requests a horizontal offset. The
+                            -- physical floor supplies its height; climbing must
+                            -- not increase a fictitious distance to the old Z.
+                            local delta=p.destination-self.position
+                            stall=require('scripts.astrabridge.progress').update(p,p.elapsed,
+                                math.sqrt(delta.x*delta.x+delta.y*delta.y),
+                                self.position.x,self.position.y,self.position.z)
+                        end
                         if stall then
                             if p.navigator and N.recover(p.navigator,yaw) then require('scripts.astrabridge.progress').recover(p.navigator,p.elapsed)
                             else pause(p.cmd,{paused=true,reason=stall});return end

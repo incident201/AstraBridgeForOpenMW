@@ -9,6 +9,7 @@ import * as tar from 'tar';
 import {CliRegistration,applicationExecutable} from './cli-registration';
 import {Recordings} from './recordings';
 import {gameDataDirectory} from './game-data';
+import {gameCommandHttp} from './game-command-http';
 import {PodmanBackend} from './runtime/PodmanBackend';
 import {WslContainerBackend} from './runtime/WslContainerBackend';
 import type {Progress,RuntimeBackend,RuntimeSpec} from './runtime/RuntimeBackend';
@@ -94,7 +95,8 @@ export class Core {
   async fetch(path:string,init:RequestInit={},config?:Installation):Promise<Response>{
     config??=await this.configured();
     if(!path.startsWith('/v1/')&&path!=='/health')throw new Error('Invalid runtime API path');
-    const response=await fetch(`http://127.0.0.1:${config.apiPort}${path}`,{...init,
+    const transport=path==='/v1/game/command'?gameCommandHttp:fetch;
+    const response=await transport(`http://127.0.0.1:${config.apiPort}${path}`,{...init,
       headers:{Authorization:'Bearer '+config.token,...(config.agentToken?{'X-Astra-Session':config.agentToken}:{}),...init.headers}});
     return response;
   }

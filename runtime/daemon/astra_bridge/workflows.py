@@ -240,6 +240,11 @@ def _navigate_once(session,args, *, motion=None):
             if session.control.cancelled.is_set():reason='cancelled';break
             origin={'space':session.atlas.segment,'pose':list(session.atlas.current()['pose'])}
             if step['kind']=='walk':
+                # Keep the chosen itinerary through successful motor chunks.
+                # Arrival has a wider tolerance than graph trace joins: finding
+                # a fresh graph route after every chunk can send the player back
+                # along the newly recorded edge to the original departure.
+                walking_route=None;route_cursor=0;route_loaded=False
                 while True:
                     if session.control.cancelled.is_set():reason='cancelled';break
                     remaining=budget-elapsed
@@ -251,21 +256,38 @@ def _navigate_once(session,args, *, motion=None):
                     signature=(node['ref'],tuple(round(v,1) for v in pose))
                     if signature in seen_positions:reason='no_progress';break
                     seen_positions.add(signature)
-                    route=atlas.travelled_route(node)
+                    if not route_loaded:
+                        walking_route=atlas.travelled_route(node)
+                        route_loaded=True
                     goal=node['p'];chunk=[];length=0;previous=pose
-                    if route:
-                        for point in route:
-                            length+=math.dist(previous,point);previous=point
-                            if length>60 or len(chunk)>=400:break
-                            chunk.append(point)
-                        if chunk:goal=chunk[-1]
+                    if walking_route:
+                        # The actual settled pose is always the private route's
+                        # first point. Retain the previous chunk's corner when
+                        # it was reached within tolerance rather than exactly.
+                        chunk=[list(pose)]
+                        if route_cursor and math.dist(pose,walking_route[route_cursor-1])>1e-6:
+                            anchor=walking_route[route_cursor-1]
+                            length=math.dist(pose,anchor);previous=anchor
+                            chunk.append(anchor)
+                        while route_cursor<len(walking_route):
+                            point=walking_route[route_cursor]
+                            next_length=length+math.dist(previous,point)
+                            if next_length>60 or len(chunk)>=400:break
+                            length=next_length;previous=point;route_cursor+=1
+                            if math.dist(chunk[-1],point)>1e-6:chunk.append(point)
+                        if len(chunk)>1:goal=chunk[-1]
+                        else:chunk=[]
                     offset=[round(a-b,4) for a,b in zip(goal,pose)]
                     offsets=[[round(a-b,4) for a,b in zip(p,pose)] for p in chunk] if chunk else None
                     marker=session.command('mark',_atlas_offset=offset,_atlas_route=offsets)['ref']
                     r=session.call('go',{'ref':marker,'seconds':remaining,**{k:v for k,v in args.items() if k in {'run','under_fire'}}})
                     a=r['action'];results.append(step_result(r,'go'));elapsed+=a.get('elapsed',0)
                     if motion is not None:motion.sample(session,a)
-                    session.atlas.record_outcome(step,origin,a)
+                    # An intermediate chunk's arrival is not arrival at the
+                    # walk leg's final atlas node. Its actual trace is already
+                    # ingested; only report the final outcome for this leg.
+                    if a.get('reason')!='arrived' or math.dist(goal,node['p'])<.04:
+                        session.atlas.record_outcome(step,origin,a)
                     if a.get('reason')!='arrived':reason=a.get('reason','interrupted');break
                     if math.dist(goal,node['p'])<.04:break
                 if reason!='arrived':break

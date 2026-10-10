@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from astra_bridge.workflows import navigate
+from astra_bridge.exploration import ExplorationAtlas
 
 
 class RouteSession:
@@ -65,3 +66,63 @@ def test_accepted_native_goal_is_not_rejected_at_100_metres():
     assert result['summary']['destination_reached']
     assert session.markers==[{'_atlas_offset':[0.,150.,0.],'_atlas_route':None}]
     assert len(session.calls)==1
+
+
+def test_chunks_continue_forward_after_inexact_arrival(tmp_path):
+    """Native shortcuts can stay outside the recorded trace's tiny join radius."""
+    class SettledSession:
+        def __init__(self):
+            self.atlas=ExplorationAtlas(tmp_path/'atlas.json')
+            self.control=SimpleNamespace(cancelled=threading.Event())
+            self.sequence=0;self.markers=[];self.calls=[];self.distance=0
+            self.feed([[0.,0.,0.]])
+            self.destination=self.atlas.annotate(self.observe())['ref']
+            self.feed([[0.,float(y),0.] for y in range(1,121)])
+            self.atlas.annotate(self.observe())
+
+        def feed(self, points):
+            rows=[]
+            for x,y,z in points:
+                self.sequence+=1
+                rows.append({'sequence':self.sequence,'forward_m':y,
+                             'sideways_m':x,'vertical_m':z,'heading_deg':0})
+            self.atlas.ingest({'state':'running','location':'Hall','ui_mode':'Gameplay',
+                'body':{'on_ground':True},'trajectory':{'ref':'recorded_hall',
+                    'sequence':self.sequence,'start_heading_deg':0,'samples':rows,'sparse':False}})
+
+        def observe(self, **kwargs):
+            return {'state':'running','location':'Hall','ui_mode':'Gameplay',
+                    'body':{'on_ground':True},'orientation':{'view_distance_m':5}}
+
+        def command(self, op, **kwargs):
+            assert op=='mark'
+            self.markers.append(kwargs)
+            self.goal=[a+b for a,b in zip(self.atlas.current()['pose'],kwargs['_atlas_offset'])]
+            return {'ref':'waypoint_test'}
+
+        def call(self, op, args):
+            assert op=='go'
+            start=list(self.atlas.current()['pose'])
+            # A normal native shortcut in an open corridor stops 28 cm from
+            # its target. Its entire trace stays 20 cm beside the old trace;
+            # rebuilding a graph route joins it only at the old departure.
+            end=[self.goal[0]+.2,self.goal[1]+.2,self.goal[2]]
+            distance=math.dist(start,end);self.distance+=distance
+            count=max(1,math.ceil(distance*2))
+            self.feed([[.2,start[1]+(end[1]-start[1])*i/count,end[2]]
+                       for i in range(1,count+1)])
+            self.calls.append(self.goal[:])
+            return {'action':{'reason':'arrived','elapsed':distance/10,
+                    'motion':{'forward_m':end[1]-start[1],'sideways_m':end[0]-start[0],
+                              'location_changed':False}},
+                    'feedback':{'status':'succeeded','reason':'arrived'},'observation':self.observe()}
+
+    session=SettledSession()
+    result=navigate(session,{'ref':session.destination,'seconds':40})
+    assert result['summary']['destination_reached']
+    assert session.distance<123,'chunk continuation must not return to the original departure'
+    assert len(session.calls)==3
+    assert all(b[1]<a[1] for a,b in zip(session.calls,session.calls[1:]))
+    assert all(m['_atlas_route'][0]==[0,0,0] for m in session.markers)
+    outcomes=session.atlas.route_outcomes()
+    assert len(outcomes)==1 and outcomes[0]['success'], 'intermediate chunks must not claim final arrival'

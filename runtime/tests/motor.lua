@@ -208,6 +208,14 @@ r=command('look',{heading_deg=270,pitch_deg=-60})
 assert(r.result.reason=='duration' and math.abs(angle(yaw-math.rad(270)))<.01 and math.abs(pitch-math.rad(-60))<.01)
 r=command('look',{pitch_deg=60})
 assert(math.abs(angle(yaw-math.rad(270)))<.01 and math.abs(pitch-math.rad(60))<.01,'absolute vertical look preserves unspecified heading')
+local rampStart=self.position
+r=command('move_local',{forward_m=4,seconds=30},function()
+    local delta=self.position-rampStart
+    local climbed=.8*math.sqrt(delta.x*delta.x+delta.y*delta.y)
+    self.position=V.new(self.position.x,self.position.y,rampStart.z+climbed)
+end)
+assert(r.result.reason=='arrived' and self.position.z-rampStart.z>3*70,
+    'horizontal movement on a walkable uphill floor must not stall as height increases')
 r=command('act',{seconds=1},function(n)if n==15 then playerDead=true end end)
 assert(r.result.reason=='player_down' and paused,'death interrupts ordinary timed input as well as combat')
 assert(not data.can_save,'a dead character is not a valid save state')

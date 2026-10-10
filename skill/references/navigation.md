@@ -50,7 +50,20 @@ simulation seconds.
 
 Path-following `go`/`walk` looks along its movement. A live combat lock controls the camera: `unlock` before independent turns/scans/path navigation. Combat pursuit/retreat intentionally keeps the actor in view; see [combat.md](combat.md).
 
+Path-following commands can automatically take a short local detour around an
+obstruction and rejoin their original route. This also applies to recorded
+travel. You do not need to issue separate sidesteps for every rock: select the
+observed destination, allow enough time for the route, then read the actual
+result. Detours require floor support and body clearance and consume the same
+action budget. They do not guarantee that every visible destination is
+reachable. An obstruction, repeated positions or no route progress can still
+stop the command; inspect its diagnostics and current screenshot before retrying.
+
 On narrow stairs and bridges, choose a visible tread, landing or part of the deck with `ground` → `go`, or use `walk` on the screenshot. Check the point's height and navigation status. The route may first lead around a support post before climbing. `move-local` and `act` apply direct movement without planning that detour; after they stall, select a path-following command or a different visible intermediate point.
+
+`move-local` checks progress toward its horizontal offset. The physical floor
+can raise or lower the player along the way; this does not make the old starting
+height a separate destination. Direct input still cannot plan around a wall.
 
 `point_not_ground` means the selected pixel could not be resolved to a visible walking surface; no movement was started. It does not establish that the staircase or bridge is unreachable. Choose the centre of a visible tread/deck or a fresh `ground` ref. Small seams between boards can resolve to nearby physical support, while railings, walls and unsupported points remain rejected. `ground` and `terrain.passages` are sparse samples: an omitted stairway may become selectable after turning, looking down or approaching its foot.
 
@@ -244,7 +257,7 @@ The motor first tries the engine's normal pathfinder. If that route is incomplet
 
 At a learned door transition, the motor first matches fresh visible door geometry against its recorded center/floor. If needed it makes a bounded set of ordinary recorded camera turns. Old transitions without geometry require an unambiguous current label. Missing or ambiguous doors stop the route.
 
-Collision is checked during movement. For a blocking NPC the motor briefly waits, then attempts a short local detour with floor support and both legs checked; otherwise it stops with an obstruction reason. Progress is measured along the route, with a short allowance for initial turning. Rotation or small oscillation does not reset the progress timer. `no_route_progress`/`repeated_positions` and the navigation reason identify stalled recovery. A closed door can block an older route. A time limit returns `step_limit`; continue from the current pose only if the result shows useful progress. Failed legs and successful traversals persist in the atlas. NPC blockages expire after eight simulation seconds, other route failures after 90; thinking on pause does not expire them. Loading/restarting revalidates old obstacles while preserving their history; `revisit` can try up to two alternative known legs within the original time budget. These cooldowns guide retries, not assertions that an obstacle still exists. `recorded_route_unavailable` means no route between known points/door links can be resolved. Long recorded paths are split internally into bounded motor legs and use the caller's total time budget; there is no total distance limit on a connected recorded journey. A disconnected permanent point within the current nominal view range can use native navigation, without inventing a connecting trail; this does not establish that the point is currently visible or reachable.
+Collision is checked during movement. For a blocking NPC the motor briefly waits, then attempts a short local detour with floor support and both legs checked; otherwise it stops with an obstruction reason. Static obstacles can also trigger a checked detour on a recorded trail. `navigation.recovery_count` counts recoveries across the action, including separate obstacles; it is not proof of arrival. Progress is measured along the active route or detour, with a short allowance for turning. Rotation or small oscillation does not reset the progress timer. `no_route_progress`/`repeated_positions` and the navigation reason identify stalled recovery. A closed door can block an older route. A time limit returns `step_limit`; continue from the current pose only if the result shows useful progress. Failed legs and successful traversals persist in the atlas. NPC blockages expire after eight simulation seconds, other route failures after 90; thinking on pause does not expire them. Loading/restarting revalidates old obstacles while preserving their history; `revisit` can try up to two alternative known legs within the original time budget. These cooldowns guide retries, not assertions that an obstacle still exists. `recorded_route_unavailable` means no route between known points/door links can be resolved. Long recorded paths are split internally into bounded motor legs and use the caller's total time budget; there is no total distance limit on a connected recorded journey. A disconnected permanent point within the current nominal view range can use native navigation, without inventing a connecting trail; this does not establish that the point is currently visible or reachable.
 
 ## Semantic notes and route history
 
@@ -261,6 +274,11 @@ These complement the automatically drawn travel path:
 | `return-to PLACE_REF --seconds S --run --under-fire` | Return to a note's persistent atlas node, including learned door transitions. Legacy notes without a verified atlas link still need a valid current-branch motor marker. |
 
 For `return-to`/`revisit`, time defaults to 60 s and has no fixed upper cap. Always refresh `observe` before creating a note: `remember` uses the latest observation, not a fresh screenshot of its own.
+
+A long recorded journey keeps its selected itinerary through successful internal
+segments, including when a segment ends within arrival tolerance. The overall
+command still reports arrival only at its requested destination. An interrupted
+journey can choose a fresh known route from the actual stopping point.
 
 Record visible landmarks, how you entered, and decisions at junctions. If a point has multiple visits and little new progress, inspect its past screenshots and choose a different observed route. Avoid repeatedly issuing the same blocked movement without new evidence.
 

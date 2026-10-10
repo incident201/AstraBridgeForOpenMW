@@ -17,6 +17,8 @@
 #include "luamanagerimp.hpp"
 #include "objectlists.hpp"
 
+#include <cmath>
+#include <tuple>
 #include <vector>
 
 namespace
@@ -109,6 +111,19 @@ namespace MWLua
                     { "VisualOnly", MWPhysics::CollisionType_VisualOnly },
                 }));
 
+        api["_astraActorSweep"] = [context](const LObject& object,
+            const osg::Vec3f& fromFeet, const osg::Vec3f& toFeet) {
+            if (context.mType != Context::Local || !context.mLuaManager->isSynchronizedUpdateRunning())
+                throw std::runtime_error("Astra actor sweep requires player onFrame");
+            const auto world = MWBase::Environment::get().getWorld();
+            if (object.ptr() != world->getPlayerPtr())
+                throw std::runtime_error("Astra actor sweep requires the actual player");
+            for (unsigned int i = 0; i < 3; ++i)
+                if (!std::isfinite(fromFeet[i]) || !std::isfinite(toFeet[i]))
+                    throw std::runtime_error("Astra actor sweep requires finite feet positions");
+            const auto [hit, fraction] = world->getRayCasting()->astraActorSweep(object.ptr(), fromFeet, toFeet);
+            return std::make_tuple(hit, fraction);
+        };
         api["castRay"] = [](const osg::Vec3f& from, const osg::Vec3f& to, sol::optional<sol::table> options) {
             std::vector<MWWorld::ConstPtr> ignore;
             int collisionType = MWPhysics::CollisionType_Default;

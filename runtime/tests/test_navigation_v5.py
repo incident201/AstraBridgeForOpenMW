@@ -17,6 +17,12 @@ def test_scene_uses_current_camera_range():
     r=subprocess.run(['lua','tests/scene_range.lua'],cwd=root,capture_output=True,text=True)
     assert r.returncode==0,r.stdout+r.stderr
 
+
+def test_checked_ground_routes_preserve_curves_and_original_goal():
+    root=Path(__file__).resolve().parents[1]
+    r=subprocess.run(['lua','tests/ground_graph.lua'],cwd=root,capture_output=True,text=True)
+    assert r.returncode==0,r.stdout+r.stderr
+
 @pytest.mark.parametrize('args',[{'ref':'raw_world_id'},{'ref':'passage_x','seconds':0},{'ref':'passage_x','position':[1,2,3]},{'ref':'passage_x','run':1}])
 def test_go_stays_bounded(args):
     with pytest.raises(BridgeError):validate('go',args)

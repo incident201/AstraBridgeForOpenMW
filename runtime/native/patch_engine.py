@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Apply the small, version-pinned UI patch to an unpacked OpenMW 0.51.0 tree."""
+"""Apply the version-pinned AstraBridge adapters to an unpacked OpenMW 0.51.0 tree."""
 from pathlib import Path
 import argparse, shutil, re
 p=argparse.ArgumentParser();p.add_argument('source',type=Path);a=p.parse_args()
@@ -15,8 +15,8 @@ def replace(path,old,new):
     if markers and all(marker in s for marker in markers):return
     if old not in s:raise RuntimeError(f'Unexpected source: {path}')
     file.write_text(s.replace(old,new,1))
-def copy_header(name):
-    source=Path(__file__).with_name(name);target=root/'apps/openmw/mwlua'/name
+def copy_header(name,directory='apps/openmw/mwlua'):
+    source=Path(__file__).with_name(name);target=root/directory/name
     if not target.exists() or target.read_bytes()!=source.read_bytes():shutil.copyfile(source,target)
 # Stable roles on existing, displayed controls. Values are the same visible
 # prices/amounts the ordinary callbacks act on; no service bypass is exposed.
@@ -204,6 +204,96 @@ replace('apps/openmw/mwlua/uibindings.cpp','        api["_astraUiEdit"]',
             return true;
         };
         api["_astraUiEdit"]''')
+
+# Private, read-only exact player-body sensing for the ordinary movement motor.
+# Keep the callback separate from ActorConvexCallback: the stock callback can
+# call Projectile::hit while testing a sweep, and uses the live actor transform
+# for its special actor-overlap normal rather than the hypothetical start pose.
+copy_header('astraactorsweep.hpp', 'apps/openmw/mwphysics')
+replace('apps/openmw/mwphysics/raycasting.hpp', '#include <osg/Vec3f>',
+        '#include <osg/Vec3f>\n#include <utility>')
+replace('apps/openmw/mwphysics/raycasting.hpp', '        /// Return true if actor1 can see actor2.',
+'''        /// Private read-only player-body sweep; positions are logical feet.
+        /// Fraction is 1 when clear, otherwise the first accepted body contact.
+        virtual std::pair<RayCastingResult, float> astraActorSweep(const MWWorld::ConstPtr& actor,
+            const osg::Vec3f& fromFeet, const osg::Vec3f& toFeet) const = 0;
+
+        /// Return true if actor1 can see actor2.''')
+replace('apps/openmw/mwphysics/physicssystem.hpp', '        /// Return true if actor1 can see actor2.',
+'''        std::pair<RayCastingResult, float> astraActorSweep(const MWWorld::ConstPtr& actor,
+            const osg::Vec3f& fromFeet, const osg::Vec3f& toFeet) const override;
+
+        /// Return true if actor1 can see actor2.''')
+replace('apps/openmw/mwphysics/physicssystem.cpp', '#include "actor.hpp"',
+        '#include "actor.hpp"\n#include "astraactorsweep.hpp"')
+replace('apps/openmw/mwphysics/physicssystem.cpp', '#include <algorithm>',
+        '#include <algorithm>\n#include <cmath>')
+replace('apps/openmw/mwphysics/physicssystem.cpp',
+        '    bool PhysicsSystem::getLineOfSight(const MWWorld::ConstPtr& actor1, const MWWorld::ConstPtr& actor2) const',
+'''    std::pair<RayCastingResult, float> PhysicsSystem::astraActorSweep(const MWWorld::ConstPtr& ptr,
+        const osg::Vec3f& fromFeet, const osg::Vec3f& toFeet) const
+    {
+        if (ptr != MWMechanics::getPlayer())
+            throw std::runtime_error("Astra actor sweep requires the actual player");
+        for (unsigned int i = 0; i < 3; ++i)
+            if (!std::isfinite(fromFeet[i]) || !std::isfinite(toFeet[i]))
+                throw std::runtime_error("Astra actor sweep requires finite feet positions");
+
+        const Actor* actor = getActor(ptr);
+        if (!actor || !actor->getCollisionObject() || !actor->getConvexShape())
+            throw std::runtime_error("Astra actor sweep has no physical player body");
+        const btCollisionObject* body = actor->getCollisionObject();
+        const btBroadphaseProxy* proxy = body->getBroadphaseHandle();
+        if (!proxy)
+            throw std::runtime_error("Astra actor sweep has no active physical player body");
+
+        RayCastingResult result{};
+        if (fromFeet == toFeet)
+            return { result, 1.f };
+
+        // Actor's mesh translation is scaled/rotated by its real physics body.
+        // Translate the hypothetical feet into that body's actual shape origin,
+        // preserving its rotation, dimensions, scaling, and collision margin.
+        const osg::Vec3f offset = actor->getCollisionObjectPosition() - osg::Vec3f(actor->getPosition());
+        const btVector3 fromCenter = Misc::Convert::toBullet(fromFeet + offset);
+        const btVector3 toCenter = Misc::Convert::toBullet(toFeet + offset);
+        btTransform fromTransform(body->getWorldTransform());
+        btTransform toTransform(fromTransform);
+        fromTransform.setOrigin(fromCenter);
+        toTransform.setOrigin(toCenter);
+        AstraActorSweepCallback callback(body, fromCenter, toCenter, CollisionType_Projectile);
+        callback.m_collisionFilterGroup = proxy->m_collisionFilterGroup;
+        callback.m_collisionFilterMask = proxy->m_collisionFilterMask & ~CollisionType_Projectile;
+        mTaskScheduler->convexSweepTest(actor->getConvexShape(), fromTransform, toTransform, callback);
+
+        result.mHit = callback.hasHit();
+        if (!result.mHit)
+            return { result, 1.f };
+        result.mHitPos = Misc::Convert::toOsg(callback.m_hitPointWorld);
+        result.mHitNormal = Misc::Convert::toOsg(callback.m_hitNormalWorld);
+        if (auto* holder = static_cast<PtrHolder*>(callback.m_hitCollisionObject->getUserPointer()))
+            result.mHitObject = holder->getPtr();
+        return { result, std::clamp(static_cast<float>(callback.m_closestHitFraction), 0.f, 1.f) };
+    }
+
+    bool PhysicsSystem::getLineOfSight(const MWWorld::ConstPtr& actor1, const MWWorld::ConstPtr& actor2) const''')
+replace('apps/openmw/mwlua/nearbybindings.cpp', '#include <vector>',
+        '#include <cmath>\n#include <tuple>\n#include <vector>')
+replace('apps/openmw/mwlua/nearbybindings.cpp', '        api["castRay"]',
+'''        api["_astraActorSweep"] = [context](const LObject& object,
+            const osg::Vec3f& fromFeet, const osg::Vec3f& toFeet) {
+            if (context.mType != Context::Local || !context.mLuaManager->isSynchronizedUpdateRunning())
+                throw std::runtime_error("Astra actor sweep requires player onFrame");
+            const auto world = MWBase::Environment::get().getWorld();
+            if (object.ptr() != world->getPlayerPtr())
+                throw std::runtime_error("Astra actor sweep requires the actual player");
+            for (unsigned int i = 0; i < 3; ++i)
+                if (!std::isfinite(fromFeet[i]) || !std::isfinite(toFeet[i]))
+                    throw std::runtime_error("Astra actor sweep requires finite feet positions");
+            const auto [hit, fraction] = world->getRayCasting()->astraActorSweep(object.ptr(), fromFeet, toFeet);
+            return std::make_tuple(hit, fraction);
+        };
+        api["castRay"]''')
 replace('apps/openmw/mwlua/uibindings.cpp','        api["_astraUiSnapshot"]',
 '''        api["_astraDoorDescription"] = [context](const LObject& object) {
             if (context.mType != Context::Local || !context.mLuaManager->isSynchronizedUpdateRunning())

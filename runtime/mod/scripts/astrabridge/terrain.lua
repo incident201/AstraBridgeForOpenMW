@@ -10,6 +10,22 @@ local P=require('scripts.astrabridge.protocol')
 local Space=require('scripts.astrabridge.space')
 local Mobility=require('scripts.astrabridge.mobility')
 local M={radius=6,units=70}
+local queryBudget
+local function castRay(from,to,opts)
+    if queryBudget then
+        if queryBudget.left<=0 then error('local_collision_query_limit') end
+        queryBudget.left=queryBudget.left-1
+    end
+    return nearby.castRay(from,to,opts)
+end
+function M.withQueryBudget(limit,fn)
+    local budget={left=limit};queryBudget=budget
+    local ok,result=pcall(fn)
+    queryBudget=nil
+    M.lastQueryCount=limit-budget.left
+    if not ok and not tostring(result):find('local_collision_query_limit',1,true) then error(result) end
+    return ok and result or nil
+end
 local cache,targets,marks,markOrder,serial,epoch=nil,{}, {},{},0,'test'
 local function round(n)return math.floor(n*100+.5)/100 end
 local function horizontal(v)return math.sqrt(v.x*v.x+v.y*v.y)end
@@ -38,7 +54,7 @@ function M.contact(from,to,centerOnly)
         local ignored={self.object}
         local hit
         for attempt=1,5 do
-            hit=nearby.castRay(a,b,{ignore=#ignored==1 and self.object or ignored})
+            hit=castRay(a,b,{ignore=#ignored==1 and self.object or ignored})
             -- Corpses remain raycast targets for looting after the engine stops
             -- colliding with them. Ignore them for walking, while still probing
             -- the wall or living actor behind. Stock physics handles a death
@@ -53,26 +69,105 @@ function M.contact(from,to,centerOnly)
     end
     return best
 end
+-- Static sphere sweeps cover the player's full width around curved rocks.
+-- Actors remain covered by contact(); excluding them here also excludes self,
+-- since OpenMW sphere casts do not yet support an ignore list.
+function M.bodyContact(from,to)
+    if nearby._astraActorSweep then
+        if queryBudget then
+            if queryBudget.left<=0 then error('local_collision_query_limit') end
+            queryBudget.left=queryBudget.left-1
+        end
+        local hit,fraction=nearby._astraActorSweep(self.object,from,to)
+        if hit.hit then return {kind=kind(hit.hitObject),distance=horizontal(to-from)*(fraction or 0),normal=hit.hitNormal,fraction=fraction} end
+        return nil
+    end
+    local best=M.contact(from,to)
+    local masks=nearby.COLLISION_TYPE
+    if not masks then return best end
+    -- The stock fallback retains all ray evidence. Only the exact native body
+    -- sweep can safely filter a separating initial hit and inspect later hits.
+    local bounds=types.Actor.getPathfindingAgentBounds(self).halfExtents
+    local radius=math.max(bounds.x,bounds.y)+3
+    local height=bounds.z*2
+    for _,z in ipairs({radius+30,height*.62,math.max(radius+30,height-radius)}) do
+        local up=util.vector3(0,0,z)
+        local hit=castRay(from+up,to+up,{radius=radius,
+            collisionType=masks.World+masks.Door+masks.HeightMap})
+        if hit.hit and hit.hitPos then
+            local distance=math.max(0,horizontal(hit.hitPos-from)-radius)
+            if not best or distance<best.distance then
+                best={kind=kind(hit.hitObject),distance=distance}
+            end
+        end
+    end
+    return best
+end
 -- Validate a short physical walking corridor where a navmesh seam may be
 -- missing. Sample actual floor support, including stair treads, and the body
 -- envelope. This is local collision sensing, never a map or object search.
-function M.walkLine(from,to)
+function M.walkLine(from,to,opts)
     local delta=to-from
     local length=horizontal(delta)
     if length>420 or math.abs(delta.z)>length*1.1+20 then return nil end
     local steps=math.max(1,math.ceil(length/20))
     local path={from}
     local previous=from
+    local followFloor=opts and opts.followFloor
+    local previousFloor=from
+    if followFloor then
+        local floor=castRay(from+util.vector3(0,0,2),from-util.vector3(0,0,40),{ignore=self.object})
+        if floor.hitObject and types.Actor.objectIsInstance(floor.hitObject) then return nil end
+        if floor.hit and floor.hitPos and floor.hitNormal then
+            if not nearby._astraActorSweep and floor.hitNormal.z<=math.cos(math.rad(46)) then return nil end
+            previousFloor=floor.hitPos
+        elseif nearby._astraActorSweep then
+            local high,low=from+util.vector3(0,0,35),from-util.vector3(0,0,45)
+            local support=M.bodyContact(high,low)
+            if not support or support.kind~='geometry' or not support.normal
+                or support.normal.z<=math.cos(math.rad(46)) then return nil end
+            previousFloor=high+(low-high)*(support.fraction or 0)+util.vector3(0,0,1)
+        else return nil end
+    end
     for i=1,steps do
         local target=from+delta*(i/steps)
-        local hit=nearby.castRay(target+util.vector3(0,0,35),target-util.vector3(0,0,45),{ignore=self.object})
-        if not hit.hit or not hit.hitPos or not hit.hitNormal or hit.hitNormal.z<.55
-            or hit.hitObject and types.Actor.objectIsInstance(hit.hitObject) then return nil end
-        local point=Mobility.surface(hit.hitPos)
-        if math.abs(point.z-previous.z)>35 or M.contact(previous,point) then return nil end
+        if followFloor then target=util.vector3(target.x,target.y,previousFloor.z) end
+        local hit=castRay(target+util.vector3(0,0,35),target-util.vector3(0,0,45),{ignore=self.object})
+        if hit.hitObject and types.Actor.objectIsInstance(hit.hitObject) then return nil end
+        local rayFloor=hit.hit and hit.hitPos and hit.hitNormal
+        if not rayFloor and not nearby._astraActorSweep then return nil end
+        if rayFloor and not nearby._astraActorSweep and hit.hitNormal.z<=math.cos(math.rad(46)) then return nil end
+        local point=Mobility.surface(rayFloor and hit.hitPos or target)
+        previousFloor=rayFloor and hit.hitPos or target
+        if nearby._astraActorSweep then
+            -- Standing height follows the entire physical footprint. On a
+            -- hillside it is above the center ray's floor height; putting the
+            -- raw ray point into the body sweep would embed its forward edge.
+            local high=point+util.vector3(0,0,rayFloor and 34 or 35)
+            local low=point-util.vector3(0,0,rayFloor and 2 or 45)
+            local support=M.bodyContact(high,low)
+            if not support or support.kind~='geometry' or not support.normal
+                or support.normal.z<=math.cos(math.rad(46)) then return nil end
+            point=Mobility.surface(high+(low-high)*(support.fraction or 0)+util.vector3(0,0,1))
+            if not rayFloor then previousFloor=point end
+        end
+        local body=M.bodyContact(previous,point)
+        if body and nearby._astraActorSweep and body.kind=='geometry' and math.abs(point.z-previous.z)<=35 then
+            -- Test the ordinary step envelope using the real body. A blocked
+            -- ascent or head corridor stays blocked; only supported walkable
+            -- floor can finish the downward leg.
+            local up=util.vector3(0,0,34)
+            if not M.bodyContact(previous,previous+up) and not M.bodyContact(previous+up,point+up) then
+                local down=M.bodyContact(point+up,point)
+                if not down or down.kind=='geometry' and down.normal
+                    and down.normal.z>math.cos(math.rad(46)) and (1-(down.fraction or 0))*34<2 then body=nil end
+            end
+        end
+        if math.abs(point.z-previous.z)>35 or body then return nil end
         path[#path+1]=point;previous=point
     end
-    if math.abs(previous.z-to.z)>25 then return nil end
+    local heightTolerance=nearby._astraActorSweep and 35 or 25
+    if not followFloor and math.abs(previous.z-to.z)>=heightTolerance then return nil end
     return path
 end
 -- Walk straight along the current floor. Stepwise sampling preserves ramps/stairs

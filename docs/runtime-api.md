@@ -54,6 +54,12 @@ JSON responses use `{ "ok": true, "result": ... }` or
 retain their native binary/SDP formats. Clients must not automatically repeat
 mutations after a connection failure; use the existing action receipt mechanism.
 
+Game command responses can wait until the requested action finishes. Desktop
+and CLI use native HTTP for `/v1/game/command`, without an independent five-minute
+header or response-body deadline. Gameplay time budgets, daemon watchdogs and
+explicit caller cancellation still apply. A lost connection does not establish
+whether an action ran; inspect its receipt before deciding how to recover.
+
 ## Endpoints
 
 | Method and path | Purpose |

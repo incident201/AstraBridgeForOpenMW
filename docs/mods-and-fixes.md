@@ -14,6 +14,7 @@ they also affect how a playthrough behaves.
 | Synchronous physics at action boundaries | OpenMW setting applied by AstraBridge | `async num threads = 0` in the runtime profile. |
 | Idle-camera stabilization | AstraBridge Lua policy using OpenMW camera interfaces | Disables automatic vanity/standing-preview behavior during controlled play. |
 | Visible target selection | AstraBridge Lua adapter using OpenMW's current camera range | Object picking and screenshot walking targets use the renderer's view distance; normal occlusion, inspection and activation rules remain. |
+| Walking obstacle avoidance | AstraBridge motor using OpenMW navigation and local physics queries | Keeps the selected destination and checks corners, floor support and short detours before rejoining the route, including recorded trails. |
 | Jump and fall controls | AstraBridge Lua adapter using normal actor controls | One jump impulse, directional air steering, observed flight state and stopping on landing; ordinary game physics and skill effects remain in force. |
 | NPC placement recovery | Explicit public command using native ResetActors | Never an automatic part of navigation; the skill restricts its use to observed malfunctions. |
 
@@ -233,6 +234,49 @@ bounded segments with no total distance ceiling. Native attempts between known
 points without a connected trail use the current nominal view range, with
 reachability determined by OpenMW. None of these changes extend the player's
 activation reach or alter collision, movement speed or the core pathfinder.
+
+### Walking obstacle avoidance
+
+[navigation.lua](../runtime/mod/scripts/astrabridge/navigation.lua) follows the
+ordinary OpenMW path with normal player input. Intermediate corners must be
+reached closely enough to take the next checked segment; turning and braking
+account for short waypoints instead of driving past them into nearby rocks.
+
+If an obstruction interrupts a native or recorded walking route, the motor can
+try a bounded local detour and rejoin the original route. Each connection checks
+sampled floor support, OpenMW's normal 46° walkable-slope limit and body
+clearance. Recovery counts apply to an obstruction episode, so passing one rock
+does not exhaust recovery for every
+later rock. Repeated positions and lack of route progress still stop the action,
+and the caller's time budget remains the limit for the whole command. Progress
+along a detour includes its actual walking segments, even when the first segment
+moves away from the final destination.
+
+For direct `move-local` input, progress uses the requested horizontal offset.
+Walking uphill or downhill does not create a fictitious goal at the starting
+height or count as a loss of progress. Its ordinary obstruction, damage and
+time-limit checks still apply.
+
+A native path that stops just short of a selected floor point can be extended
+only when a short physical connection reaches that same point. The connector
+keeps its sampled floor profile. The connection checks reject missing body
+support, incompatible floors and closed-door collisions. At deck seams, a centre
+ray can miss while the physical footprint remains supported; the motor requires
+walkable body support and checks each connecting movement.
+
+When a curved floor connection is missing from the native mesh, a bounded local
+search can assemble checked walking segments. A nearby destination must be
+reached by that complete local route; a more distant destination can use a
+checked prefix followed by a fresh plan from its actual endpoint. The original
+goal and height checks remain in force. An incomplete path without a supported
+connection remains incomplete. None of these checks teleport the player,
+change collision rules or reveal an unvisited route through the public API.
+
+The controller retains the chosen travelled itinerary between successful motor
+segments. Stopping within the ordinary arrival tolerance does not require a new
+atlas graph search that could lead back to the departure. Each next segment
+starts at the actual settled pose and retains the previous corner. Intermediate
+arrivals are not recorded as success at the final destination.
 
 ### Explicit NPC placement recovery
 

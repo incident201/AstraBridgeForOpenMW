@@ -23,6 +23,12 @@ package.preload['openmw.self']=function()return self end
 package.preload['openmw.util']=function()return {vector3=V.new}end
 package.preload['openmw.types']=function()return {Actor={objectIsInstance=function()return true end,getPathfindingAgentBounds=function()return 'player_bounds'end,
     activeEffects=function()return {getEffect=function()return {magnitude=waterWalking and 1 or 0}end}end}}end
+-- The path fixture supplies continuous floor support. Collision and missing
+-- support cases below replace these queries explicitly.
+package.preload['scripts.astrabridge.terrain']=function()return {
+    contact=function()return nil end,
+    walkLine=function(from,to)return {from,to}end,
+}end
 local N=require('scripts.astrabridge.navigation')
 local target={position=V.new(280,0,140)}
 local goal={obj=target}
@@ -54,6 +60,26 @@ self.position=V.new(180,0,140)
 assert(N.step(fast,nil,.2).x==280,'do not turn back after crossing an intermediate waypoint between frames')
 fast={path={V.new(140,0,280),V.new(280,0,280)},index=1,sincePlan=0,previousPosition=V.new(100,0,140)}
 assert(N.step(fast,nil,.2).x==140,'swept movement must still respect the floor')
+-- A near corner is not permission to cut through its wall. The next segment
+-- must be physically supported and clear from the actual current pose.
+local floor=require('scripts.astrabridge.terrain')
+local clearFloor=floor.walkLine
+floor.walkLine=function()return nil end
+self.position=V.new(0,61,0)
+local corner=V.new(0,70,0)
+local tight={goal=V.new(70,70,0),path={corner,V.new(70,70,0)},index=1,sincePlan=0}
+assert(N.step(tight,nil,.1)==corner,'do not skip a nearby corner when its outgoing segment is blocked')
+floor.walkLine=clearFloor
+self.position=V.new(180,20,140)
+local missed={path={V.new(140,0,140),V.new(280,0,140)},index=1,sincePlan=0,
+    recorded=true,previousPosition=V.new(100,20,140)}
+assert(N.step(missed,nil,.2).x==140,'a swept segment outside the narrow recorded path must not skip its corner')
+-- A recorded point 12 units away is outside its arrival radius. Its direction
+-- still needs to steer the player; retaining the old yaw drives into a wall.
+self.position=V.new(0,0,140)
+local shortYaw=N.motion({},V.new(12,0,140),.02,false,0)
+assert(math.abs(shortYaw-math.pi/2)<.001,'short waypoints must steer towards the actual point')
+self.position=V.new(180,0,140)
 local frozen=n.goal
 target.position=V.new(999,999,999)
 nearby.findPath=function(_,dest)
@@ -64,6 +90,7 @@ N.begin(n);n.blockedBy='actor'
 assert(N.recover(n,0))
 assert(N.step(n,nil,.2)==self.position and n.status=='waiting')
 N.step(n,nil,.6)
+package.loaded['scripts.astrabridge.terrain']=nil
 package.preload['scripts.astrabridge.terrain']=function()return {
     contact=function()return {kind='actor'}end,
     walkLine=function()return nil end,
@@ -164,6 +191,23 @@ assert(N.step(crowded,nil,.1) and not crowded.detour and crowded.recorded)
 crowded.attempts=4
 assert(not N.recover(crowded,0),'dynamic recovery remains bounded')
 
+-- Walking around a rock can initially move away from the final goal. It is
+-- useful progress only when it advances the verified detour, not when it
+-- merely rotates or oscillates near an obstruction.
+self.position=V.new(0,0,0)
+local around={goal=V.new(0,700,0),path={V.new(0,700,0)},index=1,
+    rejoinIndex=1,detourPath={V.new(140,0,0),V.new(140,140,0),V.new(0,140,0)},detourIndex=1}
+around.detour=around.detourPath[1]
+assert(not N.stalled(around,0))
+local remainingBefore=around.progress.best
+self.position=V.new(70,0,0)
+assert(not N.stalled(around,1) and around.progress.best<remainingBefore-50,
+    'progress towards a checked sidestep must count even if final-goal distance increases')
+assert(N.stalled(around,3)=='no_route_progress','a stationary detour must still time out')
+N.begin(around)
+assert(not N.stalled(around,0) and around.stalledSeconds==0,
+    'continuing a cached walking goal must start a fresh action progress clock')
+
 -- Static door origin is inside a wall, but an activation standing point exists.
 self.position=V.new(0,0,0)
 require('openmw.types').Actor.objectIsInstance=function()return false end
@@ -215,3 +259,49 @@ assert(N.step(endpoint,nil,.1).x==45 and endpoint.localPath)
 terrain.walkLine=function()return nil end
 endpoint={goal=V.new(45,0,0),path={V.new(10,0,0)},index=1,sincePlan=0,lastGoal={groundPoint=V.new(45,0,0)}}
 assert(N.step(endpoint,nil,.1)==nil,'do not finish a short gap without safe floor support')
+
+-- A native route around a rock may stop at the foot of a short ramp. A
+-- physically checked tail should preserve that route and the original goal,
+-- even when its endpoint's height initially looks like a different floor.
+self.position=V.new(0,0,0)
+local originalGoal=V.new(0,2293,81)
+local nativeCorner=V.new(140,1000,0)
+local nativeEnd=V.new(0,2200,0)
+local rampMid=V.new(0,2246,40)
+nearby.findPath=function()return 1,{self.position,nativeCorner,nativeEnd}end
+terrain.walkLine=function(from,to)
+    if from==nativeEnd and to==originalGoal then return {from,rampMid,to}end
+end
+local rampRoute=N.new({groundPoint=originalGoal})
+assert(rampRoute.goal==originalGoal and rampRoute.path[2]==nativeCorner,
+    'a short checked connector must retain the native rock bypass and selected goal')
+assert(rampRoute.path[#rampRoute.path]==originalGoal and not rampRoute.endpointMismatch,
+    'continuous physical ramp support can complete an otherwise rejected native endpoint')
+assert(N.step(rampRoute,nil,.1)==nativeCorner,'follow the native prefix before its ramp connector')
+terrain.walkLine=function()return nil end
+local unsupportedTail=N.new({groundPoint=originalGoal})
+assert(N.step(unsupportedTail,nil,.1)==nil and unsupportedTail.status=='endpoint_mismatch',
+    'a short but unsupported or blocked connection must retain the wrong-floor guard')
+
+-- A visible floor target beyond a single local query horizon may still have
+-- continuous support. Follow checked prefixes, not an unchecked long chord or
+-- a path on the wrong floor, and keep the caller's original destination.
+self.position=V.new(0,0,0)
+local longFloor=V.new(0,700,0)
+nearby.findPath=function()return 2,{self.position,V.new(0,0,-256)}end
+terrain.walkLine=function(from,to)
+    if (to-from):length()<=420 and math.abs(to.z-from.z)<1 then return {from,to}end
+end
+local physicalRoute=N.new({groundPoint=longFloor})
+local prefix=N.step(physicalRoute,nil,.1)
+assert(prefix and prefix.y>0 and prefix.y<=420 and physicalRoute.goal==longFloor,
+    'a supported long floor route must begin with a bounded checked prefix')
+self.position=prefix
+local continuation=N.step(physicalRoute,nil,.1)
+assert(continuation==longFloor and physicalRoute.goal==longFloor,
+    'finishing a local prefix must continue towards the same selected floor target')
+terrain.walkLine=function()return nil end
+self.position=V.new(0,0,0)
+local missingPrefix=N.new({groundPoint=longFloor})
+assert(N.step(missingPrefix,nil,.1)==nil and missingPrefix.endpointMismatch,
+    'a failed prefix probe must not walk through a gap or towards a different floor')

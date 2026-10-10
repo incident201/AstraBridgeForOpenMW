@@ -2,6 +2,7 @@
 #define OPENMW_MWPHYSICS_RAYCASTING_H
 
 #include <osg/Vec3f>
+#include <utility>
 
 #include "../mwworld/ptr.hpp"
 
@@ -36,6 +37,11 @@ namespace MWPhysics
 
         virtual RayCastingResult castSphere(const osg::Vec3f& from, const osg::Vec3f& to, float radius,
             int mask = CollisionType_Default, int group = 0xff) const = 0;
+
+        /// Private read-only player-body sweep; positions are logical feet.
+        /// Fraction is 1 when clear, otherwise the first accepted body contact.
+        virtual std::pair<RayCastingResult, float> astraActorSweep(const MWWorld::ConstPtr& actor,
+            const osg::Vec3f& fromFeet, const osg::Vec3f& toFeet) const = 0;
 
         /// Return true if actor1 can see actor2.
         virtual bool getLineOfSight(const MWWorld::ConstPtr& actor1, const MWWorld::ConstPtr& actor2) const = 0;

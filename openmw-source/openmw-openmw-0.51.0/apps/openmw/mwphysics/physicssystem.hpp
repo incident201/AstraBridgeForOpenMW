@@ -219,6 +219,9 @@ namespace MWPhysics
         RayCastingResult castSphere(const osg::Vec3f& from, const osg::Vec3f& to, float radius,
             int mask = CollisionType_Default, int group = 0xff) const override;
 
+        std::pair<RayCastingResult, float> astraActorSweep(const MWWorld::ConstPtr& actor,
+            const osg::Vec3f& fromFeet, const osg::Vec3f& toFeet) const override;
+
         /// Return true if actor1 can see actor2.
         bool getLineOfSight(const MWWorld::ConstPtr& actor1, const MWWorld::ConstPtr& actor2) const override;
 

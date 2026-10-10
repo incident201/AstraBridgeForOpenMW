@@ -84,10 +84,12 @@ assert(not pcall(T.mark,{0,2,0},{{0,0,0},{0,1,0}}),'a route must end at the reco
 local physical='floor'
 nearby.castRay=function(a,b,opts)
     if a.x==b.x and a.y==b.y then
-        if physical=='gap' and a.y>50 and a.y<90 then return {hit=false}end
-        local z=physical=='stairs' and math.floor(a.y/30)*12 or physical=='wrong_floor' and 256 or 0
+        if physical=='gap' and a.y>50 and a.y<90
+            or physical=='wide_gap' and a.y>40 and a.y<110 then return {hit=false}end
+        local slope=physical=='ramp45' and 1 or physical=='steep48' and math.tan(math.rad(48)) or 0
+        local z=physical=='stairs' and math.floor(a.y/30)*12 or physical=='wrong_floor' and 256 or a.y*slope
         if z>a.z or z<b.z then return {hit=false}end
-        return {hit=true,hitPos=V.new(a.x,a.y,z),hitNormal=V.new(0,0,1)}
+        return {hit=true,hitPos=V.new(a.x,a.y,z),hitNormal=V.new(0,-slope,1)*(1/math.sqrt(1+slope*slope))}
     end
     if physical=='closed_door' and a.y<60 and b.y>=60 then
         return {hit=true,hitPos=V.new(a.x,60,a.z)}
@@ -96,8 +98,47 @@ nearby.castRay=function(a,b,opts)
 end
 assert(T.walkLine(V.new(0,0,0),V.new(0,140,0)))
 physical='stairs';assert(T.walkLine(V.new(0,0,0),V.new(0,120,48)))
+physical='ramp45';assert(T.walkLine(V.new(0,0,0),V.new(0,140,140)),
+    'a supported ramp inside the ordinary slope limit remains usable')
+physical='steep48';assert(not T.walkLine(V.new(0,0,0),V.new(0,140,140*math.tan(math.rad(48)))),
+    'floor rays must not certify a slope too steep for ordinary engine walking')
 for _,value in ipairs({'gap','wrong_floor','closed_door'}) do
     physical=value
     assert(not T.walkLine(V.new(0,0,0),V.new(0,140,0)),value..' must stop local path construction')
 end
+-- A body on a 45 degree ramp stands above its centre-floor ray. Preserve
+-- that supported foot profile instead of embedding the body in the slope or
+-- widening arrival limits beyond the motor's existing 35-unit height limit.
+physical='ramp45'
+nearby._astraActorSweep=function(_,a,b)
+    if a.x==b.x and a.y==b.y and b.z<a.z then
+        local supportZ=a.y+28.48
+        if supportZ<=a.z and supportZ>=b.z then
+            return {hit=true,hitPos=V.new(a.x,a.y,supportZ),
+                    hitNormal=V.new(0,-1,1)*(1/math.sqrt(2))},(a.z-supportZ)/(a.z-b.z)
+        end
+    end
+    return {hit=false},1
+end
+local footProfile=T.walkLine(V.new(0,0,29.48),V.new(0,140,140))
+assert(footProfile and math.abs(footProfile[#footProfile].z-169.48)<.001,
+    'a valid body-supported ramp must retain its actual standing height')
+-- At a seam the centre-floor ray can miss while the physical footprint still
+-- rests on the surrounding deck. An actual unsupported hole remains rejected.
+nearby._astraActorSweep=function(_,a,b)
+    if a.x==b.x and a.y==b.y and b.z<a.z then
+        if physical=='wide_gap' and a.y>40 and a.y<110 then return {hit=false},1 end
+        if a.z>=0 and b.z<=0 then
+            return {hit=true,hitPos=V.new(a.x,a.y,0),hitNormal=V.new(0,0,1)},a.z/(a.z-b.z)
+        end
+    end
+    return {hit=false},1
+end
+physical='gap'
+assert(T.walkLine(V.new(0,0,1),V.new(0,140,0)),
+    'actual body support can cross a deck seam that the centre ray misses')
+physical='wide_gap'
+assert(not T.walkLine(V.new(0,0,1),V.new(0,140,0)),
+    'missing actual body support must still reject an unsupported gap')
+nearby._astraActorSweep=nil
 print('Bounded local survey: floors, walls, physical blocker, cache, stale refs, anchors and no hidden names passed')

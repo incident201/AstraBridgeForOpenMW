@@ -7,7 +7,7 @@ is in [openmw-source/openmw-openmw-0.51.0](../openmw-source/openmw-openmw-0.51.0
 The upstream reference is the
 [openmw-0.51.0 tag archive](https://codeload.github.com/OpenMW/openmw/tar.gz/refs/tags/openmw-0.51.0).
 
-There are **38 modified existing files and five added native headers**, apart
+There are **42 modified existing files and six added native headers**, apart
 from omitted upstream documentation and development-support files. The patch
 recipe is designed to be idempotent and the vendored tree includes these changes.
 
@@ -154,6 +154,27 @@ returning tooltip/condition/effect data. The door/container description helper
 returns the game's tooltip text; the public close-inspection gate is in Lua
 and the Python recognition projection, not in that helper alone.
 
+### Player body collision sensing
+
+The private `openmw.nearby._astraActorSweep` binding checks a short candidate
+movement with the player's actual physics collision shape. Exterior navigation
+meshes use a configured agent size, which is not necessarily the current
+player's physical body. A few rays at torso height can also miss a low obstacle
+or incorrectly reject movement beside a curved rock.
+
+The query uses the real shape, its rotation and vertical offset, and normal
+collision masks. It ignores the player itself and excludes projectiles to keep
+the query free of gameplay side effects. Separating contacts are filtered before
+choosing the nearest blocking hit, so an initial contact with a rock does not
+hide another obstacle farther along the same movement. The binding is restricted
+to the player and does not move it or enumerate nearby objects.
+
+Lua combines this body query with sampled floor support for walking connections
+and local detours. Native positions and hit geometry stay inside the motor; the
+agent continues to receive aggregate movement and obstruction diagnostics. This
+adds collision sensing, rather than replacing OpenMW's movement solver,
+pathfinder or player controls.
+
 ## 3. A stable pause boundary
 
 The native `_astraPause` binding applies the same `AstraBridge` pause tag used
@@ -226,7 +247,7 @@ ResetActors recovery adapter continue to work.
 
 ## Native binding inventory
 
-All names below are internal members added to `openmw.ui`. Public commands are
+Unless qualified otherwise, names below are internal members added to `openmw.ui`. Public commands are
 documented in the [skill reference](../skill/references/commands.md).
 
 | Bindings | Responsibility and boundary |
@@ -246,16 +267,18 @@ documented in the [skill reference](../skill/references/commands.md).
 | `_astraProjectileParameters` | Private parameters for the player's current ranged attack. |
 | `_astraPause` | Immediate application of AstraBridge's own pause tag. |
 | `_astraResetNPC` | Explicit engine ResetActors recovery. |
+| `openmw.nearby._astraActorSweep` | Read-only sweep using the player's real collision body; private motor sensing only. |
 
 ## Complete changed-file inventory
 
 Paths below are relative to the vendored OpenMW tree. The groups account for
-all 38 modified files in the upstream comparison; helper headers are listed
+all 42 modified files in the upstream comparison; helper headers are listed
 separately afterward.
 
 | Changed files | Purpose |
 |---|---|
 | [apps/openmw/mwlua/uibindings.cpp](../openmw-source/openmw-openmw-0.51.0/apps/openmw/mwlua/uibindings.cpp) | Register the native adapter functions. |
+| [mwlua/nearbybindings.cpp](../openmw-source/openmw-openmw-0.51.0/apps/openmw/mwlua/nearbybindings.cpp), [mwphysics/raycasting.hpp](../openmw-source/openmw-openmw-0.51.0/apps/openmw/mwphysics/raycasting.hpp), [physicssystem.hpp](../openmw-source/openmw-openmw-0.51.0/apps/openmw/mwphysics/physicssystem.hpp), [physicssystem.cpp](../openmw-source/openmw-openmw-0.51.0/apps/openmw/mwphysics/physicssystem.cpp) | Private player-only body sweep using the real collision shape and read-only callback; expose hit data and sweep fraction to the motor. |
 | [mwgui/mapwindow.hpp](../openmw-source/openmw-openmw-0.51.0/apps/openmw/mwgui/mapwindow.hpp), [mapwindow.cpp](../openmw-source/openmw-openmw-0.51.0/apps/openmw/mwgui/mapwindow.cpp) | Temporary large map, typed view controls and visible tooltip projection. |
 | [mwgui/waitdialog.cpp](../openmw-source/openmw-openmw-0.51.0/apps/openmw/mwgui/waitdialog.cpp), [countdialog.cpp](../openmw-source/openmw-openmw-0.51.0/apps/openmw/mwgui/countdialog.cpp), [tradewindow.cpp](../openmw-source/openmw-openmw-0.51.0/apps/openmw/mwgui/tradewindow.cpp) | Rest, quantity and barter controls and values. |
 | [mwgui/dialogue.cpp](../openmw-source/openmw-openmw-0.51.0/apps/openmw/mwgui/dialogue.cpp), [travelwindow.cpp](../openmw-source/openmw-openmw-0.51.0/apps/openmw/mwgui/travelwindow.cpp) | Service roles and localized travel destinations. |
@@ -281,6 +304,7 @@ Added headers and their maintained sources:
 | `apps/openmw/mwlua/astraui.hpp` | [runtime/native/astraui.hpp](../runtime/native/astraui.hpp) |
 | `apps/openmw/mwlua/astramap.hpp` | [runtime/native/astramap.hpp](../runtime/native/astramap.hpp), compiled by `mapwindow.cpp` |
 | `apps/openmw/mwlua/astracombat.hpp` | [runtime/native/astracombat.hpp](../runtime/native/astracombat.hpp) |
+| `apps/openmw/mwphysics/astraactorsweep.hpp` | [runtime/native/astraactorsweep.hpp](../runtime/native/astraactorsweep.hpp) |
 | `components/sdlutil/astraframe.hpp` | [runtime/native/astraframe.hpp](../runtime/native/astraframe.hpp) |
 | `components/sdlutil/astramedia.hpp` | [runtime/native/astramedia.hpp](../runtime/native/astramedia.hpp) |
 
