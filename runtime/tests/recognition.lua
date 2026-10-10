@@ -33,6 +33,7 @@ end
 package.preload['openmw.camera']=function()return {
     getPosition=function()return V.new(0,0,10)end,getThirdPersonDistance=function()return thirdPerson end,
     getYaw=function()return 0 end,getPitch=function()return 0 end,getFieldOfView=function()return 1 end,
+    getViewDistance=function()return 7168 end,
     viewportToWorldVector=function()return V.new(0,1,0)end,
     worldToViewportVector=function(v)return V.new(640+v.x,360-v.z)end,
 }end

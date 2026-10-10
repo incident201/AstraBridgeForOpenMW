@@ -259,8 +259,10 @@ def test_ballistic_adapter_rejects_a_blocked_weapon_path():
     assert r.returncode==0,r.stdout+r.stderr
 
 
-def anchored(atlas, samples, visit='visit1', space='private_cell', origin=(100,200,3), heading=0):
+def anchored(atlas, samples, visit='visit1', space='private_cell', origin=(100,200,3), heading=0,
+             view_distance_m=102.4):
     obs=observation(samples, segment=visit, heading=heading)
+    obs['orientation']={'view_distance_m':view_distance_m}
     atlas.ingest(obs, {'space':space, 'origin':list(origin)})
     return obs
 
@@ -357,6 +359,61 @@ def test_disconnected_known_point_requires_native_path_not_invented_trail(tmp_pa
     assert row['can_revisit'] and row['revisit_source']=='native_path_required'
     archived=atlas.present(tmp_path/'archive.svg',archived=True)['nodes'][0]
     assert not archived['can_revisit'] and archived['revisit_source']=='different_space'
+
+
+@pytest.mark.parametrize('distance_m,view_distance_m,available',[
+    (79,80,True),(80,80,True),(90,80,False),
+    (79,50,False),(90,120,True),(150,200,True),(90,None,False),
+])
+def test_disconnected_native_route_and_report_use_current_renderer_range(tmp_path,distance_m,view_distance_m,available):
+    atlas=ExplorationAtlas(tmp_path/'atlas.json')
+    first=anchored(atlas,[sample(1)],origin=(0,0,0))
+    node=atlas.annotate(first)
+    anchored(atlas,[sample(1)],'other_door',origin=(distance_m,0,0),view_distance_m=view_distance_m)
+    assert atlas.travelled_route(node) is None
+    row=next(r for r in atlas.present(None,radius=distance_m+1)['nodes'] if r['ref']==node['ref'])
+    plan=atlas.route_to(node['ref'])
+    assert row['can_revisit'] is available and bool(plan) is available
+    assert row['revisit_source']==('native_path_required' if available else 'unavailable')
+    if plan:
+        assert plan['steps']==[{'kind':'walk','ref':node['ref'],'source':'native_path_required'}]
+
+
+def test_renderer_range_tracks_current_observation_and_is_transient(tmp_path):
+    path=tmp_path/'atlas.json'
+    atlas=ExplorationAtlas(path)
+    first=anchored(atlas,[sample(1)],origin=(0,0,0))
+    node=atlas.annotate(first)
+    last=anchored(atlas,[sample(1)],'other_door',origin=(90,0,0))
+    assert atlas.route_to(node['ref'])
+    atlas.ingest({'orientation':{'view_distance_m':50}})
+    assert atlas.route_to(node['ref']) is None
+    atlas.ingest({'trajectory':last['trajectory'],'location':last['location']},
+                 {'space':'private_cell','origin':[90,0,0]})
+    assert atlas.view_distance_m==50,'trajectory-only updates must retain the current camera range'
+    atlas.ingest({'orientation':{'view_distance_m':120}})
+    assert atlas.route_to(node['ref'])
+    assert 'view_distance_m' not in str(atlas.data)
+    atlas.persist();atlas.db.close()
+    atlas=ExplorationAtlas(path)
+    assert atlas.view_distance_m is None,'renderer state must be refreshed after restart'
+    atlas.ingest({'orientation':{'view_distance_m':120}})
+    atlas.reset_runtime()
+    assert atlas.view_distance_m is None
+
+
+@pytest.mark.parametrize('view_distance_m',[None,5])
+def test_connected_kilometre_trail_is_independent_of_renderer_range(tmp_path,view_distance_m):
+    atlas=ExplorationAtlas(tmp_path/'atlas.json')
+    first=anchored(atlas,[sample(1)],origin=(0,0,0),view_distance_m=view_distance_m)
+    node=atlas.annotate(first)
+    anchored(atlas,[sample(i+2,forward=i+1) for i in range(1000)],origin=(0,0,0),
+             view_distance_m=view_distance_m)
+    plan=atlas.route_to(node['ref'])
+    assert plan['estimated_distance_m']==pytest.approx(1000)
+    assert plan['steps']==[{'kind':'walk','ref':node['ref'],'source':'recorded_trail'}]
+    row=next(r for r in atlas.present(None,radius=1001)['nodes'] if r['ref']==node['ref'])
+    assert row['can_revisit'] and row['revisit_source']=='recorded_trail'
 
 
 def test_private_atlas_metadata_rejected_at_public_boundary():

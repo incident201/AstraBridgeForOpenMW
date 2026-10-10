@@ -70,6 +70,7 @@ class ExplorationAtlas(AtlasRoutes):
         self._route_cache = None
         self.clock_epoch = uuid.uuid4().hex
         self.simulation_seconds = None
+        self.view_distance_m = None
 
     def _meta(self, key):
         row = self.db.execute('SELECT value FROM meta WHERE key=?', (key,)).fetchone()
@@ -154,11 +155,17 @@ class ExplorationAtlas(AtlasRoutes):
         self.data['markers'] = []
         self.clock_epoch = uuid.uuid4().hex
         self.simulation_seconds = None
+        self.view_distance_m = None
 
     def current(self):
         return next((s for s in self.data['segments'] if s['ref'] == self.segment), None)
 
     def ingest(self, observation, frame=None):
+        orientation = observation.get('orientation', {})
+        if 'view_distance_m' in orientation:
+            view_distance = orientation['view_distance_m']
+            self.view_distance_m = (view_distance if type(view_distance) in (int, float)
+                                    and math.isfinite(view_distance) and view_distance > 0 else None)
         clock = observation.get('simulation_seconds')
         if isinstance(clock, (int, float)) and math.isfinite(clock):
             if self.simulation_seconds is not None and clock < self.simulation_seconds - .01:
@@ -466,8 +473,8 @@ class ExplorationAtlas(AtlasRoutes):
                          'location':n.get('location',s['location']), 'distance_m': round(distance(n['p'], pose), 2),
                          'bearing_deg': round(relative_bearing, 1),
                          'height_change_m': round(n['p'][2]-pose[2], 2), 'visits': n['visits'],
-                         'can_revisit': n['ref'] in routes or bool(s.get('persistent') and n.get('walkable') and math.dist(n['p'], pose) < 100),
-                         'revisit_source': 'recorded_trail' if n['ref'] in routes else 'native_path_required' if s.get('persistent') and n.get('walkable') and math.dist(n['p'], pose) < 100 else 'unavailable',
+                         'can_revisit': n['ref'] in routes or bool(s.get('persistent') and n.get('walkable') and self.native_leg_available(pose, n['p'])),
+                         'revisit_source': 'recorded_trail' if n['ref'] in routes else 'native_path_required' if s.get('persistent') and n.get('walkable') and self.native_leg_available(pose, n['p']) else 'unavailable',
                          'route_distance_m': round(routes[n['ref']][1], 2) if n['ref'] in routes else None,
                          'untraversed_directions': [{'heading_deg': round(d['heading'], 1), 'meters': d['meters']} for d in directions],
                          'landmarks': n.get('landmarks', []), 'screenshots': [self.portable_view(v) for v in n['views'] if v and Path(v).is_file()]})

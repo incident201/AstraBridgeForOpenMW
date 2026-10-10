@@ -31,23 +31,61 @@ function M.orientation()
         for name,value in pairs(camera.MODE) do if value==camera.getMode() then mode=name end end
     end
     return {heading_deg=round(math.deg(camera.getYaw())%360),pitch_deg=round(math.deg(camera.getPitch())),view_mode=mode,
+        view_distance_m=round(camera.getViewDistance()/M.unitsPerMeter),
         horizontal_fov_deg=round(math.deg(2*math.atan(math.tan(vf/2)*s.x/s.y)))}
 end
 function M.fov(degrees)
     local s=ui.screenSize()
     camera.setFieldOfView(2*math.atan(math.tan(math.rad(degrees)/2)*s.y/s.x))
 end
+local function view()
+    local forward=camera.viewportToWorldVector(util.vector2(.5,.5))
+    return {origin=camera.getPosition(),forward=forward*(1/forward:length()),distance=camera.getViewDistance()}
+end
+local function inViewDepth(point,v)
+    local depth=(point-v.origin):dot(v.forward)
+    return depth>0 and depth<=v.distance
+end
+local function viewportRay(v,x,y,size)
+    local direction=camera.viewportToWorldVector(util.vector2(x/size.x,y/size.y))
+    local depth=direction:dot(v.forward)
+    if depth<=0 or v.distance<=0 then return nil end
+    -- The far plane limits camera depth, not Euclidean ray length. Edge rays
+    -- can be longer than the current view distance without leaving the view.
+    return direction*(1/depth)
+end
+local function objectRay(g,target,offscreen)
+    local direction=target-g.origin
+    local length=direction:length()
+    if length<.001 then return nil end
+    local unit=direction*(1/length)
+    local distance=length+4
+    if not offscreen then
+        local depth=unit:dot(g.view.forward)
+        if depth<=0 then return nil end
+        distance=math.min(distance,g.view.distance/depth)
+    end
+    local ray=nearby.castRenderingRay(g.origin,g.origin+unit*distance,{ignore=self.object})
+    if ray.hitObject==g.obj and ray.hitPos and (offscreen or inViewDepth(ray.hitPos,g.view)) then return ray end
+end
 local function geometry(obj,offscreen)
     if not obj:isValid() or not obj.enabled then return nil end
     if not obj.cell then return nil end
     if Space.key(obj.cell)~=Space.key(self.cell) then return nil end
-    local origin=camera.getPosition()
+    local v=view()
+    local origin=v.origin
     local box=obj:getBoundingBox()
     local center,half=box.center,box.halfSize
     local delta=center-origin
-    if delta:length()>2800 then return nil end
-    local forward=camera.viewportToWorldVector(util.vector2(.5,.5))
+    local forward=v.forward
     if not offscreen and delta:dot(forward)<=0 then return nil end
+    -- A visible part can be in front of the far plane while its bounds centre
+    -- is beyond it. Let the rendering ray identify the actual visible surface.
+    if not offscreen then
+        local nearest=math.huge
+        for _,point in ipairs(box.vertices) do nearest=math.min(nearest,(point-origin):dot(forward)) end
+        if nearest>v.distance then return nil end
+    end
     if types.Actor.objectIsInstance(obj) then
         local effects=types.Actor.activeEffects(obj)
         local effect=effects:getEffect('invisibility')
@@ -65,7 +103,7 @@ local function geometry(obj,offscreen)
         end
     end
     if not offscreen and (maxX<0 or maxY<0 or minX>size.x or minY>size.y) then return nil end
-    return {obj=obj,origin=origin,center=center,half=half,distance=delta:length(),
+    return {obj=obj,origin=origin,view=v,center=center,half=half,distance=delta:length(),
         rect={math.max(0,minX),math.max(0,minY),math.min(size.x,maxX)-math.max(0,minX),math.min(size.y,maxY)-math.max(0,minY)}}
 end
 local offsets={{0,0,0},{0,0,.65},{0,0,-.5},{.6,0,0},{-.6,0,0},{0,.6,0},{0,-.6,0}}
@@ -76,8 +114,8 @@ local function visible(g,budget,offscreen)
     if picked then
         local screen=camera.worldToViewportVector(picked)
         if offscreen or screen.x>=0 and screen.y>=0 and screen.x<size.x and screen.y<size.y then
-            local ray=nearby.castRenderingRay(g.origin,picked+(picked-g.origin):normalize()*4,{ignore=self.object})
-            if ray.hitObject==g.obj then
+            local ray=objectRay(g,picked,offscreen)
+            if ray then
                 g.point=ray.hitPos;g.screen={round(screen.x),round(screen.y)};g.distance=(ray.hitPos-g.origin):length()
                 return g
             end
@@ -96,9 +134,8 @@ local function visible(g,budget,offscreen)
             -- Some door meshes are almost planar. Ending exactly on their bounds
             -- can miss the triangle numerically; extend the same ray slightly.
             -- First-hit identity still prevents looking through an occluder.
-            local direction=target-g.origin
-            local ray=nearby.castRenderingRay(g.origin,target+direction:normalize()*4,{ignore=self.object})
-            if ray.hitObject and ray.hitObject==g.obj then
+            local ray=objectRay(g,target,offscreen)
+            if ray then
                 preferred[key]=index
                 local p=camera.worldToViewportVector(ray.hitPos)
                 g.point=ray.hitPos;g.screen={round(p.x),round(p.y)}
@@ -235,15 +272,15 @@ end
 function M.pick(x,y,radius)
     local size=ui.screenSize()
     if x<0 or y<0 or x>=size.x or y>=size.y then return {reason='invalid_arguments'} end
-    local origin=camera.getPosition();local rows=P.array();local found={}
+    local v=view();local origin=v.origin;local rows=P.array();local found={}
     local offsets=radius>0 and {-1,-.75,-.5,-.25,0,.25,.5,.75,1} or {0}
     for _,dx in ipairs(offsets) do for _,dy in ipairs(offsets) do
         local sx,sy=x+dx*radius,y+dy*radius
         if sx>=0 and sy>=0 and sx<size.x and sy<size.y then
-            local direction=camera.viewportToWorldVector(util.vector2(sx/size.x,sy/size.y)):normalize()
-            local ray=nearby.castRenderingRay(origin,origin+direction*2800,{ignore=self.object})
+            local direction=viewportRay(v,sx,sy,size)
+            local ray=direction and nearby.castRenderingRay(origin,origin+direction*v.distance,{ignore=self.object}) or {}
             local obj=ray.hitObject
-            if obj and not found[obj.id] then
+            if obj and ray.hitPos and inViewDepth(ray.hitPos,v) and not found[obj.id] then
                 local g=geometry(obj)
                 if g then
                     for _,kind in ipairs({'Actor','Door','Container','Item','Activator'}) do
@@ -295,15 +332,18 @@ end
 function M.groundPoint(x,y)
     local size=ui.screenSize()
     if x<0 or y<0 or x>=size.x or y>=size.y then return nil end
-    local from=camera.getPosition()
-    local direction=camera.viewportToWorldVector(util.vector2(x/size.x,y/size.y))
-    local ray=nearby.castRenderingRay(from,from+direction*2100,{ignore=self.object})
+    local v=view();local from=v.origin
+    local direction=viewportRay(v,x,y,size)
+    if not direction then return nil end
+    local ray=nearby.castRenderingRay(from,from+direction*v.distance,{ignore=self.object})
+    if ray.hit and (not ray.hitPos or not inViewDepth(ray.hitPos,v)) then return nil end
     local level=require('scripts.astrabridge.mobility').waterLevel()
     if level and from.z>level and direction.z<0 then
         local distance=(level-from.z)/direction.z
         -- The surface must be in front of any rendered wall/shore/object.
-        if distance>0 and distance<=2100 and (not ray.hit or ray.hitPos and distance<=(ray.hitPos-from):length()+1) then
-            return from+direction*distance
+        local point=from+direction*distance
+        if distance>0 and distance<=v.distance and (not ray.hit or (point-from):length()<=(ray.hitPos-from):length()+1) then
+            return point
         end
     end
     if not ray.hit or not ray.hitPos or not ray.hitNormal then return nil end
@@ -314,9 +354,9 @@ function M.groundPoint(x,y)
     -- that same instance, along the same ray; walls/rails and remote floors
     -- must not become walking targets through an unrelated collision hit.
     if not nearby.castRay then return nil end
-    local support=nearby.castRay(from,from+direction*2100,{ignore=self.object})
+    local support=nearby.castRay(from,from+direction*v.distance,{ignore=self.object})
     if support.hit and support.hitPos and support.hitObject==ray.hitObject
-        and (support.hitPos-ray.hitPos):length()<=8 and walkableNormal(support.hitNormal) then
+        and inViewDepth(support.hitPos,v) and (support.hitPos-ray.hitPos):length()<=8 and walkableNormal(support.hitNormal) then
         return support.hitPos
     end
     return nil
@@ -335,6 +375,7 @@ function M.groundTargets()
     groundTargets={};groundSerial=groundSerial+1
     if not nearby.findPath or not types.Actor.getPathfindingAgentBounds then return result end
     local size=ui.screenSize()
+    local v=view()
     local groups={}
     -- Only actual visible surfaces. No navmesh point is invented beyond the ray.
     for _,fy in ipairs({.45,.60,.75,.90,.97}) do
@@ -344,7 +385,7 @@ function M.groundTargets()
             if point then
                 local d=point-self.position
                 local distance=d:length()/M.unitsPerMeter
-                if distance>=1 and distance<=30 then
+                if distance>=1 and inViewDepth(point,v) then
                     local height=d.z/M.unitsPerMeter
                     local band=height< -1 and 1 or height>1 and 3 or 2
                     local side=math.min(3,math.floor(fx*3)+1)
@@ -371,7 +412,7 @@ function M.groundTargets()
                     -- Suggest the reachable point only if it is close, on the
                     -- same floor, visibly projected, and not beyond a wall.
                     local ok,visiblePoint=pcall(function()
-                        if gap>105 or math.abs(endpoint.z-g.point.z)>52.5 or (endpoint-self.position):length()>2100 then return nil end
+                        if gap>105 or math.abs(endpoint.z-g.point.z)>52.5 then return nil end
                         -- Recast onto the physical tread. The navmesh is a
                         -- simplified surface and can lie below a stair by more
                         -- than our arrival tolerance; its Z is not a foot pose.
@@ -381,7 +422,7 @@ function M.groundTargets()
                         local candidate=floorRay.hitPos
                         if (candidate-g.point):length()>105 or math.abs(candidate.z-g.point.z)>52.5 then return nil end
                         local origin=camera.getPosition()
-                        if (candidate-origin):dot(camera.viewportToWorldVector(util.vector2(.5,.5)))<=0 then return nil end
+                        if not inViewDepth(candidate,v) then return nil end
                         local screen=camera.worldToViewportVector(candidate)
                         local floor=M.groundPoint(screen.x,screen.y)
                         if not floor or (floor-candidate):length()>35 then return nil end

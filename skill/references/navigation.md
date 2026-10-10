@@ -38,6 +38,16 @@ For places already visited, start with `atlas --query "NAME"` / `revisit`, or `r
 
 `walk` also accepts `--under-fire`. This flag disables the early damage stop for the movement commands that support it; it does not confer protection. Ordinary navigation can stop on damage, a changed location/UI, obstruction, lost target, time limit or partial path. Check the returned reason and actual distance, not just `ok:true`.
 
+`pick`, visible object refs and screenshot walking points use the current OpenMW
+view distance, reported as `orientation.view_distance_m`. The standard setting
+is about 102.4 m; changing it changes selection range. This is the camera's
+forward depth, so a visible point near a screen edge can be farther away in
+straight-line distance. Occlusion and normal inspection/activation range still
+apply. Selecting a distant target does not prove a complete route exists. A
+returned walking goal can be continued with its ref after the camera turns;
+fresh ground/passage selections still expire after moving 0.5 m or three
+simulation seconds.
+
 Path-following `go`/`walk` looks along its movement. A live combat lock controls the camera: `unlock` before independent turns/scans/path navigation. Combat pursuit/retreat intentionally keeps the actor in view; see [combat.md](combat.md).
 
 On narrow stairs and bridges, choose a visible tread, landing or part of the deck with `ground` → `go`, or use `walk` on the screenshot. Check the point's height and navigation status. The route may first lead around a support post before climbing. `move-local` and `act` apply direct movement without planning that detour; after they stall, select a path-following command or a different visible intermediate point.
@@ -234,7 +244,7 @@ The motor first tries the engine's normal pathfinder. If that route is incomplet
 
 At a learned door transition, the motor first matches fresh visible door geometry against its recorded center/floor. If needed it makes a bounded set of ordinary recorded camera turns. Old transitions without geometry require an unambiguous current label. Missing or ambiguous doors stop the route.
 
-Collision is checked during movement. For a blocking NPC the motor briefly waits, then attempts a short local detour with floor support and both legs checked; otherwise it stops with an obstruction reason. Progress is measured along the route, with a short allowance for initial turning. Rotation or small oscillation does not reset the progress timer. `no_route_progress`/`repeated_positions` and the navigation reason identify stalled recovery. A closed door can block an older route. A time limit returns `step_limit`; continue from the current pose only if the result shows useful progress. Failed legs and successful traversals persist in the atlas. NPC blockages expire after eight simulation seconds, other route failures after 90; thinking on pause does not expire them. Loading/restarting revalidates old obstacles while preserving their history; `revisit` can try up to two alternative known legs within the original time budget. These cooldowns guide retries, not assertions that an obstacle still exists. `recorded_route_unavailable` means no route between known points/door links can be resolved. Long recorded paths are split internally into bounded motor legs and use the caller's total time budget; there is no 100 m limit on a connected recorded journey. A disconnected permanent point can use native navigation, without inventing a connecting trail.
+Collision is checked during movement. For a blocking NPC the motor briefly waits, then attempts a short local detour with floor support and both legs checked; otherwise it stops with an obstruction reason. Progress is measured along the route, with a short allowance for initial turning. Rotation or small oscillation does not reset the progress timer. `no_route_progress`/`repeated_positions` and the navigation reason identify stalled recovery. A closed door can block an older route. A time limit returns `step_limit`; continue from the current pose only if the result shows useful progress. Failed legs and successful traversals persist in the atlas. NPC blockages expire after eight simulation seconds, other route failures after 90; thinking on pause does not expire them. Loading/restarting revalidates old obstacles while preserving their history; `revisit` can try up to two alternative known legs within the original time budget. These cooldowns guide retries, not assertions that an obstacle still exists. `recorded_route_unavailable` means no route between known points/door links can be resolved. Long recorded paths are split internally into bounded motor legs and use the caller's total time budget; there is no total distance limit on a connected recorded journey. A disconnected permanent point within the current nominal view range can use native navigation, without inventing a connecting trail; this does not establish that the point is currently visible or reachable.
 
 ## Semantic notes and route history
 

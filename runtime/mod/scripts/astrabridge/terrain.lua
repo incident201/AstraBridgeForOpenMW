@@ -160,7 +160,7 @@ function M.observe(force)
 end
 function M.resolve(ref)
     local mark=marks[ref]
-    if mark and mark.cell==Space.key(self.cell) and (mark.point-self.position):length()<7000 then return mark.point end
+    if mark and mark.cell==Space.key(self.cell) then return mark.point end
     local goal=targets[ref]
     if goal and goal.cell==Space.key(self.cell) and (goal.origin-self.position):length()<35
         and core.getSimulationTime()-goal.time<3 then return goal.point end
@@ -168,15 +168,23 @@ end
 function M.route(ref)
     if M.resolve(ref) then return marks[ref] and marks[ref].route end
 end
+local function restoredPoint(offset)
+    assert(type(offset)=='table' and #offset==3)
+    local d=util.vector3(P.number(offset[1],-math.huge,math.huge),
+        P.number(offset[2],-math.huge,math.huge),P.number(offset[3],-math.huge,math.huge))
+    local point=self.position+d*M.units
+    -- Finite relative coordinates can still overflow when converted to units.
+    P.number(point.x,-math.huge,math.huge)
+    P.number(point.y,-math.huge,math.huge)
+    P.number(point.z,-math.huge,math.huge)
+    return point
+end
 function M.mark(offset,route)
     local point=self.position
     if offset then
         -- Controller-only restoration of this player's recorded path after
         -- loading its matching checkpoint. Public mark accepts no coordinates.
-        assert(type(offset)=='table' and #offset==3)
-        local d=util.vector3(P.number(offset[1],-100,100,0),P.number(offset[2],-100,100,0),P.number(offset[3],-100,100,0))
-        assert(d:length()<100)
-        point=point+d*M.units
+        point=restoredPoint(offset)
     end
     serial=serial+1
     local ref='waypoint_'..epoch..'_'..serial
@@ -185,10 +193,7 @@ function M.mark(offset,route)
         assert(type(route)=='table' and #route>0 and #route<=800)
         local points={}
         for i,p in ipairs(route) do
-            assert(type(p)=='table' and #p==3)
-            local d=util.vector3(P.number(p[1],-100,100),P.number(p[2],-100,100),P.number(p[3],-100,100))
-            assert(d:length()<100)
-            points[i]=self.position+d*M.units
+            points[i]=restoredPoint(p)
         end
         assert((points[1]-self.position):length()<10 and (points[#points]-point):length()<3)
         marks[ref].route=points

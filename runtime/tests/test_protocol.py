@@ -23,6 +23,15 @@ def test_player_visible_projection():
                          "stats": {"health": {"current": 20, "maximum": 30}}})
 
 
+def test_current_renderer_range_is_public_camera_metadata():
+    from astra_bridge.observations import compact
+    observation={'state':'running','orientation':{'view_distance_m':102.4}}
+    assert compact(check_result(observation))['orientation']['view_distance_m']==102.4
+    for value in (float('nan'),float('inf')):
+        with pytest.raises(BridgeError):
+            check_result({'orientation':{'view_distance_m':value}})
+
+
 def test_dialogue_content_is_not_limited_to_viewport():
     topic={'ref':'ui_available','text':'Доступная тема','role':'button','enabled':True,'screen_visible':False}
     assert check_result({'ui':{'text':'Уже произнесённый ответ',

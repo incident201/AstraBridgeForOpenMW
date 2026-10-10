@@ -63,7 +63,17 @@ mode='swim';r=T.observe(true);assert(not r.supported and r.reason=='swimming_req
 T.reset('new');assert(not T.resolve(mark))
 local restored=T.mark({2,-3,.5});local point=T.resolve(restored)
 assert(point.x==140 and point.y==-210 and point.z==35,'restore only a relative recorded waypoint in the current space')
-assert(not pcall(T.mark,{101,0,0}),'restored markers remain within the bounded local return distance')
+local distant=T.mark({2000,0,0})
+assert(T.resolve(distant).x==140000,'known waypoints have no arbitrary distance ceiling')
+self.position=V.new(-70000,0,0)
+assert(T.resolve(distant).x==140000,'a known waypoint remains valid after moving away in the same world')
+self.cell={id='different_space'};assert(not T.resolve(distant),'distance changes do not weaken space isolation')
+self.cell={id='private_room'};self.position=V.new(0,0,0)
+for _,invalid in ipairs({{math.huge,0,0},{0/0,0,0},{1e308,0,0},{0,0}}) do
+ assert(not pcall(T.mark,invalid),'restored coordinates and converted world points must remain finite')
+end
+local farRoute=T.mark({0,150,0},{{0,0,0},{0,75,0},{0,150,0}})
+assert(T.route(farRoute)[3].y==10500,'controller restore is not limited by an arbitrary 100 m radius')
 local route=T.mark({0,2,0},{{0,0,0},{0,1,0},{0,2,0}})
 assert(#T.route(route)==3 and T.route(route)[3].y==140)
 assert(not pcall(T.mark,{0,2,0},{{2,0,0},{0,2,0}}),'a route must start at the current foot pose')

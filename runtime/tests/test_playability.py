@@ -66,6 +66,7 @@ def test_compact_ui_bounds_preview_and_preserves_explicit_access_to_full_text():
 
 def enter(atlas,cell,visit,points):
     obs={'state':'running','ui_mode':'Gameplay','location':cell,'body':{'on_ground':True},
+         'orientation':{'view_distance_m':102.4},
          'trajectory':{'ref':visit,'start_heading_deg':0,'samples':[
              {'sequence':i+1,'forward_m':p[1],'sideways_m':p[0],'vertical_m':p[2],'heading_deg':0}
              for i,p in enumerate(points)]}}

@@ -259,7 +259,6 @@ def _navigate_once(session,args, *, motion=None):
                             if length>60 or len(chunk)>=400:break
                             chunk.append(point)
                         if chunk:goal=chunk[-1]
-                    if math.dist(goal,pose)>=100:reason='recorded_route_unavailable';break
                     offset=[round(a-b,4) for a,b in zip(goal,pose)]
                     offsets=[[round(a-b,4) for a,b in zip(p,pose)] for p in chunk] if chunk else None
                     marker=session.command('mark',_atlas_offset=offset,_atlas_route=offsets)['ref']

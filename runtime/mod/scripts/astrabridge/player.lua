@@ -1028,7 +1028,7 @@ local function dispatch(cmd)
             walkingRoute={ref=args.ref,nav=N.new({groundPoint=point})}
         elseif args.ref then
             if not walkingRoute or walkingRoute.ref~=args.ref or walkingRoute.nav.cell~=Space.key(self.cell)
-                or (walkingRoute.nav.goal-self.position):length()>7000 then pause(cmd,nil,'stale_ref');return end
+                then pause(cmd,nil,'stale_ref');return end
         else
             local point=Scene.groundPoint(args.x,args.y)
             if not point then pause(cmd,nil,'point_not_ground');return end

@@ -26,6 +26,7 @@ end
 package.preload['openmw.self']=function()return self end
 package.preload['openmw.nearby']=function()return nearby end
 package.preload['openmw.camera']=function()return {getYaw=function()return 0 end,getPosition=function()return self.position end,
+    getViewDistance=function()return 7168 end,
     viewportToWorldVector=function()return V.new(0,1,0)end,
     worldToViewportVector=function(p)projected=p;return {x=777,y=888}end}end
 package.preload['openmw.ui']=function()return {screenSize=function()return {x=1000,y=1000}end}end
@@ -98,6 +99,7 @@ assert(originalGroundPoint(100,500).z==50,'a bridge above the water remains the 
 -- the same object's walkable collision surface is only 5.5 units away.
 require('scripts.astrabridge.mobility').waterLevel=function()return nil end
 self.position=V.new(0,0,0)
+require('openmw.camera').viewportToWorldVector=function()return V.new(0,1,0)end
 local bridge={id='bridge_instance'}
 local visual={hit=true,hitObject=bridge,hitPos=V.new(100,100,0),hitNormal=V.new(-.938937,.342887,-.028742)}
 local support={hit=true,hitObject=bridge,hitPos=visual.hitPos+V.new(-4.336,1.344,3.112),hitNormal=V.new(-.018299,.005661,.999817)}

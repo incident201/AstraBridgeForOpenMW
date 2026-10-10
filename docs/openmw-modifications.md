@@ -295,7 +295,7 @@ not against current upstream `master`.
 | Feature | Main implementation |
 |---|---|
 | Public actions, finite movement/turning, moving-target approach and interruption | [player.lua](../runtime/mod/scripts/astrabridge/player.lua), [navigation.lua](../runtime/mod/scripts/astrabridge/navigation.lua), [movement_input.lua](../runtime/mod/scripts/astrabridge/movement_input.lua) |
-| Visibility, inspection range and bridge-seam walking-point correction | [scene.lua](../runtime/mod/scripts/astrabridge/scene.lua), [recognition.lua](../runtime/mod/scripts/astrabridge/recognition.lua) |
+| Visibility, camera-range target selection, inspection range and bridge-seam walking-point correction | [scene.lua](../runtime/mod/scripts/astrabridge/scene.lua), [recognition.lua](../runtime/mod/scripts/astrabridge/recognition.lua) |
 | Local movement directions and short collision-checked connections | [terrain.lua](../runtime/mod/scripts/astrabridge/terrain.lua) |
 | Persistent object knowledge, notes and travelled routes | [knowledge.py](../runtime/daemon/astra_bridge/knowledge.py), [exploration.py](../runtime/daemon/astra_bridge/exploration.py), [trajectory.lua](../runtime/mod/scripts/astrabridge/trajectory.lua) |
 | GUI/action sequencing and public-result validation | [session.py](../runtime/daemon/astra_bridge/session.py), [workflows.py](../runtime/daemon/astra_bridge/workflows.py), [protocol.py](../runtime/daemon/astra_bridge/protocol.py) |

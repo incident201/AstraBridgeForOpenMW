@@ -13,6 +13,7 @@ they also affect how a playthrough behaves.
 | Map zoom | OpenMW UI setting applied by AstraBridge | `allow zooming = true` in the private profile enables normal map zoom controls. |
 | Synchronous physics at action boundaries | OpenMW setting applied by AstraBridge | `async num threads = 0` in the runtime profile. |
 | Idle-camera stabilization | AstraBridge Lua policy using OpenMW camera interfaces | Disables automatic vanity/standing-preview behavior during controlled play. |
+| Visible target selection | AstraBridge Lua adapter using OpenMW's current camera range | Object picking and screenshot walking targets use the renderer's view distance; normal occlusion, inspection and activation rules remain. |
 | Jump and fall controls | AstraBridge Lua adapter using normal actor controls | One jump impulse, directional air steering, observed flight state and stopping on landing; ordinary game physics and skill effects remain in force. |
 | NPC placement recovery | Explicit public command using native ResetActors | Never an automatic part of navigation; the skill restricts its use to observed malfunctions. |
 
@@ -214,6 +215,24 @@ idle timer could otherwise begin a vanity orbit and separate the view direction
 from the intended movement direction. If already in vanity/preview mode, the
 policy returns to the primary camera mode. It does not introduce a free camera
 for observing unexplored space.
+
+### Visible target range
+
+[scene.lua](../runtime/mod/scripts/astrabridge/scene.lua) reads
+`camera.getViewDistance()` for object selection and visible walking surfaces.
+The standard OpenMW far-plane depth is 7168 game units, approximately 102.4 m.
+AstraBridge does not impose a separate 30 or 40 m acquisition limit. The current
+value is reported as `orientation.view_distance_m`; off-centre rays and large
+objects are checked against the camera plane rather than a sphere around the
+player. First-hit geometry still occludes targets, and new names/details require
+normal tooltip range. Rendering rays do not reproduce fog-shader opacity.
+
+Already selected goals and remembered waypoints retain their same-space checks
+without a fixed distance expiry. Connected travelled routes are followed in
+bounded segments with no total distance ceiling. Native attempts between known
+points without a connected trail use the current nominal view range, with
+reachability determined by OpenMW. None of these changes extend the player's
+activation reach or alter collision, movement speed or the core pathfinder.
 
 ### Explicit NPC placement recovery
 

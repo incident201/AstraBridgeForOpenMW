@@ -107,6 +107,7 @@ def test_autosave_ring_overwrites_only_owned_slot_and_preserves_manual(tmp_path)
 
 def enter(atlas,points):
     atlas.ingest({'state':'running','location':'Room','ui_mode':'Gameplay','simulation_seconds':100,'body':{'on_ground':True},
+                 'orientation':{'view_distance_m':102.4},
                  'trajectory':{'ref':'visit','start_heading_deg':0,'samples':[{'sequence':i+1,'forward_m':p[1],'sideways_m':p[0],'vertical_m':p[2],'heading_deg':0} for i,p in enumerate(points)]}},
                 {'space':'Room','origin':[0,0,0]})
 

@@ -56,6 +56,16 @@ class AtlasRoutes:
         return any(r['kind']==kind and r['destination']==destination and r['space']==space
                    and (math.dist(r['origin'],origin)<2 or r.get('position') and math.dist(r['position'],origin)<2) for r in failures)
 
+    def native_leg_available(self, origin, destination):
+        """Nominal renderer range for native routing between previously known points.
+
+        The range authorizes an attempted connection; visibility and reachability
+        still require current engine checks. Recorded trails have their own edges.
+        """
+        view_distance = getattr(self, 'view_distance_m', None)
+        return (type(view_distance) in (int, float) and math.isfinite(view_distance)
+                and view_distance > 0 and math.dist(origin, destination) <= view_distance)
+
     def graph_for(self, ref):
         return next((s for s in self.data['segments'] if s['ref']==ref and s.get('profile',self.profile)==self.profile),None)
 
@@ -182,7 +192,7 @@ class AtlasRoutes:
                 if ds['ref']!=s['ref'] or dest==key:continue
                 if self.blocked_leg(failures,'walk',dest,s['ref'],start if start is not None else s['pose']):continue
                 if dest in routes:edges.append((dest,routes[dest][1],{'kind':'walk','ref':dest,'source':'recorded_trail'}))
-                elif math.dist(dn['p'],start if start is not None else s['pose'])<80:
+                elif s.get('persistent') and dn.get('walkable') and self.native_leg_available(start if start is not None else s['pose'], dn['p']):
                     # Door arrival markers rarely coincide with the point from
                     # which the door was activated. Both endpoints are known;
                     # ask the engine to bridge this gap when executing the leg.
