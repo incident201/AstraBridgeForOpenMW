@@ -2,6 +2,7 @@
 import ctypes as C
 import math
 import subprocess
+import threading
 
 from astra_bridge.protocol import BridgeError
 
@@ -27,6 +28,7 @@ def bind(lib,name,result,*arguments):
 class Input:
     def __init__(self,display,env):
         self.env=env
+        self.lock = threading.RLock()
         self.x=C.CDLL('libX11.so.6');self.test=C.CDLL('libXtst.so.6')
         bind(self.x,'XInitThreads',C.c_int)()
         self.d=bind(self.x,'XOpenDisplay',C.c_void_p,C.c_char_p)(display.encode())
@@ -41,6 +43,12 @@ class Input:
         self.held_keys=set();self.held_buttons=set()
 
     def event(self,event):
+        with self.lock:
+            if not self.d:
+                raise BridgeError('input_display_unavailable')
+            return self._event(event)
+
+    def _event(self,event):
         if not isinstance(event,dict):raise BridgeError('invalid_input')
         kind=event.get('type')
         if kind=='key':
@@ -73,15 +81,29 @@ class Input:
         elif kind=='text':
             text=event.get('text')
             if not isinstance(text,str) or len(text)>1024 or '\x00' in text:raise BridgeError('invalid_text')
-            subprocess.run(['xdotool','type','--clearmodifiers','--',text],env=self.env,check=True,timeout=10)
+            try:
+                subprocess.run(['xdotool', 'type', '--clearmodifiers', '--delay', '1', '--', text],
+                               env=self.env, check=True, timeout=10)
+            except subprocess.TimeoutExpired as exc:
+                raise BridgeError('input_text_timeout') from exc
+            except subprocess.CalledProcessError as exc:
+                raise BridgeError('input_text_failed') from exc
+            except OSError as exc:
+                raise BridgeError('input_text_unavailable') from exc
         else:raise BridgeError('invalid_input')
         self.flush(self.d)
 
     def release(self):
-        for code in self.held_keys:self.key(self.d,code,0,0)
-        for button in self.held_buttons:self.button(self.d,button,0,0)
-        self.held_keys.clear();self.held_buttons.clear();self.flush(self.d)
+        with self.lock:
+            if not self.d:
+                return
+            for code in self.held_keys:self.key(self.d,code,0,0)
+            for button in self.held_buttons:self.button(self.d,button,0,0)
+            self.held_keys.clear();self.held_buttons.clear();self.flush(self.d)
 
     def close(self):
-        self.release()
-        bind(self.x,'XCloseDisplay',C.c_int,C.c_void_p)(self.d)
+        with self.lock:
+            if self.d:
+                self.release()
+                bind(self.x,'XCloseDisplay',C.c_int,C.c_void_p)(self.d)
+                self.d = None

@@ -111,45 +111,46 @@ LEAF_KEYS = {
     "screen_visible",
     "title", "characters", "offset", "next_offset", "eof", "scope", "phase", "standing_point",
     "simulation_seconds", "journal_count", "instance", "waypoint", "waypoints", "progress_m", "stalled_seconds",
+    'activation_distance_m', 'actor_kind', 'aimed', 'air_state',
+    'can_pan_down', 'can_pan_left', 'can_pan_right', 'can_pan_up',
+    'center_bearing_deg', 'closed', 'control', 'controls_enabled',
+    'destination', 'details_visible', 'fullscreen', 'game_time_seconds',
+    'horizontal_distance_m', 'image_x', 'image_y', 'jumping_enabled',
+    'landed', 'limit_reached', 'looking_enabled', 'max_zoom',
+    'memory_ref', 'min_zoom', 'movement_mode', 'name_source',
+    'peak_rise_m', 'ready', 'started_airborne', 'took_off',
+    'vertical_speed_mps', 'view_distance_m', 'zoom',
 }
-DICT_KEYS = {"stats", "attributes", "health", "magicka", "fatigue", "observation", "orientation", "scene", "ui", "motion", "movement", "target_lock", "body", "navigation", "combat", "weapon_info", "castable", "resources", "changes", "terrain", "trajectory"}
-LIST_KEYS = {"items", "spells", "entries", "saves", "available", "objects", "actions", "skills", "topics", "elements", "messages", "effects", "steps", "rays", "passages", "samples", "ground_targets"}
-LIST_KEYS.add('attribute_details')
-LEAF_KEYS.add('horizontal_distance_m')
-LEAF_KEYS.update({'ready','activation_distance_m'})
-LEAF_KEYS.add('aimed')
-LEAF_KEYS.update({'control','destination'})
-LEAF_KEYS.add('game_time_seconds')
-LEAF_KEYS.update({'movement_mode','center_bearing_deg'})
-LEAF_KEYS.add('view_distance_m')
-LEAF_KEYS.update({'controls_enabled','looking_enabled','jumping_enabled'})
-LEAF_KEYS.update({'actor_kind','details_visible','name_source','memory_ref'})
-LEAF_KEYS.update({'air_state','vertical_speed_mps','started_airborne','took_off','landed','peak_rise_m'})
-DICT_KEYS.add('aerial')
-DICT_KEYS.add('dialogue')
-DICT_KEYS.add('document')
-ERRORS = {"save_unavailable", "stale_save_ref", "operation_failed", "invalid_arguments", "no_player",
-          "game_operation_timeout", "cancelled", "view_unavailable", "unknown_view",
-          "ui_open", "use_act", "stale_ref", "action_unavailable", "unknown_operation",
-          "action_timeout", "resume_timeout", "observation_failed"}
-ERRORS.update({'input_failed','input_timeout'})
-ERRORS.update({'native_ui_unavailable','stale_ui_ref','unknown_topic','target_not_visible','out_of_reach','target_not_aimed'})
-ERRORS.update({'invalid_lock_target','target_locked_unlock_first','locked_camera'})
-ERRORS.update({'nothing_selected','target_required'})
-ERRORS.update({'selection_ambiguous','selection_unavailable'})
-ERRORS.add('point_not_ground')
-ERRORS.add('ui_control_disabled')
-ERRORS.update({'ui_element_offscreen', 'ui_scroll_unavailable'})
-ERRORS.add('movement_conflicts_with_target')
-ERRORS.update({'levitation_required','flight_requires_fly'})
-ERRORS.add('swimming_required')
-ERRORS.update({'jump_requires_ground','airborne_required','swimming_requires_swim'})
-ERRORS.update({'document_not_open', 'stale_document_ref'})
-ERRORS.add('map_not_open')
-DICT_KEYS.add('map')
-LIST_KEYS.add('markers')
-LEAF_KEYS.update({'fullscreen','zoom','min_zoom','max_zoom','limit_reached',
-                 'can_pan_left','can_pan_right','can_pan_up','can_pan_down','image_x','image_y','closed'})
+DICT_KEYS = {
+    'aerial', 'attributes', 'body', 'castable',
+    'changes', 'combat', 'dialogue', 'document',
+    'fatigue', 'health', 'magicka', 'map',
+    'motion', 'movement', 'navigation', 'observation',
+    'orientation', 'resources', 'scene', 'stats',
+    'target_lock', 'terrain', 'trajectory', 'ui',
+    'weapon_info',
+}
+LIST_KEYS = {
+    'actions', 'attribute_details', 'available', 'effects',
+    'elements', 'entries', 'ground_targets', 'items',
+    'markers', 'messages', 'objects', 'passages',
+    'rays', 'samples', 'saves', 'skills',
+    'spells', 'steps', 'topics',
+}
+ERRORS = {
+    'action_timeout', 'action_unavailable', 'airborne_required', 'cancelled',
+    'document_not_open', 'flight_requires_fly', 'game_operation_timeout', 'input_failed',
+    'input_timeout', 'invalid_arguments', 'invalid_lock_target', 'jump_requires_ground',
+    'levitation_required', 'locked_camera', 'map_not_open', 'movement_conflicts_with_target',
+    'native_ui_unavailable', 'no_player', 'nothing_selected', 'observation_failed',
+    'operation_failed', 'out_of_reach', 'point_not_ground', 'resume_timeout',
+    'save_unavailable', 'selection_ambiguous', 'selection_unavailable', 'stale_document_ref',
+    'stale_ref', 'stale_save_ref', 'stale_ui_ref', 'swimming_required',
+    'swimming_requires_swim', 'target_locked_unlock_first', 'target_not_aimed', 'target_not_visible',
+    'target_required', 'ui_control_disabled', 'ui_element_offscreen', 'ui_open',
+    'ui_scroll_unavailable', 'unknown_operation', 'unknown_topic', 'unknown_view',
+    'use_act', 'view_unavailable',
+}
 
 
 def check_result(value, depth=0):

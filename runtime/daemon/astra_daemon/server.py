@@ -13,6 +13,7 @@ from urllib.parse import quote
 
 from aiohttp import ClientSession, ClientTimeout, WSMsgType, web
 from astra_bridge.protocol import BridgeError
+from astra_bridge.diagnostic_logs import recent_events
 from astra_bridge.gpu import inventory
 from .commands import catalog
 from .runtime import Runtime
@@ -137,7 +138,7 @@ def application(runtime: Runtime, token: str):
         return answer({'names':sorted(files),'name':name,'text':text})
     async def sessions(request):
         path=runtime.root/'sessions/events.jsonl'
-        return answer([json.loads(line) for line in path.read_text().splitlines()[-200:]] if path.exists() else [])
+        return answer(await asyncio.to_thread(recent_events, path))
     async def environment(request):return answer({**runtime.build,'graphics':runtime.graphics.info,'storage':runtime.storage.state})
     async def live(request):
         if request.method=='DELETE':return answer(await runtime.viewer(False))
@@ -163,13 +164,14 @@ def application(runtime: Runtime, token: str):
             async for message in socket:
                 if message.type!=WSMsgType.TEXT:continue
                 try:
-                    value=json.loads(message.data);kind=value.get('type')
+                    value=json.loads(message.data)
+                    if not isinstance(value,dict):raise BridgeError('invalid_event')
+                    kind=value.get('type')
                     if kind=='manual.acquire':result=await runtime.manual(connection,True)
                     elif kind=='manual.release':result=await runtime.manual(connection,False)
                     elif kind=='input':
-                        if runtime.transition or runtime.owner.mode!='manual' or runtime.owner.token!=connection:
-                            raise BridgeError('manual_input_not_owned')
-                        runtime.input.event(value.get('event'));continue
+                        await runtime.input_event(connection,value.get('event'))
+                        continue
                     else:raise BridgeError('invalid_event')
                     await socket.send_json({'type':'input.owner','data':result})
                 except (BridgeError,ValueError,TypeError) as exc:

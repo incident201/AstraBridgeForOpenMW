@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import os
@@ -17,6 +18,7 @@ from astra_bridge.environment import identity
 from astra_bridge.protocol import BridgeError, number
 from astra_bridge.exploration import ExplorationAtlas
 from astra_bridge.session import Session
+from astra_bridge.diagnostic_logs import append_bounded
 from .graphics import Graphics
 from .input import Input
 from .live import Live
@@ -37,7 +39,7 @@ class Runtime:
         self.owner=Ownership();self.session=None;self.input=None;self.live=None
         self.viewer_generation=0;self.termination=None;self.stop_preparation=None
         self.transition=False;self.mutation=asyncio.Lock()
-        self.starting=False;self.stopping=False;self.start_cancelled=threading.Event();self.start_log_offset=0
+        self.starting=False;self.stopping=False;self.start_cancelled=threading.Event()
         self.artifacts={};self.last_error=None;self.started=time.time()
         self.replay=Replay(self.recordings_root)
         self.atlas_cache={'supported':False}
@@ -78,8 +80,11 @@ class Runtime:
                 'environment':self.build,'error':self.last_error}
 
     def _history(self, event, **fields):
-        with (self.root/'sessions/events.jsonl').open('a') as stream:
-            stream.write(json.dumps({'time':time.time(),'event':event,**fields},ensure_ascii=False)+'\n')
+        record = json.dumps({'time': time.time(), 'event': event, **fields}, ensure_ascii=False) + '\n'
+        try:
+            append_bounded(self.root / 'sessions/events.jsonl', record.encode('utf8'))
+        except OSError:
+            logging.exception('Could not persist runtime lifecycle history')
 
     def _start_engine(self, gpu=None):
         cfg=self.storage.prepare_profile()
@@ -108,20 +113,15 @@ class Runtime:
                 return self.status()
             if self.session:await asyncio.to_thread(self._stop_engine)
             self.starting=True;self.start_cancelled.clear();self.last_error=None;self.termination=None
-            log=self.root/'runtime/engine-private.log'
-            self.start_log_offset=log.stat().st_size if log.exists() else 0
             try:await asyncio.to_thread(self._start_engine,gpu)
             except Exception as exc:
+                failed_session = self.session
                 await asyncio.to_thread(self._stop_engine)
                 if self.start_cancelled.is_set():
                     raise BridgeError('startup_cancelled',message='Game startup was cancelled.') from exc
                 if isinstance(exc,BridgeError) and exc.details.get('message'):
                     self.last_error=exc.details['message'];raise
-                log=self.root/'runtime/engine-private.log'
-                tail=''
-                if log.exists():
-                    with log.open('rb') as stream:
-                        stream.seek(max(self.start_log_offset,log.stat().st_size-16000));tail=stream.read().decode(errors='replace')
+                tail = ''.join(getattr(failed_session, 'engine_diagnostics', ()))
                 fatal=next((line.split('Fatal error:',1)[1].strip() for line in reversed(tail.splitlines()) if 'Fatal error:' in line),None)
                 self.last_error=f'OpenMW could not finish starting: {fatal or str(exc)}. See Diagnostics → engine-private.log.'
                 raise BridgeError('game_start_failed',message=self.last_error) from exc
@@ -264,6 +264,22 @@ class Runtime:
             finally:self.transition=False
             if not enable:self.owner.release()
         return self.owner.public()
+
+    async def input_event(self, token, event):
+        # The same lock owns lifecycle and ownership changes. A typing worker
+        # must finish before its display closes or control changes to an agent.
+        async with self.mutation:
+            if self.transition or self.owner.mode != 'manual' or self.owner.token != token:
+                raise BridgeError('manual_input_not_owned')
+            if self.input is None:
+                raise BridgeError('input_display_unavailable')
+            worker = asyncio.create_task(asyncio.to_thread(self.input.event, event))
+            try:
+                await asyncio.shield(worker)
+            except asyncio.CancelledError:
+                with contextlib.suppress(Exception):
+                    await worker
+                raise
 
     async def game(self, token, op, args):
         def stopped(end, **details):

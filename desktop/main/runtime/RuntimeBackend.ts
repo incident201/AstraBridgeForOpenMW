@@ -1,5 +1,6 @@
-import {spawn, type ChildProcessWithoutNullStreams} from 'node:child_process';
+import {spawn} from 'node:child_process';
 import {Readable} from 'node:stream';
+import {terminateProcessTree} from './process-tree';
 
 export interface RuntimeSpec {
   name:string; image:string; digest:string; token:string; gameVolume:string; stateVolume:string;
@@ -41,20 +42,71 @@ export interface ProcessResult {code:number; stdout:string; stderr:string}
 export type Runner=(program:string,args:string[],options?:{input?:Readable; timeout?:number; progress?:Progress; terminal?:boolean})=>Promise<ProcessResult>;
 
 export const run:Runner=(program,args,options={})=>new Promise((resolve,reject)=>{
-  const terminal=options.terminal&&process.platform==='linux';
-  const quote=(value:string)=>"'"+value.replaceAll("'","'\"'\"'")+"'";
-  const child=spawn(terminal?'script':program,terminal?['-qefc','stty cols 160 rows 40 && exec '+[program,...args].map(quote).join(' '),'/dev/null']:args,
-    {stdio:['pipe','pipe','pipe'],windowsHide:true,detached:terminal,env:terminal?{...process.env,LC_ALL:'C',TERM:'xterm',COLUMNS:'160'}:process.env});
-  let stdout='',stderr='';
-  const limit=4*1024*1024;
-  const timer=setTimeout(()=>{child.kill();reject(new Error(`${program} timed out`));},options.timeout??120_000);
-  child.on('error',error=>{clearTimeout(timer);reject(error);});
-  child.stdout.on('data',(chunk:Buffer)=>{stdout=(stdout+chunk.toString()).slice(-limit);options.progress?.(chunk.toString());});
-  child.stderr.on('data',(chunk:Buffer)=>{stderr=(stderr+chunk.toString()).slice(-limit);options.progress?.(chunk.toString());});
-  child.on('close',code=>{clearTimeout(timer);resolve({code:code??1,stdout,stderr});});
-  child.stdin.on('error',()=>{});
-  if(options.input){options.input.on('error',error=>{child.kill();clearTimeout(timer);reject(error);});options.input.pipe(child.stdin);}
-  else child.stdin.end();
+  const terminal = options.terminal && process.platform === 'linux';
+  const quote = (value:string) => "'" + value.replaceAll("'", "'\"'\"'") + "'";
+  const child = spawn(terminal ? 'script' : program, terminal
+    ? ['-qefc', 'stty cols 160 rows 40 && exec ' + [program, ...args].map(quote).join(' '), '/dev/null']
+    : args, {
+      stdio:['pipe', 'pipe', 'pipe'], windowsHide:true, detached:process.platform !== 'win32',
+      env:terminal ? {...process.env, LC_ALL:'C', TERM:'xterm', COLUMNS:'160'} : process.env,
+    });
+  let stdout = '', stderr = '';
+  let cancellationError:Error|undefined;
+  let settled = false;
+  let closed!:()=>void;
+  const closedPromise = new Promise<void>(resolve => closed = resolve);
+  const limit = 4 * 1024 * 1024;
+  const cleanup = () => {
+    clearTimeout(timer);
+    options.input?.off('error', inputFailed);
+  };
+  const finish = (error?:Error, code?:number|null) => {
+    if (settled) return;
+    settled = true;
+    cleanup();
+    if (error) reject(error);
+    else resolve({code:code ?? 1, stdout, stderr});
+  };
+  const cancel = (error:Error) => {
+    if (settled || cancellationError) return;
+    cancellationError = error;
+    clearTimeout(timer);
+    options.input?.unpipe(child.stdin);
+    child.stdin.destroy();
+    void terminateProcessTree(child).catch(terminationError => {
+      child.kill('SIGKILL');
+      cancellationError = new Error(`${error.message}: ${String(terminationError)}`);
+    }).then(async()=>{
+      // Reap the child normally; a kernel/process-tree failure must not hang the caller forever.
+      await new Promise<void>(resolve => {
+        const reapTimer = setTimeout(resolve, 1000);
+        void closedPromise.then(()=>{clearTimeout(reapTimer);resolve();});
+      });
+      finish(cancellationError);
+    });
+  };
+  const timer = setTimeout(() => cancel(new Error(`${program} timed out`)), options.timeout ?? 120_000);
+  child.stdout.setEncoding('utf8');
+  child.stderr.setEncoding('utf8');
+  child.stdout.on('data', (chunk:string) => {
+    stdout = (stdout + chunk).slice(-limit);
+    options.progress?.(chunk);
+  });
+  child.stderr.on('data', (chunk:string) => {
+    stderr = (stderr + chunk).slice(-limit);
+    options.progress?.(chunk);
+  });
+  const inputFailed = (error:Error) => cancel(error);
+  child.once('error', error => finish(error));
+  child.once('close', code => {
+    closed();
+    if (!cancellationError) finish(undefined, code);
+  });
+  child.stdin.on('error', () => {});
+  if (options.input) {
+    options.input.on('error', inputFailed);
+    options.input.pipe(child.stdin);
+  } else child.stdin.end();
 });
 
 export function checked(result:ProcessResult):string {

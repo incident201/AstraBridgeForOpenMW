@@ -7,6 +7,7 @@ from pathlib import Path
 from .auth import AuthStore
 from .journal import Journal
 from .locking import FileLock
+from .logs import prune_sessions
 from .providers.deepseek import DeepSeek
 from .providers.openai import OpenAI
 from .runner import Runner
@@ -33,6 +34,13 @@ def parser():
     run.add_argument('--compact-at', type=float, default=.75, help='Context fraction triggering compaction (default .75)')
     run.add_argument('--astra'); run.add_argument('--base-url', help='DeepSeek deployment override; OpenAI always uses the official OAuth route')
     resume = sub.add_parser('resume'); resume.add_argument('session', type=Path); resume.add_argument('--task')
+    logs = sub.add_parser('logs', help='Manage private runner session archives')
+    log_actions = logs.add_subparsers(dest='logs_action', required=True)
+    prune = log_actions.add_parser('prune', help='Preview deletion of old inactive sessions')
+    prune.add_argument('--log-dir', type=Path, default=Path('astrabridge-sessions'))
+    prune.add_argument('--older-than-days', type=float, default=30)
+    prune.add_argument('--keep-last', type=int, default=5)
+    prune.add_argument('--delete', action='store_true', help='Delete selected sessions; omitted means dry run')
     return root
 
 
@@ -48,6 +56,17 @@ def provider(name, journal, args, model, effort, account=None):
 
 def main(argv=None):
     arguments = parser(); args = arguments.parse_args(argv)
+    if args.command == 'logs':
+        try:
+            result = prune_sessions(
+                args.log_dir, older_than_days=args.older_than_days,
+                keep_last=args.keep_last, delete=args.delete,
+            )
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 1 if result['errors'] else 0
+        except Exception as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
     if args.command == 'auth':
         auth = AuthStore(args.auth_dir)
         try:
@@ -64,19 +83,36 @@ def main(argv=None):
         finally: auth.close()
     if args.command == 'models':
         # Discovery has no gameplay effects and never needs a game installation.
-        journal = Journal(Path(os.environ.get('XDG_STATE_HOME', Path.home() / '.local/state')) / 'astrabridge-runner/discovery')
+        parent = Path(os.environ.get('XDG_STATE_HOME', Path.home() / '.local/state')) / 'astrabridge-runner/discovery'
+        journal = None
+        session_lock = None
         api = None
         try:
+            with FileLock(parent / '.create.lock', blocking=False):
+                journal = Journal(parent)
+                session_lock = FileLock(journal.root / '.session.lock', blocking=False)
+                session_lock.__enter__()
+                journal.write('manifest.json', {'schema': 1, 'provider': args.provider, 'kind': 'discovery'})
             api = provider(args.provider, journal, args, '', '', args.account)
             models = api.models()
             if args.json: print(json.dumps(models, ensure_ascii=False, indent=2))
             else:
                 for model in models: print(model['id'], '|', model['name'], '| context:', model['context_window'], '| reasoning:', model['reasoning_efforts'])
             return 0
-        except Exception as exc: print(journal.clean(str(exc)), file=sys.stderr); return 1
+        except Exception as exc:
+            print(journal.clean(str(exc)) if journal else str(exc), file=sys.stderr)
+            return 1
         finally:
-            if api: api.close()
-            journal.close()
+            try:
+                if api:
+                    api.close()
+            finally:
+                try:
+                    if journal:
+                        journal.close()
+                finally:
+                    if session_lock:
+                        session_lock.__exit__()
     resume = args.command == 'resume'
     if resume:
         try:
@@ -89,18 +125,31 @@ def main(argv=None):
         if args.context_window is not None and args.context_window <= 1024: arguments.error('--context-window must exceed 1024 tokens')
         if args.base_url and args.provider != 'deepseek': arguments.error('--base-url is only available for DeepSeek')
         parent = args.log_dir
-    # Acquire before opening/repairing an existing journal.
-    lock = FileLock((args.session if resume else parent) / ('.session.lock' if resume else '.create.lock'), blocking=False)
+    # Coordinate creation/resume with archive cleanup before opening a journal.
+    lock = FileLock(parent / '.create.lock', blocking=False)
     journal = None; api = None; runner = None
+    session_lock = None
     try:
         with lock:
-            journal = Journal(parent, resume=args.session if resume else None)
-            if not resume:
-                # The creation lock need not serialize the full session with
-                # other independent profiles; use its own lifetime lock below.
+            try:
+                if resume:
+                    if not args.session.is_dir() or not (args.session / 'manifest.json').is_file():
+                        raise ValueError('The runner session archive no longer exists.')
+                    session_lock = FileLock(args.session / '.session.lock', blocking=False)
+                    session_lock.__enter__()
+                journal = Journal(parent, resume=args.session if resume else None)
+                if not resume:
+                    session_lock = FileLock(journal.root / '.session.lock', blocking=False)
+                    session_lock.__enter__()
+                # Independent profiles need not hold the parent lock for the
+                # full run; the session's own lock protects its complete log.
                 lock.__exit__()
-            session_lock = FileLock(journal.root / '.session.lock', blocking=False) if not resume else None
-            if session_lock: session_lock.__enter__()
+            except BaseException:
+                if session_lock:
+                    session_lock.__exit__()
+                if journal:
+                    journal.close()
+                raise
             try:
                 if resume:
                     args.base_url = saved['base_url']
@@ -136,11 +185,19 @@ def main(argv=None):
                 journal.event('runner_error',error=str(exc),interrupted=isinstance(exc,KeyboardInterrupt))
                 raise
             finally:
-                if runner: runner.close()
-                else:
-                    if api: api.close()
-                    if journal: journal.close()
-                if session_lock: session_lock.__exit__()
+                try:
+                    if runner:
+                        runner.close()
+                    else:
+                        try:
+                            if api:
+                                api.close()
+                        finally:
+                            if journal:
+                                journal.close()
+                finally:
+                    if session_lock:
+                        session_lock.__exit__()
     except (EOFError, KeyboardInterrupt): print('\nRunner stopped.'); return 0
     except Exception as exc:
         text = journal.clean(str(exc)) if journal else str(exc)

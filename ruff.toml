@@ -1,0 +1,6 @@
+target-version = "py311"
+
+[lint]
+# Check correctness across the existing Python code without a formatting rewrite.
+select = ["E9", "F"]
+ignore = ["F401", "F841"]

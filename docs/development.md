@@ -143,6 +143,7 @@ when the developer has direct access to the runtime.
 
 ```sh
 python3 -m pip install -r runtime/requirements-dev.txt
+python3 -m ruff check runtime/daemon packaging agent-runner/src
 PYTHONPATH=runtime/daemon python3 -m pytest runtime/tests packaging/tests
 ```
 
@@ -150,6 +151,24 @@ Lua fixtures and a small native media-clock test complement Python tests.
 Desktop checks cover command parsing, backend contracts and renderer typing.
 The CPU recording smoke test uses generated frame/audio transport data and does
 not require copyrighted game content or hardware encoding.
+
+Ruff checks Python syntax and Pyflakes correctness rules in source and release
+CI. Its pinned version is in `runtime/requirements-dev.txt`; `ruff.toml` keeps
+formatting and unused-name cleanup separate from this correctness gate. New
+helpers should use explicit control flow and separate statements so failures
+and cleanup ordering remain easy to review.
+
+Install, update and removal share an OS-owned mutex keyed by the configuration
+path: an abstract Unix socket on Linux or a named pipe on Windows. It releases
+on process exit, including an abnormal exit. The compatibility `.lock` record
+is not the authority for new installations; abandoned empty or malformed older
+records are recoverable. Migration preserves a live older installer, and uses
+process creation time when available to distinguish a reused PID.
+
+Runtime subprocess timeouts terminate and reap the process tree. Linux terminal
+commands run through `script`, whose PTY child can have its own process group;
+cleanup includes those descendant groups. Output is decoded incrementally as
+UTF-8 so Unicode characters survive chunk boundaries.
 
 For an explicitly prepared GPU test installation and save:
 
@@ -206,6 +225,11 @@ the runtime, and verifies CPU recording before pushing the image to GHCR.
 Desktop embeds that image's registry digest. Each platform's packaged CLI is
 checked before its artifact is uploaded. Hardware tests run separately from the
 ordinary CPU-only release build.
+
+External GitHub Actions are pinned to full commit SHA values. Updating an
+Action requires checking that commit in its upstream repository. Build jobs
+have read-only repository access; registry publication and the final release
+job receive their required write permissions separately.
 
 By default the result is a draft with its prerelease flag already set. Select
 `publish=true` to publish after CI verifies anonymous access to the exact GHCR

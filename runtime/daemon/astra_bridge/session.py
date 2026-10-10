@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from collections import deque
 import configparser
 import json
+import logging
 import os
 from pathlib import Path
 import signal
@@ -30,6 +32,7 @@ from .game_map import view_map
 from .knowledge import Knowledge
 from .autosave import Autosave
 from .tribunal import prepare_tribunal_delay
+from .diagnostic_logs import append_bounded
 
 
 def observation_changes(before,after):
@@ -80,6 +83,8 @@ class Session:
         self.ready = False
         self.condition = threading.Condition()
         self.responses = {}
+        self.pending_commands = set()
+        self.engine_diagnostics = deque(maxlen=100)
         self.travel_updates = []
         self.session_id = ""
         self.command_id = 0
@@ -164,7 +169,12 @@ class Session:
         self.session_id = uuid.uuid4().hex
         self.save_refs = {}
         self.atlas.reset_runtime()
-        self.command_id, self.responses, self.latest_observation = 0, {}, None
+        with self.condition:
+            self.command_id = 0
+            self.responses.clear()
+            self.pending_commands.clear()
+        self.engine_diagnostics.clear()
+        self.latest_observation = None
         self.uncertain = False
         atomic_json(self.inbox, {"version": 1, "session": self.session_id, "id": 0, "op": "ping", "args": {}})
         atomic_json(self.inbox.with_name('input.json'), {})
@@ -216,17 +226,31 @@ class Session:
         return result
 
     def _read_output(self, process, session_id):
-        decoder=LogDecoder()
-        with open(self.runtime / "engine-private.log", "ab") as log:
-            while line := process.stdout.readline():
-                log.write(line)
-                log.flush()
-                if len(line) > 2_000_000:
+        decoder = LogDecoder()
+        log_enabled = True
+        oversized_line = False
+        try:
+            while line := process.stdout.readline(2_000_001):
+                if oversized_line or len(line) > 2_000_000:
+                    oversized_line = not line.endswith(b'\n')
                     continue
+                # Protocol payloads are already handled as structured results.
+                # Hex chunks must not turn every observation into a large log.
+                protocol_line = b'ASTRA_PART ' in line or b'ASTRA_BRIDGE ' in line
+                if not protocol_line:
+                    if session_id == self.session_id:
+                        self.engine_diagnostics.append(line[-16000:].decode(errors='replace'))
+                    if log_enabled:
+                        try:
+                            append_bounded(self.runtime / 'engine-private.log', line)
+                        except OSError:
+                            log_enabled = False
+                            logging.exception('Engine diagnostics could not be written; stdout will still be drained')
                 try:
                     message = decoder.feed(line)
                     if message is None:continue
-                    if message.get("session") != session_id or message.get("version") != 1:
+                    if (session_id != self.session_id or message.get("session") != session_id
+                            or message.get("version") != 1):
                         continue
                     if message.get('event') == 'progress':
                         result=message.get('result', {})
@@ -253,12 +277,16 @@ class Session:
                     if message.get("status") not in {"completed", "rejected"}:
                         continue
                     with self.condition:
-                        self.responses[message["id"]] = message
-                        self.condition.notify_all()
-                except (ValueError, TypeError, KeyError, BridgeError):
+                        command_id = message['id']
+                        if (session_id == self.session_id and type(command_id) is int
+                                and command_id in self.pending_commands):
+                            self.responses[command_id] = message
+                            self.condition.notify_all()
+                except (ValueError, TypeError, KeyError, BridgeError, OSError):
                     continue
-        with self.condition:
-            self.condition.notify_all()
+        finally:
+            with self.condition:
+                self.condition.notify_all()
 
     def command(self, op, args=None, *, timeout=25, _atlas_offset=None, _atlas_route=None, _save_ref=None,
                 _runtime_mode=None, _passive=False):
@@ -298,26 +326,33 @@ class Session:
             raise BridgeError("game_not_running")
         if self.uncertain and op not in {"stop", "ping", "quit"}:
             raise BridgeError("previous_result_unknown_stop_or_restart")
-        self.command_id += 1
-        cmd_id = self.command_id
-        message = {"version": 1, "session": self.session_id, "id": cmd_id, "op": op, "args": args}
-        atomic_json(self.inbox, message)
-        deadline = time.monotonic() + timeout
         with self.condition:
-            while cmd_id not in self.responses:
-                if op=='ping' and self.control.cancelled.is_set():
-                    raise BridgeError('startup_cancelled',message='Game startup was cancelled.')
+            self.command_id += 1
+            cmd_id = self.command_id
+            self.pending_commands.add(cmd_id)
+            message = {"version": 1, "session": self.session_id, "id": cmd_id, "op": op, "args": args}
+        try:
+            atomic_json(self.inbox, message)
+            deadline = time.monotonic() + timeout
+            with self.condition:
+                while cmd_id not in self.responses:
+                    if op=='ping' and self.control.cancelled.is_set():
+                        raise BridgeError('startup_cancelled',message='Game startup was cancelled.')
+                    self._drain_travel()
+                    if self.process.poll() is not None:
+                        raise BridgeError("game_exited")
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        self.uncertain = True
+                        # Never retry consumables or other mutations automatically.
+                        raise BridgeError("result_unknown_stop_or_restart")
+                    self.condition.wait(min(.2, remaining))
+                response = self.responses.pop(cmd_id)
                 self._drain_travel()
-                if self.process.poll() is not None:
-                    raise BridgeError("game_exited")
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    self.uncertain = True
-                    # Never retry consumables or other mutations automatically.
-                    raise BridgeError("result_unknown_stop_or_restart")
-                self.condition.wait(min(.2, remaining))
-            response = self.responses.pop(cmd_id)
-            self._drain_travel()
+        finally:
+            with self.condition:
+                self.pending_commands.discard(cmd_id)
+                self.responses.pop(cmd_id, None)
         if response.get("status") == "rejected":
             error = response.get("error")
             raise BridgeError(error if error in ERRORS else "operation_failed")

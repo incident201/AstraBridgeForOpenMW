@@ -1,12 +1,16 @@
 import {readdir,stat} from 'node:fs/promises';
-import {join,resolve,relative,sep} from 'node:path';
+import {isAbsolute,resolve,relative,sep} from 'node:path';
+
+export function isContainedRelativePath(path:string,separator=sep,absolute=isAbsolute):boolean {
+  return !absolute(path) && path !== '..' && !path.startsWith('..' + separator);
+}
 
 /** Recognize conventional folder layouts, without guessing language/load order. */
 export async function gameDataDirectory(game:string,override?:string){
   const root=resolve(game);
   if(override){
     const path=resolve(root,override),rel=relative(root,path);
-    if(rel==='..'||rel.startsWith('..'+sep)||!(await stat(path)).isDirectory())throw new Error('Data directory must be inside the game folder');
+    if(!isContainedRelativePath(rel)||!(await stat(path)).isDirectory())throw new Error('Data directory must be inside the game folder');
     return rel||'.';
   }
   const entries=await readdir(root,{withFileTypes:true});

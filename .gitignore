@@ -51,6 +51,7 @@ openmw.x86_64
 /manifest.json
 
 # Desktop build products
+.ruff_cache/
 node_modules/
 /desktop/dist/
 /desktop/out/

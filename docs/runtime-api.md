@@ -60,6 +60,15 @@ header or response-body deadline. Gameplay time budgets, daemon watchdogs and
 explicit caller cancellation still apply. A lost connection does not establish
 whether an action ran; inspect its receipt before deciding how to recover.
 
+Command receipts retain full results for the latest 1,000 finished requests,
+for up to 30 days. Cleanup runs periodically in bounded batches, preserves
+pending requests, and reuses SQLite's freed pages. Older receipts keep their
+request ID, argument hash and original status, with `result_retained: false`.
+These compact guards are retained to prevent a repeated consumable or other
+mutation; they are not a second copy of the old result. Querying an expired
+result's section/view returns `action_result_expired`. Recording timelines,
+Atlas and knowledge data have separate lifetimes and are not receipt payloads.
+
 ## Endpoints
 
 | Method and path | Purpose |
@@ -91,6 +100,17 @@ whether an action ran; inspect its receipt before deciding how to recover.
 | `POST /v1/runtime/live/whep` | WebRTC SDP offer/answer through MediaMTX. |
 | `PATCH/DELETE /v1/runtime/live/whep/{id}` | WHEP session signaling/cleanup. |
 | `GET /v1/events` | WebSocket events, telemetry and authenticated manual input. |
+
+### Diagnostic retention
+
+Engine diagnostics exclude bridge protocol responses and hex payload chunks.
+`engine-private.log` and the profile's lifecycle `sessions/events.jsonl` each
+retain a current file and three archives, capped at 4 MiB per file. Existing
+oversized files are reduced on the next diagnostic write. A failed diagnostic
+write does not stop the engine's stdout reader or lifecycle operation.
+`GET /v1/runtime/sessions` reads a bounded tail across these archives, returning
+up to 200 valid events and skipping malformed or interrupted rows. Recording
+event sidecars and gameplay timelines retain their complete history.
 
 ### Game map views
 
@@ -188,6 +208,10 @@ with an `event`. Input event types are `key`, `button`, `pointer`, `relative`,
 `wheel`, `text` and `release`. Absolute pointer coordinates are normalized to the
 displayed game area; relative movements are bounded pixel deltas. Key events use
 DOM physical key codes. Only the owning manual connection can submit input.
+Text input accepts up to 1024 characters, runs outside the daemon event loop,
+and is serialized with input ownership and display lifecycle changes. A typing
+timeout or subprocess failure produces an `error` event without closing the
+WebSocket connection.
 
 Server events include `status`, `input.owner` and `error`. Status updates carry
 action progress and separate game/capture/viewer metrics. Disconnection releases

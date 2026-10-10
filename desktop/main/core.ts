@@ -1,4 +1,4 @@
-import {access,copyFile,cp,mkdir,open,readFile,rename,rm,stat,writeFile} from 'node:fs/promises';
+import {access,copyFile,cp,mkdir,readFile,rename,rm,stat,writeFile} from 'node:fs/promises';
 import {basename,dirname,join,resolve} from 'node:path';
 import {homedir} from 'node:os';
 import {randomBytes,randomUUID} from 'node:crypto';
@@ -10,6 +10,7 @@ import {CliRegistration,applicationExecutable} from './cli-registration';
 import {Recordings} from './recordings';
 import {gameDataDirectory} from './game-data';
 import {gameCommandHttp} from './game-command-http';
+import {withInstallationLock} from './installation-lock';
 import {PodmanBackend} from './runtime/PodmanBackend';
 import {WslContainerBackend} from './runtime/WslContainerBackend';
 import type {Progress,RuntimeBackend,RuntimeSpec} from './runtime/RuntimeBackend';
@@ -68,15 +69,11 @@ export class Core {
     await rename(temporary,this.configFile);
   }
   private async exclusive<T>(operation:()=>Promise<T>):Promise<T>{
-    await mkdir(dirname(this.configFile),{recursive:true,mode:0o700});
-    const lock=this.configFile+'.lock';
-    try{const old=JSON.parse(await readFile(lock,'utf8'));
-      try{process.kill(old.pid,0);throw new Error('Another install/update is running');}
-      catch(error){if((error as NodeJS.ErrnoException).code==='ESRCH')await rm(lock);else throw error;}
-    }catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
-    const handle=await open(lock,'wx',0o600);await handle.writeFile(JSON.stringify({pid:process.pid}));
-    this.managementBusy=true;
-    try{return await operation();}finally{this.managementBusy=false;await handle.close();await rm(lock,{force:true});}
+    return withInstallationLock(this.configFile, async()=>{
+      this.managementBusy=true;
+      try{return await operation();}
+      finally{this.managementBusy=false;}
+    });
   }
   backend(config:Pick<Installation,'backend'|'storageDirectory'>):RuntimeBackend {
     return config.backend==='wsl'?new WslContainerBackend(undefined,this.progress):new PodmanBackend(config.storageDirectory,undefined,this.progress);

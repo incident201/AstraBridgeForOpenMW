@@ -54,7 +54,9 @@ def test_timeout_and_invalid_stdout_report_unknown_result_without_retry(fixture)
     f=fixture;b=f['bridge'];b.load_tools()
     bad=deepcopy(b.tools['astra_act']);bad['invocation']['argv']=['game','bad'];b.tools['astra_act']=bad
     result=b.call('astra_act','{}','bad');assert result['error']=='invalid_tool_response' and result['result_unknown']
-    slow=deepcopy(bad);slow['invocation']['argv']=['game','slow'];slow['invocation']['timeout']={'base_seconds':.1};b.tools['astra_act']=slow
+    # The fixture sleeps for five seconds. Leave enough startup time for its
+    # invocation log to be written on a loaded CI worker before timing out.
+    slow=deepcopy(bad);slow['invocation']['argv']=['game','slow'];slow['invocation']['timeout']={'base_seconds':1};b.tools['astra_act']=slow
     result=b.call('astra_act','{}','slow');assert result['error']=='tool_result_unknown'
     assert sum(c['args'][1:2]==['slow'] for c in calls(f))==1
     assert 'partial JSON' in (f['journal'].root/'events.jsonl').read_text()

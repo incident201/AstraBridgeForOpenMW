@@ -11,6 +11,9 @@ def receipt_details(receipt, args):
     """Page a stored result without observing or advancing the running game."""
     if args.keys()-{'ref','view','section','query','page','limit'}:
         raise BridgeError('invalid_arguments')
+    if receipt.get('result_retained') is False:
+        raise BridgeError('action_result_expired', request_id=receipt['request_id'],
+                          status=receipt['status'], result_retained=False)
     raw = receipt.get('response', {})
     view = args.get('view')
     if view is not None:

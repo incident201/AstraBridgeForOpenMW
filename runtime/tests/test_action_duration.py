@@ -33,6 +33,7 @@ def test_session_waits_for_long_action_result(tmp_path, monkeypatch, op):
     s.display=SimpleNamespace(public_coordinates=lambda value:value)
     s.process = SimpleNamespace(poll=lambda: None)
     s.uncertain = False; s.command_id = 0; s.session_id = 'test'; s.responses = {}
+    s.pending_commands = set()
     clock = [0.0]
     monkeypatch.setattr('astra_bridge.session.time.monotonic', lambda: clock[0])
 

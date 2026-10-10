@@ -8,7 +8,7 @@ history, images, context and logs. The model makes every game decision.
 ## Install and prepare
 
 Use Python 3.11+, AstraBridge 0.3.5+ and the normal container/GPU prerequisites.
-Install the `astrabridge_runner-0.1.0-py3-none-any.whl` in a Python environment,
+Install the `astrabridge_runner-0.1.1-py3-none-any.whl` in a Python environment,
 or install the source package:
 
 ```sh
@@ -169,7 +169,10 @@ request ID when available. They are not automatically executed again.
   game profile, skill hash and model catalog.
 - `active-state.json`: the current provider-native context and budget state.
 - `events.jsonl`: complete model items, tool results, CLI output, lifecycle and errors.
-- `api/*.json.gz`: full requests/responses, stream events, usage and diagnostics.
+- `api/*.json.gz`: reconstructable full requests/responses, stream events, usage
+  and diagnostics. Requests reference archived image bytes instead of storing
+  repeated base64 copies of the same screenshot. The `image_archive` field maps
+  each reference to its image file, SHA256 and exact positions in the request.
 - `images.json` and `images/`: registered frames, original paths, hashes and image bytes.
 - `checkpoint-*.json`: validated historical checkpoints.
 
@@ -177,3 +180,44 @@ Logs contain private playthrough data; they are for the host operator and are
 not general model-readable files. OAuth/API credentials are not log data.
 This package replaces the experimental DeepSeek-only runner and uses its own
 session format.
+
+### Storage and archive cleanup
+
+The active session's complete text history and image archive are retained;
+compaction only changes model context. Logs therefore still grow during a long
+session. Repeated API screenshots share the files in `images/`.
+`astrabridge_runner.journal.read_api_record(session_directory, relative_path)`
+restores the original JSON request, including image data URLs, and verifies image
+hashes. It also reads older records with inline images without modifying them.
+
+Preview cleanup of old inactive sessions:
+
+```sh
+astrabridge-runner logs prune --log-dir /path/to/private-sessions
+```
+
+This keeps the five most recent sessions and selects older sessions only after
+30 days without activity. `--older-than-days DAYS` and `--keep-last COUNT`
+change those limits. Add `--delete` to remove the selected archives:
+
+```sh
+astrabridge-runner logs prune --log-dir /path/to/private-sessions \
+  --older-than-days 30 --keep-last 5 --delete
+```
+
+Cleanup removes entire selected session directories, including their API logs,
+screenshots and resume state. Active sessions, unrelated directories and
+symlinked session directories are skipped. There is no automatic removal of
+playthrough history; archive anything you want to keep before deletion.
+Model discovery uses separate archives under
+`$XDG_STATE_HOME/astrabridge-runner/discovery` (or
+`~/.local/state/astrabridge-runner/discovery` when unset). Pass that directory as
+`--log-dir` to apply the same cleanup policy to discovery logs.
+
+### API retries
+
+Transient HTTP errors (429, 500, 502, 503 and 504) and network failures get at
+most three attempts. Exponential backoff respects `Retry-After` seconds or an
+HTTP date in both providers. If the server requests a wait longer than 60
+seconds, the runner stops retrying and retains the session for later resume.
+Permanent errors and ChatGPT subscription usage limits are not retried.

@@ -1,10 +1,9 @@
 import copy
 import json
-import time
 
 import httpx
 
-from .http import Transport
+from .http import RETRY_STATUSES, Transport
 from ..journal import json_text
 from ..types import ProviderError, Reply, ToolCall, model_info
 
@@ -88,8 +87,9 @@ class OpenAI:
                         if not isinstance(code, str): code = None
                         if status == 401 and not refreshed:
                             self.headers(True); refreshed = True; continue
-                        if status in (429, 500, 502, 503, 504) and not (code or '').startswith('subscription_sharing_') and attempt < 2:
-                            time.sleep(2 ** attempt); continue
+                        retryable = status in RETRY_STATUSES and not (code or '').startswith('subscription_sharing_')
+                        if retryable and attempt < 2 and self.http.wait_to_retry(attempt, headers):
+                            continue
                         raise ProviderError(f'OpenAI returned HTTP {status}: ' + self.journal.clean(json_text(body)), code=code, status=status)
                     for event in sse(response.iter_lines()):
                         events.append(event)
@@ -128,7 +128,9 @@ class OpenAI:
                     raise ProviderError('OpenAI stream contains no completed output items. No tools were executed.')
             except BaseException as exc:
                 if status is None and isinstance(exc,httpx.TransportError) and attempt < 2:
-                    self.http.finish(index, start, status, headers, {'transport_error': str(exc)}); time.sleep(2 ** attempt); continue
+                    self.http.finish(index, start, status, headers, {'transport_error': str(exc)})
+                    self.http.wait_to_retry(attempt, {})
+                    continue
                 if status is None or status < 400:
                     self.http.finish(index, start, status, headers, {'events': events, 'error': str(exc)})
                 if isinstance(exc,(KeyboardInterrupt,SystemExit)):raise
