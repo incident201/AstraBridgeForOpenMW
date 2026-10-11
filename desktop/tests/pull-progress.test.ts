@@ -45,9 +45,32 @@ test('UTF-8 output and progress survive chunks split within a multibyte characte
  assert.equal(chunks.join('').includes('\ufffd'),false);
 });
 
-test('terminal timeout kills grandchildren that ignore normal shutdown',{skip:process.platform!=='linux'},async()=>{
+test('terminal timeout waits for grandchildren to exit after forced shutdown',{skip:process.platform!=='linux'},async context=>{
  const {mkdtemp,readFile,rm}=await import('node:fs/promises');const {tmpdir}=await import('node:os');const {join}=await import('node:path');
+ const {readFileSync}=await import('node:fs');
  const root=await mkdtemp(join(tmpdir(),'pull-tree-')),file=join(root,'pid');let pid:number|undefined;
+ const kill=process.kill.bind(process);
+ const pendingSignals:Promise<void>[]=[];
+ // Signal delivery and process exit are separate events. Make that gap visible
+ // consistently, instead of relying on the CI scheduler to reproduce it.
+ context.mock.method(process,'kill',(target:number,signal:NodeJS.Signals|number='SIGTERM')=>{
+  if(target<0&&signal==='SIGKILL'){
+   pid=Number(readFileSync(file,'utf8'));
+   const stat=readFileSync(`/proc/${pid}/stat`,'utf8');
+   const group=Number(stat.slice(stat.lastIndexOf(') ')+2).split(/\s+/)[2]);
+   // Let the PTY wrapper exit immediately while its separate session is still
+   // alive. Waiting only for the wrapper's close event must not pass this test.
+   if(target!==-group)return kill(target,signal);
+   pendingSignals.push(new Promise<void>((resolve,reject)=>{
+    setTimeout(()=>{
+     try{kill(target,signal);resolve();}
+     catch(error){if((error as NodeJS.ErrnoException).code==='ESRCH')resolve();else reject(error);}
+    },150);
+   }));
+   return true;
+  }
+  return kill(target,signal);
+ });
  try{
   const descendant='process.on("SIGTERM",()=>{});process.on("SIGHUP",()=>{});require("fs").writeFileSync(process.argv[1],String(process.pid));setInterval(()=>{},1000)';
   const parent='require("child_process").spawn(process.execPath,["-e",process.argv[1],process.argv[2]],{stdio:"inherit"});process.on("SIGTERM",()=>{});process.on("SIGHUP",()=>{});setInterval(()=>{},1000)';
@@ -55,7 +78,11 @@ test('terminal timeout kills grandchildren that ignore normal shutdown',{skip:pr
   pid=Number(await readFile(file,'utf8'));
   const state=await readFile(`/proc/${pid}/stat`,'utf8').catch(()=>'');
   assert.ok(!state||['Z','X'].includes(state.split(') ')[1][0]),'Timeout left a PTY grandchild running');
- }finally{if(pid)try{process.kill(pid,'SIGKILL');}catch{}await rm(root,{recursive:true,force:true});}
+ }finally{
+  if(pid)try{kill(pid,'SIGKILL');}catch{}
+  await Promise.all(pendingSignals);
+  await rm(root,{recursive:true,force:true});
+ }
 });
 
 test('failed command input terminates its process tree and retains the original error',{skip:process.platform!=='linux'},async()=>{

@@ -167,8 +167,11 @@ process creation time when available to distinguish a reused PID.
 
 Runtime subprocess timeouts terminate and reap the process tree. Linux terminal
 commands run through `script`, whose PTY child can have its own process group;
-cleanup includes those descendant groups. Output is decoded incrementally as
-UTF-8 so Unicode characters survive chunk boundaries.
+cleanup includes those descendant groups. After forced termination, cleanup
+waits up to one second for the tracked processes to exit and reports an error
+if any remain alive. Completion of the PTY wrapper alone does not establish
+that its descendants have stopped. Output is decoded incrementally as UTF-8
+so Unicode characters survive chunk boundaries.
 
 For an explicitly prepared GPU test installation and save:
 

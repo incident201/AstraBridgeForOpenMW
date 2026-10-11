@@ -51,6 +51,18 @@ async function alive(original:ProcessIdentity):Promise<boolean> {
   return Boolean(current && current.started === original.started && !['Z', 'X'].includes(current.state));
 }
 
+async function waitForExit(processes:ProcessIdentity[], timeout:number):Promise<ProcessIdentity[]> {
+  const deadline = Date.now() + timeout;
+  let remaining = processes;
+  while (remaining.length) {
+    const living = await Promise.all(remaining.map(alive));
+    remaining = remaining.filter((_, index) => living[index]);
+    if (!remaining.length || Date.now() >= deadline) break;
+    await new Promise(resolve => setTimeout(resolve, Math.min(25, deadline - Date.now())));
+  }
+  return remaining;
+}
+
 /** script's PTY child has a separate session: killing only script's group is insufficient. */
 export async function terminateProcessTree(child:ChildProcess):Promise<void> {
   if (!child.pid) return;
@@ -81,13 +93,12 @@ export async function terminateProcessTree(child:ChildProcess):Promise<void> {
   const groups = new Set([...processes.map(value => value.group), child.pid]);
   for (const group of groups) signalGroup(group, 'SIGTERM');
   // Allow a normal exit, then kill stubborn PTY descendants before settling.
-  const deadline = Date.now() + 1000;
-  let remaining = processes;
-  while (remaining.length && Date.now() < deadline) {
-    const living = await Promise.all(remaining.map(alive));
-    remaining = remaining.filter((_, index) => living[index]);
-    if (remaining.length) await new Promise(resolve => setTimeout(resolve, 25));
-  }
+  let remaining = await waitForExit(processes, 1000);
   for (const group of new Set(remaining.map(value => value.group))) signalGroup(group, 'SIGKILL');
-  if (process.platform !== 'linux') signalGroup(child.pid, 'SIGKILL');
+  if (process.platform === 'linux') {
+    // SIGKILL delivery does not mean exit is already observable. script can be
+    // reaped before a process in its separate PTY session has finished exiting.
+    remaining = await waitForExit(remaining, 1000);
+    if (remaining.length) throw new Error(`Runtime processes did not exit after SIGKILL: ${remaining.map(value => value.pid).join(', ')}`);
+  } else signalGroup(child.pid, 'SIGKILL');
 }
