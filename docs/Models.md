@@ -14,6 +14,7 @@ than a general ranking of model capabilities.
 | Gemini 3.8 Flash (high) | Found Caius Cosades in one run; became lost in Balmora in another. | agy CLI |
 | DeepSeek 4.1 Flash (max) | Completed the tutorial and saved; reached Balmora in one test, but then wandered in circles. | Codex CLI; AstraBridge Runner |
 | Claude Opus 5.5 / Sonnet 5.5 | Reached Balmora in CLI testing, but navigation suffered from discarded tool diagnostics. | Claude CLI |
+| Claude Haiku 5.5 (xhigh) | Stalled during the tutorial, resumed after user prompting, then stopped inside the Census and Excise Office. | Claude Code CLI |
 | Grok 4.7 (high) | Left the starting ship with the custom runner, but navigation remained poor and API use was excessive. | Grok Build; AstraBridge Runner |
 
 ## GPT models
@@ -143,6 +144,30 @@ embodied tasks. A similar tool-handling problem occurred with DeepSeek through
 Codex and disappeared after the switch to a custom runner. This gives a reason
 to investigate the harness, but a direct API comparison is still needed to
 establish its effect on Claude. That comparison has not been performed.
+
+## Claude Haiku 5.5 (xhigh)
+
+Haiku was tested on Linux through Claude Code CLI with reasoning effort `xhigh`.
+It left the ship's interior, but stalled on the route from the ship to the shore
+and handed control back to the user. After the user told it to continue, it
+advanced through character creation and reached the Census and Excise Office.
+It then became stuck there and again disconnected the agent to ask for help.
+The tutorial was not completed.
+
+A recurring weakness was recovery from blocked progress. Haiku often expected
+the next tutorial step to happen automatically and tried more waiting. Early
+waits while controls were disabled were appropriate. Later, it repeatedly waited
+with movement enabled and no relevant change in the observed state. In the
+office, it used repeated thirty-second waits and retried a locked door without
+progress. It also tried movement, dialogue, and exploration, but struggled to
+turn the available evidence into a revised plan.
+
+Its shell commands frequently truncated AstraBridge responses with `head` or
+filtered them down to a few fields with `grep`; some attempts discarded results
+entirely. This reduced the diagnostics available to the model, as observed in
+the other Claude CLI tests. The contribution of the model and harness cannot be
+separated from this run alone. Haiku has not been tested through a direct API
+connection.
 
 ## Grok 4.7 (high)
 
