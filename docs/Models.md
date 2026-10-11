@@ -14,7 +14,7 @@ than a general ranking of model capabilities.
 | Gemini 3.8 Flash (high) | Found Caius Cosades in one run; became lost in Balmora in another. | agy CLI |
 | DeepSeek 4.1 Flash (max) | Completed the tutorial and saved; reached Balmora in one test, but then wandered in circles. | Codex CLI; AstraBridge Runner |
 | Claude Opus 5.5 / Sonnet 5.5 | Reached Balmora in CLI testing, but navigation suffered from discarded tool diagnostics. | Claude CLI |
-| Grok 4.7 | Did not begin playing on the starting ship; the harness setup was unusable. | Grok Build |
+| Grok 4.7 (high) | Left the starting ship with the custom runner, but navigation remained poor and API use was excessive. | Grok Build; AstraBridge Runner |
 
 ## GPT models
 
@@ -144,13 +144,35 @@ Codex and disappeared after the switch to a custom runner. This gives a reason
 to investigate the harness, but a direct API comparison is still needed to
 establish its effect on Claude. That comparison has not been performed.
 
-## Grok 4.7
+## Grok 4.7 (high)
 
-Grok was tested through Grok Build on Linux. It did not begin playing on the
-starting ship: it failed to open and inspect the game screenshots and did not
-proceed with gameplay actions.
+Grok was tested on Linux through AstraBridge Runner, connected directly to the
+xAI API with reasoning effort `high`. Tool use improved compared with Grok
+Build: the model began inspecting game screenshots and analyzing what it saw.
 
-The tested Grok Build setup was unusable for this task. It prevented a meaningful
-assessment of Grok's navigation or ability to complete game objectives. A direct
-API test is needed before drawing conclusions about the model's gameplay
-capabilities. That test has not been conducted.
+It still had major difficulties with movement and navigation. It made many
+unnecessary tool calls for small decisions, consuming large amounts of API
+tokens for limited progress. It managed to leave the starting ship, but the
+effort and API use were disproportionate to that small part of the tutorial.
+
+The session logs show a fragmented decision loop: Grok frequently alternated
+between camera adjustments, pixel selection, and short movements before making
+substantial progress. Incorrect assumptions also created extra work. It
+expected race and class selection before leaving the ship and speculated that
+the menus had been skipped or the new-game tool was faulty. It also repeatedly
+searched for an activation target on the lower-deck ladder before walking up it.
+
+Grok did recognize blocked movement and unconfirmed interactions, and it could
+change its approach. After an unsuccessful screenshot target, it selected a
+ground target and successfully crossed the ship's upper level. At the gangplank,
+it eventually switched from unsuccessful assisted navigation to short direct
+movement inputs and reached the dock. Recovery was possible, but often required
+many intermediate decisions.
+
+Grok can play through this setup, but with very poor cost efficiency. Its
+observed gameplay quality was closer to DeepSeek 4.1 Flash and Gemini 3.8 Flash
+than to Astra or Sol. Further gameplay testing was judged not cost-effective.
+
+The earlier Grok Build test did not progress from the starting ship because the
+model failed to open the screenshots and act. The custom-runner test removed
+that tool-use obstacle, making the remaining navigation difficulties visible.
