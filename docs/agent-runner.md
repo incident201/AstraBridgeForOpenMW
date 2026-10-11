@@ -257,6 +257,6 @@ Model discovery uses separate archives under
 
 Transient HTTP errors (429, 500, 502, 503 and 504) and network failures get at
 most three attempts. Exponential backoff respects `Retry-After` seconds or an
-HTTP date in both providers. If the server requests a wait longer than 60
+HTTP date for all providers. If the server requests a wait longer than 60
 seconds, the runner stops retrying and retains the session for later resume.
 Permanent errors and ChatGPT subscription usage limits are not retried.
