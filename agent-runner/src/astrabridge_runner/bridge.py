@@ -63,7 +63,7 @@ class Bridge:
         self.prefix=[str(executable or meta['executable']),'--config',meta['config']]
         self.original_prefix=list(self.prefix);self.private=None
         self.agent_name=agent_label+' '+self.journal.root.name
-        private={'DEEPSEEK_API_KEY','OPENAI_API_KEY','ACCESS_TOKEN','REFRESH_TOKEN','OPENAI_ACCESS_TOKEN','OPENAI_REFRESH_TOKEN'}
+        private={'DEEPSEEK_API_KEY','XAI_API_KEY','GROK_API_KEY','OPENAI_API_KEY','ACCESS_TOKEN','REFRESH_TOKEN','OPENAI_ACCESS_TOKEN','OPENAI_REFRESH_TOKEN'}
         self.env={k:v for k,v in os.environ.items() if k.upper() not in private}
         self.tools={};self.validators={};self.image_roots=[];self.status=None
 

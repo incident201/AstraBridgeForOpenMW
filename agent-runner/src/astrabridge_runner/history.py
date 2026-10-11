@@ -45,7 +45,11 @@ class History:
         actual_input = usage.get('input_tokens', usage.get('prompt_tokens', 0))
         if input_estimate and actual_input > 0:
             self.scale = max(.02, min(4.0, actual_input / input_estimate))
-        total = usage.get('input_tokens', usage.get('prompt_tokens', 0)) + usage.get('output_tokens', usage.get('completion_tokens', 0))
+        total = max(
+            usage.get('input_tokens', usage.get('prompt_tokens', 0))
+            + usage.get('output_tokens', usage.get('completion_tokens', 0)),
+            usage.get('total_tokens', 0),
+        )
         self.meter = {'tokens': total, 'cycle_count': len(self.cycles), 'item_count': len(reply.native), 'task': self.task,
                       'usage': usage} if total > 0 else None
         self.persist()
@@ -97,5 +101,11 @@ class History:
         return math.ceil(self.local_estimate(tools) * self.scale)
 
     def local_estimate(self, tools):
-        opaque = sum(cycle.get('usage', {}).get('output_tokens', 0) for cycle in self.cycles if self.provider.name == 'openai')
+        opaque = 0
+        if getattr(self.provider, 'opaque_reasoning', self.provider.name == 'openai'):
+            for cycle in self.cycles:
+                usage = cycle.get('usage', {})
+                input_tokens = usage.get('input_tokens', usage.get('prompt_tokens', 0))
+                opaque += max(usage.get('output_tokens', usage.get('completion_tokens', 0)),
+                              usage.get('total_tokens', 0) - input_tokens)
         return text_estimate([self.instructions, self.task, self.checkpoint, self.messages, self.provider.definitions(tools)]) + opaque + 4096 * self.image_limit

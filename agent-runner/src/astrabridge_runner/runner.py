@@ -38,6 +38,9 @@ class Runner:
             state = load_json((self.journal.root / 'active-state.json').read_text(encoding='utf-8'))
             if saved.get('schema') != 1 or (saved['provider'], saved['model'], saved['reasoning'], saved['account']) != (self.api.name, self.api.model, self.api.effort, self.api.account):
                 raise BridgeFailure('Provider, model or ChatGPT registration differs from the saved session.')
+            restore_provider = getattr(self.api, 'restore_session_state', None)
+            if restore_provider:
+                restore_provider(saved.get('provider_state', {}))
         catalog = self.bridge.load_tools(); identity = self.installation()
         if saved and saved['installation'] != identity: raise BridgeFailure('The AstraBridge installation or selected game profile differs from this session.')
         info = self.api.check_model()
@@ -59,6 +62,9 @@ class Runner:
                          'compaction': self.compaction, 'image_limit': self.image_limit, 'compact_at': self.compact_at,
                          'base_url': str(self.api.http.client.base_url), 'model_info': info}
         self.manifest['auth_directory'] = str(self.api.auth.directory) if self.api.name == 'openai' else None
+        provider_state = getattr(self.api, 'session_state', None)
+        if provider_state:
+            self.manifest['provider_state'] = provider_state()
         self.journal.write('manifest.json', self.manifest)
         if resume: self.resources.restore()
         self.history = History(self.api, instructions, self.journal, self.resources, image_limit=self.image_limit, state=state)

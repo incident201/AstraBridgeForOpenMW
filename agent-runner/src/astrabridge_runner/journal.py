@@ -65,7 +65,7 @@ class Journal:
         if isinstance(value, list):
             return [self.clean(v) for v in value]
         if isinstance(value, dict):
-            private = {'authorization', 'api_key', 'deepseek_api_key', 'access_token', 'refresh_token', 'id_token', 'code_verifier', 'client_secret', 'authorization_code'}
+            private = {'authorization', 'api_key', 'deepseek_api_key', 'xai_api_key', 'grok_api_key', 'access_token', 'refresh_token', 'id_token', 'code_verifier', 'client_secret', 'authorization_code'}
             return {k: self.clean(v) for k, v in value.items() if k.lower() not in private}
         return value
 

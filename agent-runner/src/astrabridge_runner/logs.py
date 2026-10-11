@@ -18,7 +18,7 @@ def session_metadata(path):
         return None
     try:
         data = json.loads(manifest.read_text(encoding='utf-8'))
-        if data.get('schema') != 1 or data.get('provider') not in ('deepseek', 'openai'):
+        if data.get('schema') != 1 or data.get('provider') not in ('deepseek', 'openai', 'grok'):
             return None
         # Event and state writes refresh these times throughout a run. API
         # archives need not be read to establish the session's latest activity.

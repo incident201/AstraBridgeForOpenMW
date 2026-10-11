@@ -2,13 +2,14 @@
 
 `astrabridge-runner` is an optional host Python application for playing through
 native AstraBridge tools. It supports OpenAI through **Sign in with ChatGPT**
-and the Responses API, and DeepSeek through its API. It manages transport,
+and the Responses API, DeepSeek through its API, and Grok through the xAI
+Responses API with an API key. It manages transport,
 history, images, context and logs. The model makes every game decision.
 
 ## Install and prepare
 
 Use Python 3.11+, AstraBridge 0.3.5+ and the normal container/GPU prerequisites.
-Install the `astrabridge_runner-0.1.1-py3-none-any.whl` in a Python environment,
+Install the `astrabridge_runner-0.1.2-py3-none-any.whl` in a Python environment,
 or install the source package:
 
 ```sh
@@ -103,9 +104,38 @@ astrabridge-runner run --provider deepseek --model deepseek-flash --reasoning ma
   --skill /path/to/api-skill --log-dir /path/to/private-sessions
 ```
 
+For Grok, provide `XAI_API_KEY` in the environment, then use:
+
+```sh
+astrabridge-runner models --provider grok --json
+astrabridge-runner run --provider grok --model grok-4.7 --reasoning xhigh \
+  --skill /path/to/api-skill --log-dir /path/to/private-sessions \
+  --task "Start a new game, complete the tutorial and save."
+```
+
+Grok uses `https://api.x.ai/v1/responses` with Bearer API-key authorization.
+Grok 4.7 supports `low`, `medium`, `high` and `xhigh`; the runner requires an
+explicit choice. `--base-url` remains a DeepSeek option. Grok model discovery
+uses the account's `/language-models` catalog and accepts aliases advertised
+there. When that catalog omits context or effort metadata for an available
+Grok 4.7, the runner uses its documented 500,000-token context and effort
+levels. Explicit API metadata takes precedence. See the official
+[Grok 4.7 guide](https://docs.x.ai/developers/grok-4-7) and
+[model discovery reference](https://docs.x.ai/developers/rest-api-reference/inference/models).
+
+Grok requests use `store:false`, flat function tools and
+`parallel_tool_calls:false`. Its encrypted reasoning items are retained and
+passed back unchanged. A stable prompt cache key belongs to the session and
+survives resume. The HTTP read timeout is one hour for Grok reasoning; connection
+and request-write timeouts remain bounded separately. See
+[xAI reasoning](https://docs.x.ai/developers/model-capabilities/text/reasoning).
+
 Do not put keys in arguments, source files or gameplay prompts. DeepSeek uses
 its Chat Completions transport; OpenAI uses the public Responses endpoint with
 OAuth, `store:false` and `stream:true`, not Codex or ChatGPT backend endpoints.
+API keys are redacted from logs and removed from the environment passed to
+AstraBridge CLI processes. Grok uses only the exported game and runner resource
+tools; xAI search and code-execution tools are not enabled.
 
 Enter goals at `Task>`. A text response without tools ends a turn; another goal
 continues the same session. One tool call per model response is allowed. Batches
@@ -113,8 +143,8 @@ perform no game actions. Arguments use the exported schemas and fixed argv
 bindings; models have no shell or Python scripting tools. Full returned JSON,
 including movement diagnostics and errors, is retained.
 
-OpenAI tools run only after `response.completed`. Incomplete/failed/interrupted
-streams cannot execute partial calls. OpenAI output items, assistant phases and
+OpenAI and Grok tools run only after `response.completed`. Incomplete/failed/interrupted
+streams cannot execute partial calls. Responses output items, assistant phases and
 encrypted reasoning are retained from completed stream items, including when
 the terminal event has an empty output array. DeepSeek retains its reasoning
 content.
@@ -127,10 +157,12 @@ the game's rolling cache can remove them. `view_saved_image` selects an older
 registered frame and marks it historical. `read_skill_reference` reads a full
 reference from the exported package. Neither tool accepts arbitrary files.
 
-Checkpoint compaction is enabled for both providers. It triggers around 75% of
+Checkpoint compaction is enabled for all providers. It triggers around 75% of
 the configured context window, between completed tool cycles. The budget uses
 actual API usage plus estimates for new items; estimates are not exact billing
 counts. Ciphertext is not treated as plain reasoning text.
+The budget includes reasoning tokens when xAI reports them separately from
+visible completion tokens; the original API usage remains in the logs.
 
 A separate request to the same model, without tools, creates a compact JSON
 checkpoint: goal, existing plan, verified facts, uncertainty, failed attempts,
@@ -162,6 +194,8 @@ it does not load a save or take over another controller. Older observations
 and interaction handles become historical. Unfinished tool calls recover a
 recorded result or an explicit unknown/not-executed result, including a receipt
 request ID when available. They are not automatically executed again.
+Resuming a Grok session requires `XAI_API_KEY` in the environment again. Keys
+are not saved in the session archive.
 
 ## Private session files
 

@@ -10,7 +10,7 @@
   and the patched OpenMW 0.51.0 source snapshot.
 - `runtime/container` and `runtime/graphics`: image dependencies and private display.
 - `desktop`: Application Core, Podman/WSL backends, Electron preload and Svelte UI.
-- `agent-runner`: optional host client for ChatGPT OAuth/Responses and DeepSeek,
+- `agent-runner`: optional host client for ChatGPT OAuth/Responses, DeepSeek and Grok,
   with native provider history, checkpoint compaction and session continuation.
   It executes game tools through the existing CLI.
 
