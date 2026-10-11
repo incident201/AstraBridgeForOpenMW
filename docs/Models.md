@@ -13,7 +13,7 @@ than a general ranking of model capabilities.
 | GPT-6 Luna (max) | Completed none of its assigned tasks. Once reached Balmora, but could not find Caius Cosades. | Codex CLI; AstraBridge Runner |
 | Gemini 3.8 Flash (high) | Found Caius Cosades in one run; became lost in Balmora in another. | agy CLI |
 | DeepSeek 4.1 Flash (max) | Completed the tutorial and saved; reached Balmora in one test, but then wandered in circles. | Codex CLI; AstraBridge Runner |
-| Claude Opus 5.5 / Sonnet 5.5 | Reached Balmora in CLI testing, but navigation suffered from discarded tool diagnostics. | Claude CLI |
+| Claude Opus 5.5 / Sonnet 5.5 | Reached Balmora in CLI testing, but navigation suffered from discarded tool diagnostics. | Claude Code CLI |
 | Claude Haiku 5.5 (xhigh) | Stalled during the tutorial, resumed after user prompting, then stopped inside the Census and Excise Office. | Claude Code CLI |
 | Grok 4.7 (high) | Left the starting ship with the custom runner, but navigation remained poor and API use was excessive. | Grok Build; AstraBridge Runner |
 
@@ -127,8 +127,8 @@ attributed to information being removed during compaction.
 
 ## Claude Opus 5.5 / Sonnet 5.5
 
-Both models were tested through Claude CLI and behaved very similarly. Sonnet
-was faster and sometimes navigated better than Opus. These observations apply
+Both models were tested through Claude Code CLI and behaved very similarly.
+Sonnet was faster and sometimes navigated better than Opus. These observations apply
 to the tested CLI setup; they do not establish how the models would compare
 through a direct API connection.
 
@@ -139,7 +139,7 @@ useful movement details and diagnostics. Without that information, the models
 struggled to understand what had happened and repeated the same requests.
 
 The leading explanation is that the emphasis on coding in the models' behavior
-within Claude CLI encourages output processing that is poorly suited to
+within Claude Code CLI encourages output processing that is poorly suited to
 embodied tasks. A similar tool-handling problem occurred with DeepSeek through
 Codex and disappeared after the switch to a custom runner. This gives a reason
 to investigate the harness, but a direct API comparison is still needed to
@@ -165,8 +165,8 @@ turn the available evidence into a revised plan.
 Its shell commands frequently truncated AstraBridge responses with `head` or
 filtered them down to a few fields with `grep`; some attempts discarded results
 entirely. This reduced the diagnostics available to the model, as observed in
-the other Claude CLI tests. The contribution of the model and harness cannot be
-separated from this run alone. Haiku has not been tested through a direct API
+the other Claude Code CLI tests. The contribution of the model and harness
+cannot be separated from this run alone. Haiku has not been tested through a direct API
 connection.
 
 ## Grok 4.7 (high)
