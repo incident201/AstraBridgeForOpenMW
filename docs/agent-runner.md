@@ -130,6 +130,11 @@ survives resume. The HTTP read timeout is one hour for Grok reasoning; connectio
 and request-write timeouts remain bounded separately. See
 [xAI reasoning](https://docs.x.ai/developers/model-capabilities/text/reasoning).
 
+The Grok adapter expresses argument alternatives below an object schema root,
+because xAI rejects tool schemas with root `anyOf`/`oneOf` alternatives. This is
+an equivalent transformation of the exported schemas; the runner still validates
+arguments against the original AstraBridge definitions before executing a tool.
+
 Do not put keys in arguments, source files or gameplay prompts. DeepSeek uses
 its Chat Completions transport; OpenAI uses the public Responses endpoint with
 OAuth, `store:false` and `stream:true`, not Codex or ChatGPT backend endpoints.

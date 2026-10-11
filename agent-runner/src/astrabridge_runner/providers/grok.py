@@ -30,6 +30,21 @@ class Grok(Responses):
     def headers(self, force=False):
         return {'Authorization': 'Bearer ' + self.key}
 
+    def definitions(self, tools):
+        definitions = super().definitions(tools)
+        for definition in definitions:
+            schema = copy.deepcopy(definition['parameters'])
+            # xAI treats a root anyOf/oneOf as the parameter's structural type,
+            # even when the surrounding schema already requires an object.
+            # Keep these predicates as conjunctions below the object root.
+            # This preserves validation without duplicating game definitions.
+            if schema.get('type') == 'object':
+                for keyword in ('anyOf', 'oneOf'):
+                    if keyword in schema:
+                        schema.setdefault('allOf', []).append({keyword: schema.pop(keyword)})
+            definition['parameters'] = schema
+        return definitions
+
     def models(self):
         response = self.http.request('GET', 'language-models', headers=self.headers())
         rows = response.get('models')

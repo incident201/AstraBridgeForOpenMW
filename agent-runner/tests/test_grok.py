@@ -1,10 +1,12 @@
 """Grok uses the same thin, sequential gameplay loop as the other providers."""
 
+import copy
 import gzip
 import json
 
 import httpx
 import pytest
+from jsonschema import Draft202012Validator
 
 from astrabridge_runner.journal import Journal
 from astrabridge_runner.providers.grok import Grok
@@ -135,6 +137,72 @@ def catalog_provider(journal, models, *, model='grok-4.7', effort='xhigh'):
     return Grok(KEY, journal, model=model, effort=effort, client=httpx.Client(
         base_url='https://api.x.ai/v1/', transport=httpx.MockTransport(handler),
     ))
+
+
+@pytest.mark.parametrize('name, cases', [
+    ('astra_map', [
+        ({}, True),
+        ({'action': 'local'}, True),
+        ({'action': 'world', 'full': True}, True),
+        ({'action': 'view'}, True),
+        ({'action': 'pan', 'dx': -.5}, True),
+        ({'action': 'pan', 'dy': 1}, True),
+        ({'action': 'pan', 'dx': -.5, 'dy': 1}, True),
+        ({'action': 'zoom', 'factor': 2}, True),
+        ({'action': 'zoom', 'fit': True}, True),
+        ({'action': 'markers', 'query': 'Balmora', 'page': 1, 'limit': 20}, True),
+        ({'action': 'center'}, True),
+        ({'action': 'close'}, True),
+        ({'action': 'pan'}, False),
+        ({'action': 'zoom'}, False),
+        ({'action': 'zoom', 'factor': 2, 'fit': True}, False),
+        ({'action': 'local', 'dx': 1}, False),
+        ({'action': 'pan', 'dx': 1, 'factor': 2}, False),
+        ({'dx': 1}, False),
+        ({'action': 'markers', 'page': 1.5}, False),
+        ({'action': 'not-an-action'}, False),
+        ({'unknown': True}, False),
+    ]),
+    ('astra_walk', [
+        ({'ref': 'ground_4'}, True),
+        ({'ref': 'ground_4', 'run': True, 'seconds': 20}, True),
+        ({'x': 512, 'y': 300, 'observation': 42}, True),
+        ({'x': 512, 'y': 300, 'observation': 42, 'full': True}, True),
+        ({}, False),
+        ({'x': 512, 'y': 300}, False),
+        ({'x': 512, 'observation': 42}, False),
+        ({'ref': 'ground_4', 'x': 512}, False),
+        ({'ref': 'ground_4', 'x': 512, 'y': 300, 'observation': 42}, False),
+        ({'x': 512.5, 'y': 300, 'observation': 42}, False),
+        ({'ref': 'ground_4', 'unknown': True}, False),
+    ]),
+])
+def test_grok_object_parameter_normalization_preserves_exported_validation(fixture, name, cases):
+    original = copy.deepcopy(fixture['tools']['tools'])
+    api = Server([]).provider(fixture['journal'])
+    try:
+        definitions = api.definitions(fixture['tools']['tools'])
+        source = next(tool['input_schema'] for tool in original if tool['name'] == name)
+        exported = next(tool['input_schema'] for tool in fixture['tools']['tools'] if tool['name'] == name)
+        converted = next(tool['parameters'] for tool in definitions if tool['name'] == name)
+        assert converted['type'] == 'object'
+        assert 'anyOf' not in converted and 'oneOf' not in converted
+        assert converted is not exported
+        assert converted['properties'] is not exported['properties']
+        assert fixture['tools']['tools'] == original
+        keyword = 'anyOf' if name == 'astra_map' else 'oneOf'
+        assert source[keyword]
+        assert {keyword: source[keyword]} in converted['allOf']
+        for existing in source.get('allOf', []):
+            assert existing in converted['allOf']
+        Draft202012Validator.check_schema(converted)
+        before = Draft202012Validator(source)
+        after = Draft202012Validator(converted)
+        for arguments, expected in cases:
+            assert before.is_valid(arguments) is expected, arguments
+            assert after.is_valid(arguments) is expected, arguments
+    finally:
+        api.close()
 
 
 def test_grok_discovers_advertised_47_and_uses_documented_missing_metadata_defaults(fixture):
