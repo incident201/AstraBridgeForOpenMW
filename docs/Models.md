@@ -13,7 +13,8 @@ than a general ranking of model capabilities.
 | GPT-6 Luna (max) | Completed none of its assigned tasks. Once reached Balmora, but could not find Caius Cosades. | Codex CLI; AstraBridge Runner |
 | Gemini 3.8 Flash (high) | Found Caius Cosades in one run; became lost in Balmora in another. | agy CLI |
 | DeepSeek 4.1 Flash (max) | Completed the tutorial and saved; reached Balmora in one test, but then wandered in circles. | Codex CLI; AstraBridge Runner |
-| Claude Opus 5.5 / Sonnet 5.5 | Reached Balmora in CLI testing, but navigation suffered from discarded tool diagnostics. | Claude Code CLI |
+| Claude Opus 5.5 | Completed the tutorial and found Caius Cosades with `low` effort; earlier runs had navigation difficulties. | Claude Code CLI |
+| Claude Sonnet 5.5 | Reached Balmora, but navigation suffered from discarded tool diagnostics. | Claude Code CLI |
 | Claude Haiku 5.5 (xhigh) | Stalled during the tutorial, resumed after user prompting, then stopped inside the Census and Excise Office. | Claude Code CLI |
 | Grok 4.7 (high) | Left the starting ship with the custom runner, but navigation remained poor and API use was excessive. | Grok Build; AstraBridge Runner |
 
@@ -127,23 +128,24 @@ attributed to information being removed during compaction.
 
 ## Claude Opus 5.5 / Sonnet 5.5
 
-Both models were tested through Claude Code CLI and behaved very similarly.
-Sonnet was faster and sometimes navigated better than Opus. These observations apply
-to the tested CLI setup; they do not establish how the models would compare
-through a direct API connection.
+Both models were tested on Linux through Claude Code CLI.
 
-The Claude tests included reaching Balmora, but navigation then broke down.
-A recurring problem was the models' tendency to write their own parsers that
-reduced AstraBridge's JSON output to a simple success/failure flag. This removed
-useful movement details and diagnostics. Without that information, the models
-struggled to understand what had happened and repeated the same requests.
+With reasoning effort `low`, Opus completed the tutorial and found and spoke
+with Caius Cosades in Balmora in approximately 45 minutes. It actively used
+screenshots and recovered from navigation difficulties along the way.
 
-The leading explanation is that the emphasis on coding in the models' behavior
-within Claude Code CLI encourages output processing that is poorly suited to
-embodied tasks. A similar tool-handling problem occurred with DeepSeek through
-Codex and disappeared after the switch to a custom runner. This gives a reason
-to investigate the harness, but a direct API comparison is still needed to
-establish its effect on Claude. That comparison has not been performed.
+Earlier Opus and Sonnet runs had more serious navigation problems, including
+becoming lost after reaching Balmora. Their behavior was similar; Sonnet was
+faster and sometimes navigated better.
+
+Both models tended to shorten AstraBridge responses with scripts, discarding
+useful movement details and diagnostics. This problem persisted in the
+successful Opus run, which still frequently used `grep` and `head` to truncate
+results.
+
+Opus can complete the opening objective through Claude Code CLI. Whether lower
+reasoning effort improves performance remains unconfirmed from one run. A
+direct API comparison has not been performed.
 
 ## Claude Haiku 5.5 (xhigh)
 
