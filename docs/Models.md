@@ -12,7 +12,7 @@ than a general ranking of model capabilities.
 | GPT-6.1 Sol (xhigh) | Completed extended story and faction quest sequences autonomously. | Codex CLI; AstraBridge Runner |
 | GPT-6 Luna (max) | Completed none of its assigned tasks. Once reached Balmora, but could not find Caius Cosades. | Codex CLI; AstraBridge Runner |
 | Gemini 3.8 Flash (high) | Found Caius Cosades in one run; became lost in Balmora in another. | agy CLI |
-| DeepSeek 4.1 Flash (max) | Completed the tutorial and saved with the custom runner, but did not reach Balmora. | Codex CLI; AstraBridge Runner |
+| DeepSeek 4.1 Flash (max) | Completed the tutorial and saved; reached Balmora in one test, but then wandered in circles. | Codex CLI; AstraBridge Runner |
 | Claude Opus 5.5 / Sonnet 5.5 | Reached Balmora in CLI testing, but navigation suffered from discarded tool diagnostics. | Claude CLI |
 | Grok 4.7 | Did not begin playing on the starting ship; the harness setup was unusable. | Grok Build |
 
@@ -100,10 +100,11 @@ DeepSeek independently started a new game, completed character creation and the
 tutorial, handled tutorial popups, and saved when saving became available. It
 also checked that its save existed.
 
-The next goal was to reach Caius Cosades in Balmora. The model became stuck
-around the silt strider in Seyda Neen, repeatedly trying to interact with it from
-below and confusing an ordinary pier with its boarding area. The run was stopped
-without reaching Balmora.
+In that custom-runner test, the next goal was to reach Caius Cosades in Balmora.
+The model became stuck around the silt strider in Seyda Neen, repeatedly trying
+to interact with it from below and confusing an ordinary pier with its boarding
+area. That run was stopped without reaching Balmora. In another test, DeepSeek
+did reach Balmora, but then began wandering in circles there.
 
 The custom runner substantially improved tool handling compared with the Codex
 setup. In Codex, DeepSeek often wrote parsers that truncated AstraBridge JSON
