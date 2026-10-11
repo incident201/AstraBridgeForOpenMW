@@ -1,8 +1,8 @@
 # Model Results
 
-This document summarizes practical results from running different AI models with AstraBridge.
-
-These results describe how the models behave specifically when playing Morrowind through AstraBridge. They should not be treated as a general ranking of the models.
+This document summarizes practical results from playing Morrowind through
+AstraBridge with different AI models. The assessments apply to these gameplay
+tests and their harness configurations; they are not a general model ranking.
 
 ## Current status
 
@@ -16,108 +16,241 @@ These results describe how the models behave specifically when playing Morrowind
 | DeepSeek 4.1 Flash | Bad. Playable. | [astrabridge-runner](agent-runner.md) |
 | Claude (Opus 5.5 / Sonnet 5.5) | Mediocre. Playable. | Claude CLI |
 
-## GPT models
-
-Initial tests of Astra, Sol, and Luna were run through Codex CLI as the harness on Linux.
-
-All three models handle context compaction well: they retain the current goal and continue working after compaction. Tests with longer context windows did not produce a visible improvement in quality.
-
-### Harness comparison
-
-GPT-6.1 Sol (xhigh) and GPT-6 Luna (max) were also tested on Linux through AstraBridge's own runner, connected directly to the OpenAI Responses API. The runner presented AstraBridge controls as native tools, returned complete structured results, and supplied screenshots automatically.
-
-These tests did not show a meaningful difference in gameplay quality compared with Codex CLI. Luna continued to struggle with navigation and repeat familiar routes, even in the opening tutorial. Sol continued to navigate and progress through the tutorial without significant difficulty.
-
-These results support using Codex CLI as a suitable harness for GPT models playing through AstraBridge. The custom runner is primarily useful for more controlled experimental comparisons between models; Codex CLI remains a practical choice for ordinary play.
+## Results by model
 
 ### GPT-6 Astra (xhigh)
 
-**Excellent results.**
+**Test setup:** Codex CLI on Linux.
 
-Astra is very good at spatial navigation. It can keep track of which areas have already been explored and which directions are still unknown.
+#### Observed behavior
 
-It handles verbal route descriptions well and can remember long-term goals over extended sessions. When an approach is not working, it can recognize the lack of progress and try a different strategy instead of repeating the same actions.
+Astra navigates well, keeps track of explored areas and unknown directions,
+and handles verbal route descriptions reliably. It retains long-term goals
+over extended sessions and uses AstraBridge controls as intended.
 
-It also understands AstraBridge control commands reliably and generally uses the available tools as intended.
+It currently provides the best and most consistent results among the tested
+models.
 
-Overall, Astra currently provides the best and most consistent results.
+#### Consistency and recovery
+
+When an approach fails to produce progress, Astra can recognize the problem
+and try a different strategy. It also continued working toward its goals when
+AstraBridge itself had clear bugs or malfunctioning tools.
+
+For example, in early versions, a broken `revisit` could take the player to the
+wrong floor inside a building. Astra distinguished this tool failure from
+normal gameplay, found a workaround, and continued toward the original goal.
 
 ### GPT-6.1 Sol (xhigh)
 
-**Very close to Astra.**
+**Test setup:** Codex CLI and AstraBridge Runner on Linux, with the latter
+connected directly to the OpenAI Responses API.
 
-Sol shows almost the same level of navigation, spatial understanding, and long-term planning.
+#### Observed behavior
 
-It can use screenshots, previous observations, and route information to maintain a reasonably consistent understanding of the environment. It also handles AstraBridge controls without significant problems.
+Sol combines screenshots, previous observations, and route information into
+a reasonably consistent understanding of its surroundings. It handles AstraBridge
+controls reliably and maintains long-term goals. Its navigation and actual
+gameplay progress are close to Astra's.
 
-Sol sometimes spends more time reasoning before taking an action, but in terms of actual in-game progress it performs at roughly the same level as Astra.
+#### Consistency and recovery
+
+Sol continued making progress despite clear AstraBridge errors, including
+`revisit` taking the player to the wrong floor. It recognized the incorrect
+tool behavior and adjusted its actions to pursue the same goal through other
+means.
+
+#### Limitations
+
+Sol sometimes spends more time reasoning before taking an action. This did
+not produce a significant difference in actual gameplay progress compared
+with Astra in the observed runs.
 
 ### GPT-6 Luna (max)
 
-**Understands the controls, but has major navigation problems.**
+**Test setup:** Codex CLI and AstraBridge Runner on Linux, with the latter
+connected directly to the OpenAI Responses API.
 
-Luna generally understands AstraBridge commands, but has difficulty connecting visual information with the results of its own actions.
+#### Observed behavior
 
-It frequently repeats routes it has already explored and often fails to distinguish known areas from new ones, even when this information is available in the atlas.
+Luna generally understands AstraBridge commands and remembers the overall
+objective. It often uses local movement probes to test directions, but
+struggles to connect visual observations with the results of its actions.
 
-Instead of relying on screenshots and building a larger mental map of the environment, Luna often prefers local movement probes to test possible directions.
+#### Consistency and recovery
 
-It usually remembers and can describe the overall objective, but has great difficulty turning that objective into successful navigation.
+It repeatedly returns to explored routes and has difficulty distinguishing
+known areas from new ones, even when the atlas provides that information.
+These navigation problems also occurred with the custom runner.
 
-## Gemini 3.8 Flash (high)
+#### Limitations
 
-**Better than Luna in practice, but still far behind the frontier models.**
+Remembering and describing the goal does not reliably translate into
+successful navigation. Building a larger spatial understanding from
+screenshots remains a major weakness, including during the opening tutorial.
 
-Tests were run through agy CLI as the harness on Linux.
+### Gemini 3.8 Flash (high)
 
-Gemini understands AstraBridge command syntax very well and uses the available tools effectively.
+**Test setup:** agy CLI on Linux.
 
-It shows signs of understanding its surroundings through game screenshots. However, it still has difficulty combining separate observations into a stable representation of the environment. As a result, it often repeats routes it has already taken.
+#### Observed behavior
 
-The agent remembers the overall objective and can achieve it, but often needs more actions than frontier models such as Astra.
+Gemini understands AstraBridge command syntax very well and uses the tools
+effectively. It shows signs of understanding its surroundings through game
+screenshots.
 
-## DeepSeek 4.1 Flash (max)
+The agent remembers the overall objective and continues trying to achieve it,
+but often takes more actions than frontier models such as Astra.
 
-**Tool use improved; overall results remain poor.**
+#### Consistency and recovery
 
-### Earlier Codex tests
+Its performance varies noticeably between sessions compared with the other
+tested models. In some runs, it completes the tutorial reasonably well,
+reaches Balmora, and finds Caius Cosades. In others, it gets stuck walking in
+circles inside the Census and Excise Office or around Seyda Neen.
 
-Earlier tests were run through the Codex harness. The default integration was unusable because every request resent all previously viewed images. A local proxy removed older images from API requests, keeping only a few recent screenshots. Older images remained available on request.
+Gemini sometimes becomes fixated on an incorrect assumption and keeps taking
+ineffective actions without reconsidering that assumption or changing its
+approach. Difficulty recovering from errors is a possible explanation for
+the uneven results; this connection has not been confirmed.
 
-With this setup, DeepSeek frequently hallucinated and invented strange explanations for its mistakes. It often truncated AstraBridge JSON responses through its own output-processing wrappers, discarding useful information. It also wrote unhelpful Python automation scripts for route finding, repeatedly walked in circles, and showed severe spatial disorientation.
+#### Limitations
 
-### Custom harness test
+It has difficulty combining separate observations into a stable
+representation of the environment and often repeats routes it has already
+taken.
 
-A follow-up test was run on Linux through a minimal custom harness connected directly to the DeepSeek API. AstraBridge controls were presented as native tools. The harness returned complete structured JSON results and supplied screenshots automatically. Only the latest selected image was included in API requests; older images remained available on request. The full text history, including reasoning, was retained without context compaction. The model had no shell or Python scripting tools.
+### DeepSeek 4.1 Flash (max)
 
-DeepSeek stopped truncating AstraBridge JSON output and used tools more reliably. Navigation improved overall compared with the Codex tests. Removing the ability to write ineffective Python automation scripts had a positive effect: the model more often examined screenshots and tried to orient itself in the game world.
+**Test setup:** AstraBridge Runner on Linux, connected directly to the
+DeepSeek API. Earlier Codex tests are covered in the harness observations
+below.
 
-It independently started a new game, completed character creation and the opening tutorial, and saved successfully when saving became available. It handled tutorial popups and checked that its save existed.
+#### Observed behavior
 
-The next task was to reach Caius Cosades in Balmora. The model spent roughly 27 minutes circling the silt strider in Seyda Neen, repeatedly trying to interact with it from below and confusing an ordinary pier with its boarding area. The run was stopped without reaching Balmora.
+With the custom runner, DeepSeek read complete AstraBridge JSON results and
+used tools more reliably. It examined screenshots more often and navigation
+improved compared with the Codex tests.
 
-These improvements did not fundamentally raise the quality of play. DeepSeek still tends to treat an expected outcome as an established fact. It interprets screenshots as confirmation of its current hypothesis and does not consistently use them as the source of truth for building and testing an understanding of its surroundings.
+It independently started a new game, completed character creation and the
+opening tutorial, handled tutorial popups, and saved successfully when saving
+became available. It also checked that its save existed.
 
-It repeatedly claimed to understand the layout while returning to approaches that had already failed. Revising an incorrect explanation and choosing a different strategy remain major weaknesses. These failures occurred with the full conversation preserved and no compaction, so they cannot be explained by information being removed during compaction in this test.
+#### Consistency and recovery
 
-## Grok 4.7
+The next task was to reach Caius Cosades in Balmora. The model spent roughly
+27 minutes circling the silt strider in Seyda Neen, repeatedly trying to
+interact with it from below and confusing an ordinary pier with its boarding
+area. The run was stopped without reaching Balmora.
 
-Tests were run through Grok Build as the harness on Linux.
+It repeatedly claimed to understand the layout while returning to approaches
+that had already failed. Revising an incorrect explanation and changing
+strategy remain major weaknesses.
 
-The model receives game screenshots but, for an unknown reason, refuses to open or inspect them. It also tends to repeat "observe" requests unnecessarily and fails to establish a stable observation-action loop.
+#### Limitations
 
-This is likely a harness issue, although the cause has not been confirmed.
+The improved tool use did not fundamentally raise gameplay quality. DeepSeek
+still tends to treat an expected outcome as an established fact and interpret
+screenshots as confirmation of its current hypothesis. It does not
+consistently use visual observations as the source of truth for building and
+checking its understanding of the surroundings.
 
-A possible solution is to use the Grok API directly. This has not been tested yet because it would require an additional adapter specifically for Grok.
+These failures occurred with the full conversation retained and no context
+compaction. Information removed during compaction therefore does not explain
+the failures in this run.
 
-## Claude
+### Grok 4.7
 
-Opus 5.5 and Sonnet 5.5 were tested through Claude CLI.
+**Test setup:** Grok Build on Linux.
 
-Both models behaved very similarly. They showed clear navigation difficulties even during the tutorial, struggled to keep track of passages, and repeatedly returned to the same places.
+#### Observed behavior
 
-They also frequently truncated AstraBridge responses and discarded useful information in the process.
+The model receives game screenshots but, for an unknown reason, refuses to
+open or inspect them. It also repeats `observe` requests unnecessarily and
+fails to connect visual observations with the results of its actions.
 
-As with Grok, these problems are likely to be caused by characteristics of the harness itself, although this has not been confirmed.
+#### Consistency and recovery
 
-To isolate the models' behavior from harness effects, they need to be tested directly through the API. Such tests have not been conducted yet.
+It did not establish a stable observation-action loop in the tested setup.
+This prevented useful gameplay.
+
+#### Limitations
+
+The cause remains unresolved. Harness behavior is a suspected explanation;
+direct API testing is needed to separate it from model limitations.
+
+### Claude Opus 5.5 / Sonnet 5.5
+
+**Test setup:** Claude CLI, testing both Opus 5.5 and Sonnet 5.5.
+
+#### Observed behavior
+
+Both models behaved very similarly. They showed navigation difficulties
+already during the tutorial, struggled to keep track of passages, and
+repeatedly returned to the same places.
+
+#### Consistency and recovery
+
+The repeated navigation problems were accompanied by frequent truncation of
+AstraBridge responses. The models discarded useful information in the process.
+
+#### Limitations
+
+The contribution of the harness to these problems has not been established.
+Direct API tests are needed before drawing conclusions about the models
+independently of Claude CLI.
+
+## Harness observations
+
+### GPT: Codex CLI and AstraBridge Runner
+
+Astra, Sol, and Luna all handled context compaction well in Codex CLI: they
+retained their goals and continued working after compaction. Longer context
+windows did not produce a visible improvement in quality.
+
+Sol (xhigh) and Luna (max) were also tested through AstraBridge Runner using
+the OpenAI Responses API directly. The runner presented AstraBridge controls
+as native tools, returned complete structured results, and supplied
+screenshots automatically.
+
+The harness change did not produce a meaningful difference in gameplay
+quality. Luna still struggled with navigation and repeated familiar routes;
+Sol continued to navigate and progress without significant difficulty.
+
+Codex CLI is therefore a practical harness for ordinary GPT gameplay through
+AstraBridge. The custom runner is useful for more controlled experimental
+comparisons between models.
+
+### DeepSeek: Codex and the custom runner
+
+The default Codex integration was unusable because DeepSeek's API required
+every request to resend all previously viewed images. For those tests, a
+local proxy removed older images from requests, keeping only a few recent
+screenshots. Older images remained available on request.
+
+In that setup, DeepSeek frequently hallucinated and invented unusual
+explanations for its mistakes. It truncated AstraBridge JSON through its own
+output-processing wrappers and wrote unhelpful Python scripts for route
+finding, often walking in circles with severe spatial disorientation.
+
+The custom runner presented AstraBridge controls as native tools, returned
+complete JSON results, and supplied screenshots automatically. API requests
+included only the latest selected image; older images remained available on
+request. The full text history, including reasoning, was retained without
+compaction. The model had no shell or Python scripting tools.
+
+DeepSeek stopped truncating responses and used tools more reliably. Removing
+the option to write ineffective automation scripts had a positive effect:
+it more often examined screenshots and tried to navigate from what it saw.
+These changes improved tool handling, but the navigation
+and error-recovery problems described above remained.
+
+### Grok and Claude: suspected harness issues
+
+The screenshot problem in Grok Build and the difficulties observed through
+Claude CLI may be caused by characteristics of those harnesses. This is a
+working hypothesis, not a confirmed diagnosis.
+
+Neither setup has been compared with a direct API run. Grok API testing was
+deferred because it requires an additional provider adapter. Direct API tests
+of Opus 5.5 and Sonnet 5.5 have also not been conducted.
