@@ -147,6 +147,13 @@ app.whenReady().then(async()=>{
       if(operation==='gpus')return core.api('/v1/runtime/gpus');
       if(operation==='configure')return core.api('/v1/runtime/config','PATCH',args);
       if(operation==='profiles')return core.profiles();
+      if(operation==='import-save'){
+        if(typeof args.id!=='string')throw new Error('Choose a destination profile.');
+        const result=await dialog.showOpenDialog(window!,{title:'Import save into profile',properties:['openFile'],
+          filters:[{name:'OpenMW save files',extensions:['omwsave']}]});
+        if(result.canceled)return {cancelled:true};
+        return core.importSave(result.filePaths[0],args.id);
+      }
       if(operation==='profile'){
         if(!['create','rename','duplicate','switch','delete'].includes(args.operation))throw new Error('Unknown profile operation');
         if(args.operation==='delete'){

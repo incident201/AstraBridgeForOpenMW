@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 import secrets
 import uuid
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 from aiohttp import ClientSession, ClientTimeout, WSMsgType, web
 from astra_bridge.protocol import BridgeError
@@ -103,6 +103,12 @@ def application(runtime: Runtime, token: str):
         if request.method=='GET':
             async with runtime.mutation:return answer(runtime.profiles.catalog())
         return answer(await runtime.profile_operation(request.match_info['operation'],await body(request)))
+    async def import_save(request):
+        if request.content_type != 'application/octet-stream':
+            raise BridgeError('invalid_save_upload', message='Send the OpenMW save as application/octet-stream.')
+        return answer(await runtime.import_save(
+            request.match_info['profile'], unquote(request.headers.get('X-Astra-Save-Filename', '')),
+            request.content.iter_chunked(1024 * 1024), request.content_length))
     async def replay_info(request):
         return answer(await asyncio.to_thread(runtime.replay_info,request.query.get('id')))
     async def replay_index(request):
@@ -217,6 +223,7 @@ def application(runtime: Runtime, token: str):
         web.post('/v1/agent/{action}',agent),web.get('/v1/agent/status',agent),
         web.post('/v1/runtime/agent/end',end_agent),web.post('/v1/runtime/recording/{action}',record),
         web.get('/v1/runtime/profiles',profiles),web.post('/v1/runtime/profiles/{operation}',profiles),
+        web.post('/v1/runtime/profiles/{profile}/saves/import',import_save),
         web.get('/v1/runtime/replay',replay_info),
         web.get('/v1/runtime/replay/{id}/{generation}/index',replay_index),
         web.get('/v1/runtime/replay/{id}/{generation}/{part}',replay_part),

@@ -81,6 +81,7 @@ Atlas and knowledge data have separate lifetimes and are not receipt payloads.
 | `POST /v1/agent/connect` | Acquire agent ownership; accepts `name` and optional expected `profile` ID. |
 | `GET /v1/runtime/profiles` | Active profile and profile catalog. |
 | `POST /v1/runtime/profiles/{create,rename,duplicate,switch,delete}` | Manage profiles while the game is stopped. Create takes `name`; rename/duplicate take `id,name`; switch/delete take `id`. |
+| `POST /v1/runtime/profiles/{id}/saves/import` | Upload a native OpenMW save into the specified profile while the game is stopped. |
 | `POST /v1/agent/disconnect` | Stop held input and release the authenticated agent session. |
 | `GET /v1/agent/status` | Public ownership state, without its credential. |
 | `POST /v1/runtime/agent/end` | Deliberate user termination of the current owner. |
@@ -100,6 +101,41 @@ Atlas and knowledge data have separate lifetimes and are not receipt payloads.
 | `POST /v1/runtime/live/whep` | WebRTC SDP offer/answer through MediaMTX. |
 | `PATCH/DELETE /v1/runtime/live/whep/{id}` | WHEP session signaling/cleanup. |
 | `GET /v1/events` | WebSocket events, telemetry and authenticated manual input. |
+
+### Importing saves
+
+In Desktop, stop the game, open **Profiles**, select the destination profile
+in the list, and choose **Import save…**. The destination does not have to be
+the active profile. The file is copied into a new save slot; the original file
+and existing saves are preserved. Importing the same file again creates another
+slot. Start the game with that profile and load the imported save normally.
+
+The equivalent host CLI commands are:
+
+```sh
+astrabridge profiles
+astrabridge import-save /path/to/save.omwsave --profile PROFILE_ID
+```
+
+Omit `--profile` to use the active profile. These are setup commands, separate
+from `astrabridge game`. Importing does not copy or reset Atlas, object knowledge,
+notes or session history. Create a new profile for an independent experiment.
+
+Only native OpenMW `.omwsave` files are accepted. Original Morrowind `.ess`
+files require conversion first. Validation checks the OpenMW header, record
+boundaries, save metadata and primary game against the profile configuration.
+OpenMW checks engine-version and content compatibility when loading; import
+does not install or enable missing mods or expansion files.
+
+The authenticated upload uses `application/octet-stream` and the URL-encoded
+original basename in `X-Astra-Save-Filename`. It streams into temporary storage
+inside the destination profile, with a 512 MiB limit and a two-minute upload
+timeout. Failed or interrupted uploads leave no visible save slot. Game startup
+and profile management share the upload's lifecycle lock.
+
+The response contains `imported`, the destination `profile`, original `filename`,
+`player_name`, `player_level`, `description`, `content_files`, `format_version`
+and `bytes`. It does not automatically load the file or switch profiles.
 
 ### Diagnostic retention
 

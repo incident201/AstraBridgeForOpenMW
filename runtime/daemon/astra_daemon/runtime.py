@@ -12,6 +12,8 @@ import math
 import copy
 import logging
 import threading
+import shutil
+import tempfile
 from logging.handlers import RotatingFileHandler
 
 from astra_bridge.environment import identity
@@ -26,6 +28,7 @@ from .ownership import Ownership
 from .storage import Storage
 from .replay import Replay
 from .profiles import Profiles
+from .save_import import MAX_SAVE_BYTES, validate_filename, validate_save
 
 
 class Runtime:
@@ -346,6 +349,55 @@ class Runtime:
                     self.last_error=None
                 if logging_enabled:self.profile_logging()
             return {'result':result,**self.profiles.catalog()}
+
+    async def import_save(self, profile_id, filename, chunks, length=None):
+        validate_filename(filename)
+        if length is not None and length > MAX_SAVE_BYTES:
+            raise BridgeError('save_import_too_large', message='Save files must be no larger than 512 MiB.')
+        async with self.mutation:
+            if self.running() or self.starting or self.stopping:
+                raise BridgeError('stop_game_before_managing_profiles', message='Stop the game before importing a save.')
+            self.profiles.get(profile_id)
+            root = self.profiles.path(profile_id)
+            stage = Path(tempfile.mkdtemp(prefix='.save-import-', dir=root))
+            destination = None
+            destination_created = False
+            try:
+                uploaded = stage / 'save.omwsave'
+                received = 0
+                try:
+                    async with asyncio.timeout(120):
+                        with uploaded.open('xb') as target:
+                            async for chunk in chunks:
+                                received += len(chunk)
+                                if received > MAX_SAVE_BYTES:
+                                    raise BridgeError('save_import_too_large', message='Save files must be no larger than 512 MiB.')
+                                await asyncio.to_thread(target.write, chunk)
+                except TimeoutError as exc:
+                    raise BridgeError('save_import_timeout', message='The save upload timed out. Try importing it again.') from exc
+                if length is not None and received != length:
+                    raise BridgeError('invalid_save_file', message='The save upload was incomplete.')
+                metadata = await asyncio.to_thread(validate_save, uploaded)
+                configured = Storage(root, self.game_root, self.installation).config()['content']
+                def first_game(files):
+                    return next((name.casefold() for name in files if name.casefold().endswith(('.esm', '.omwgame'))), None)
+                if not first_game(metadata['content_files']) or configured and first_game(configured) != first_game(metadata['content_files']):
+                    raise BridgeError('save_game_mismatch', message='This save belongs to a different game than the profile configuration.')
+                # Reserve a new character directory. No existing slot or source
+                # file is overwritten, even when the same save is imported again.
+                destination = root / 'saves' / ('Imported-' + uuid.uuid4().hex)
+                destination.mkdir(mode=0o700)
+                destination_created = True
+                uploaded.rename(destination / 'save.omwsave')
+                result = {'imported': True, 'profile': self.profiles.public(profile_id),
+                          'filename': filename, **metadata}
+                return result
+            except BaseException:
+                if destination_created:
+                    shutil.rmtree(destination, ignore_errors=True)
+                raise
+            finally:
+                shutil.rmtree(stage, ignore_errors=True)
 
     def project(self, value):
         if isinstance(value,dict):return {k:self.project(v) for k,v in value.items()}

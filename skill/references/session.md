@@ -56,6 +56,14 @@ skill re-export. Ignore a legacy `profile` field in an older `installation.json`
 it is not a connection requirement. An explicit application `--profile ID` is
 an optional mismatch guard, not a profile switch.
 
+The host can import an OpenMW `.omwsave` file through **Profiles → Import save…**
+or application `astrabridge import-save FILE [--profile ID]` while the game is
+stopped. Application `astrabridge profiles` lists profile IDs. Import adds a
+slot without copying or resetting Atlas or knowledge. It is host setup, not a
+gameplay tool: use an external or developer save only when the user explicitly
+requests that starting scenario. After connecting, obtain its fresh ref with
+`saves` and load the intended slot normally.
+
 After an authorized runtime update/restart/recreation, connect again, observe and
 refresh all transient handles. Saves, Atlas and knowledge survive a container
 replacement. With the permanent CLI enabled, a successful runtime update switches

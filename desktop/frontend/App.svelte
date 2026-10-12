@@ -23,6 +23,7 @@
   let setupStep='game',installedSection='runtime',settingsSection='data',diagnosticSection='logs';
   let video:HTMLVideoElement,viewer=new Viewer(()=>{watching=false;nextViewerAttempt=Date.now()+1000;}),watching=false,quality='720p30',muted=false;
   let viewerDisabled=false,connecting=false,viewerClosing=false,nextViewerAttempt=0,lastFps:number|null=null;
+  let viewerAttempt=0;
   let showComments=true,showActions=false,showClocks=true,recordingsScope='all',preferencesReady=false;
   let fullscreen=false,fullscreenControls=true,fullscreenTimer:ReturnType<typeof setTimeout>,pointerCaptured=false;
   let replayVideo:HTMLVideoElement,replay:ReplayViewer|null=null,viewMode:'live'|'replay'|'still'='live';
@@ -102,6 +103,14 @@
     profiles=data.profiles;selectedProfile=profiles.find(p=>p.id===(data.result?.id??selectedProfile?.id))??profiles.find(p=>p.active);profileForm='';
     if(!data.cancelled)notice=operation==='duplicate'?'Independent profile copy created.':operation==='delete'?'Profile deleted. Video recordings are kept on your computer.':'';
   });}
+  async function importSave(){
+    const profile=selectedProfile;
+    if(!profile)return;
+    await task(async()=>{
+      const result=await window.astra.invoke('import-save',{id:profile.id});
+      if(result?.imported)notice=`Save imported into ${result.profile.name}: ${result.description||result.filename}. Select this profile, start the game and load the save.`;
+    });
+  }
   async function removeInstallation(operation:'uninstall'|'reset-setup'){
     await task(async()=>{
       const previous=state,result=await window.astra.invoke(operation);
@@ -124,13 +133,17 @@
     if(connecting)return;
     if(explicit){viewerDisabled=false;localStorage.setItem('viewerDisabled','false');}
     connecting=true;
-    try{await tick();await viewer.start(video,quality);watching=true;if(error.startsWith('Viewer: '))error='';}
-    catch(e){if((e as Error).name!=='AbortError')error='Viewer: '+(e as Error).message;nextViewerAttempt=Date.now()+5000;}
-    finally{connecting=false;}
+    const attempt=++viewerAttempt;
+    try{await tick();if(attempt!==viewerAttempt)return;await viewer.start(video,quality);if(attempt!==viewerAttempt)return;watching=true;if(error.startsWith('Viewer: '))error='';}
+    catch(e){if(attempt!==viewerAttempt)return;if((e as Error).name!=='AbortError')error='Viewer: '+(e as Error).message;nextViewerAttempt=Date.now()+5000;}
+    finally{if(attempt===viewerAttempt)connecting=false;}
   }
   async function disconnectViewer(){viewerDisabled=true;localStorage.setItem('viewerDisabled','true');await endWatch();}
   async function endWatch(){
     if(viewerClosing)return;viewerClosing=true;watching=false;
+    // Cancel this UI attempt immediately. A pending WebRTC negotiation must not
+    // retrigger reactive shutdown or clear the state of a later connection.
+    viewerAttempt++;connecting=false;
     try{
       seekSerial++;replay?.close();replay=null;viewMode='live';
       releaseInput();
@@ -446,7 +459,7 @@
     {:else if page==='profiles'&&state.installed}
       <section class="card profiles-card">
         <div class="section-heading"><div><h2>Playthrough profiles</h2><p class="hint">Separate saves, Atlas, knowledge, notes and session history.</p></div><button disabled={runtime.running||busy} on:click={()=>profileEdit('create')}><Icon name="plus" size={18}/>New profile</button></div>
-        {#if runtime.running}<div class="profile-lock"><span class="hint">Stop the game to create, switch, rename, copy or delete profiles. Save your progress first.</span><button disabled={busy} on:click={()=>task(()=>window.astra.invoke('stop-game'))}>Stop game</button></div>{/if}
+        {#if runtime.running}<div class="profile-lock"><span class="hint">Stop the game to manage profiles or import a save. Save your progress first.</span><button disabled={busy} on:click={()=>task(()=>window.astra.invoke('stop-game'))}>Stop game</button></div>{/if}
         <div class="profile-grid">
           <div class="scroll-region" aria-label="Profile list">{#each profiles as profile}<button class="node-row" class:selected={selectedProfile?.id===profile.id} class:current-profile={profile.active} on:click={()=>{selectedProfile=profile;profileForm='';}}><strong>{profile.name}{#if profile.active}<span class="profile-badge">Selected</span>{/if}</strong><span>{profile.active?'Active profile':'Available'} · {new Date(profile.created*1000).toLocaleDateString()}</span></button>{/each}</div>
           <div class="profile-detail">
@@ -460,7 +473,8 @@
                   <div class="toolbar"><button class="primary" type="submit" disabled={runtime.running||busy||!profileName.trim()}>{profileForm==='duplicate'?'Create copy':profileForm==='rename'?'Save name':'Create profile'}</button><button type="button" disabled={busy} on:click={()=>profileForm=''}>Cancel</button></div>
                 </form>
               {:else if selectedProfile}
-                <fieldset class="profile-actions" disabled={runtime.running||busy}><button class="primary" disabled={selectedProfile.active} on:click={()=>changeProfile('switch')}>{selectedProfile.active?'Active profile':'Use this profile'}</button><button on:click={()=>profileEdit('rename')}>Rename</button><button on:click={()=>profileEdit('duplicate')}><Icon name="copy" size={18}/>Duplicate profile</button><button class="danger" on:click={()=>changeProfile('delete')}>Delete profile</button></fieldset>
+                <fieldset class="profile-actions" disabled={runtime.running||busy}><button class="primary" disabled={selectedProfile.active} on:click={()=>changeProfile('switch')}>{selectedProfile.active?'Active profile':'Use this profile'}</button><button on:click={()=>profileEdit('rename')}>Rename</button><button on:click={()=>profileEdit('duplicate')}><Icon name="copy" size={18}/>Duplicate profile</button><button class="danger" on:click={()=>changeProfile('delete')}>Delete profile</button><button on:click={importSave}><Icon name="folder" size={18}/>Import save…</button></fieldset>
+                <p class="hint">Import an OpenMW .omwsave file without replacing existing saves. Use a new profile for a separate experiment; importing keeps this profile's Atlas and notes.</p>
                 <p class="hint">New profiles share no memories. Duplicate makes an independent copy at the time you choose.</p>
                 <p class="hint">Agents connect to the selected profile. The same exported skill works across profiles.</p>
               {/if}

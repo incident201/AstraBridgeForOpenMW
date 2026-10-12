@@ -40,6 +40,11 @@ await page.addInitScript(({svg,hasFrame,atlasData})=>{
   if(op==='sessions')return [{event:'engine_started',time:1790000000},{event:'agent_connected',name:'Gameplay agent',time:1790000050}];
   if(op==='artifact-json')return {encoder:'h264_vaapi',width:1920,height:1080,fps:60,duration:125,frames:7500,hardware_accelerated:true,quality_mode:'cqp',quality:18,audio_sample_rate:48000,diagnostics:{ring_dropped_frames:0,encoder_queue_peak:1},environment:{renderer:'AMD Radeon 680M',ffmpeg_version:'9.0.2'}};
   if(op==='profiles')return catalog();
+  if(op==='import-save'){
+   if(runtime.running)throw Error('Stop the game before importing a save');
+   if(window.fixture.cancelImport)return {cancelled:true};
+   return {imported:true,profile:profiles.find(p=>p.id===args.id),description:'Before the burial caverns',filename:'test.omwsave'};
+  }
   if(op==='profile'){
    if(runtime.running)throw Error('Stop the game before managing profiles');
    let row=profiles.find(p=>p.id===args.id);
@@ -106,7 +111,21 @@ try{
   const videoHeight=await page.locator('video.playback').evaluate(e=>e.clientHeight);await page.getByText('Recording metadata',{exact:true}).click();await shot('recordings-metadata-'+suffix);
   if(!process.argv.includes('--baseline'))assert.equal(await page.locator('video.playback').evaluate(e=>e.clientHeight),videoHeight,'Metadata must not shrink the video');
   await nav('Profiles');await shot('profiles-'+suffix);
-  await page.locator('.profile-grid .node-row').nth(1).click();await page.getByRole('button',{name:'Duplicate profile',exact:true}).click();await shot('profiles-copy-'+suffix);
+  await page.locator('.profile-grid .node-row').nth(1).click();
+  await page.evaluate(()=>window.fixture.cancelImport=true);
+  await page.getByRole('button',{name:'Import save…',exact:true}).click();
+  await page.waitForFunction(()=>!document.querySelector('.working'));
+  assert.equal(await page.getByText(/Save imported into/).count(),0);
+  await page.evaluate(()=>window.fixture.cancelImport=false);
+  await page.getByRole('button',{name:'Import save…',exact:true}).click();
+  await page.getByText(/Save imported into/).waitFor();
+  const imported=await page.evaluate(()=>window.fixture.calls.filter(call=>call.op==='import-save').at(-1));
+  assert.equal(imported.args.id,'profile-1','Import must use the highlighted destination, not the active profile');
+  await shot('profiles-import-'+suffix);
+  await page.evaluate(()=>{window.fixture.runtime.running=true;window.fixture.emit();});
+  assert.ok(await page.getByRole('button',{name:'Import save…',exact:true}).isDisabled());
+  await page.evaluate(()=>{window.fixture.runtime.running=false;window.fixture.emit();});
+  await page.getByRole('button',{name:'Duplicate profile',exact:true}).click();await shot('profiles-copy-'+suffix);
   await page.evaluate(()=>{window.fixture.runtime.running=true;window.fixture.emit();});await shot('profiles-locked-'+suffix);
   if(!process.argv.includes('--baseline'))assert.ok(await page.getByRole('button',{name:'Cancel',exact:true}).isEnabled(),'Cancel must remain usable while the game is running');
   await page.evaluate(()=>{window.fixture.runtime.running=false;window.fixture.emit();});

@@ -1,4 +1,4 @@
-import {access,copyFile,cp,mkdir,readFile,rename,rm,stat,writeFile} from 'node:fs/promises';
+import {access,copyFile,cp,mkdir,open,readFile,rename,rm,stat,writeFile} from 'node:fs/promises';
 import {basename,dirname,join,resolve} from 'node:path';
 import {homedir} from 'node:os';
 import {randomBytes,randomUUID} from 'node:crypto';
@@ -101,6 +101,9 @@ export class Core {
     const response=await this.fetch(path,{method,headers:{'Content-Type':'application/json'},
       ...(timeoutMs?{signal:AbortSignal.timeout(timeoutMs)}:{}),
       ...(data===undefined?{}:{body:JSON.stringify(data)})},config);
+    return this.apiResult(response);
+  }
+  private async apiResult(response:Response):Promise<any>{
     const body=await response.json() as {ok:boolean;result:unknown;error?:string;message?:string};
     if(!response.ok||!body.ok)throw Object.assign(new Error(body.message??body.error??`HTTP ${response.status}`),{details:body});
     return body.result;
@@ -440,6 +443,37 @@ export class Core {
     return {skill:join(destination,'SKILL.md'),...metadata};
   }
   async profiles(){await this.ensureDaemon();return this.api('/v1/runtime/profiles');}
+  async importSave(filename:string,profileId?:string){return this.exclusive(async()=>{
+    if(typeof filename!=='string'||!filename.toLowerCase().endsWith('.omwsave')){
+      throw new Error('Choose an OpenMW .omwsave file. Original Morrowind .ess saves require conversion first.');
+    }
+    const source=await open(resolve(filename),'r');
+    let stream:ReturnType<typeof source.createReadStream>|undefined;
+    try{
+      const info=await source.stat();
+      const header=Buffer.alloc(4);
+      if(!info.isFile()||info.size<4||(await source.read(header,0,4,0)).bytesRead!==4||header.toString('ascii')!=='TES3'){
+        throw new Error('This file is not an OpenMW save.');
+      }
+      const config=await this.ensureDaemon();
+      const status=await this.api('/v1/runtime/status','GET',undefined,config);
+      if(status.running||status.starting||status.stopping)throw new Error('Stop the game before importing a save.');
+      const catalog=await this.api('/v1/runtime/profiles','GET',undefined,config);
+      const target=catalog.profiles.find((profile:any)=>profile.id===(profileId??catalog.active.id));
+      if(!target)throw new Error('Profile not found.');
+      stream=source.createReadStream({start:0,autoClose:false});
+      const response=await this.fetch('/v1/runtime/profiles/'+encodeURIComponent(target.id)+'/saves/import',{
+        method:'POST',headers:{'Content-Type':'application/octet-stream','Content-Length':String(info.size),
+          'X-Astra-Save-Filename':encodeURIComponent(basename(filename))},
+        body:Readable.toWeb(stream),duplex:'half',signal:AbortSignal.timeout(120_000),
+      } as RequestInit,config);
+      if(response.status===404)throw new Error('This runtime does not support save import. Update the runtime in Setup.');
+      return await this.apiResult(response);
+    }finally{
+      stream?.destroy();
+      await source.close();
+    }
+  });}
   async profile(operation:string,args:Record<string,unknown>){return this.exclusive(async()=>{
     await this.ensureDaemon();const result=await this.api('/v1/runtime/profiles/'+operation,'POST',args);
     if(['switch','delete','duplicate','rename'].includes(operation)){

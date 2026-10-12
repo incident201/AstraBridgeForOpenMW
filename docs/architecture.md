@@ -102,6 +102,11 @@ and rebases attached screenshot paths. It does not copy existing video files,
 engine transport buffers or caches. Deleting or editing the source cannot change
 the duplicate. The game installation and OCI image are shared.
 
+**Import save…** copies a native OpenMW save into the highlighted profile while
+the game is stopped. Existing saves and profile memory are retained; use a new
+profile for an independent experiment. See [save import](runtime-api.md#importing-saves)
+for CLI commands, file validation and compatibility requirements.
+
 `/data/profiles.json` holds the active ID and profile names. New profiles live in
 `/data/profiles/<id>`. Existing flat state is registered as **Default** without
 moving saves. Recordings use `<host recordings folder>/<profile id>`; the legacy

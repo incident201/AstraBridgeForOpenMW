@@ -20,6 +20,8 @@ Usage: astrabridge [--config FILE] <command>
   config show | set JSON
   gpus
   recordings
+  profiles
+  import-save FILE [--profile ID]
   logs [--name FILE]
   cli install | status | uninstall
   skill export DIRECTORY [--interface cli|tools]
@@ -81,6 +83,14 @@ async function main(){
     result={directory,items};
   }
   else if(command==='logs')result=await core.logs(take('--name'));
+  else if(command==='profiles')result=await core.profiles();
+  else if(command==='import-save'){
+    const profile=take('--profile');
+    if(argv[0]==='--')argv.shift();
+    const filename=argv.shift();
+    if(!filename||argv.some(value=>value!=='--pretty'))throw new Error('Use import-save FILE [--profile ID].');
+    result=await core.importSave(filename,profile);
+  }
   else if(command==='skill'&&argv.shift()==='export'){
     const mode=take('--interface')??'cli';if(!['cli','tools'].includes(mode))throw Error('Use --interface cli or tools');
     if(!argv[0])throw new Error('Provide a skill destination directory');
