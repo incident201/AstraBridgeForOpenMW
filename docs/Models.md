@@ -149,9 +149,9 @@ direct API comparison has not been performed.
 
 ### Preventing tool-output truncation
 
-A subsequent Sonnet 5.5 test used the following Claude Code CLI `settings.json`
-configuration to increase output limits and deny commands that the model had
-used to filter or truncate AstraBridge responses:
+The following Claude Code CLI `settings.json` configuration increases output
+limits and denies commands used to filter or truncate AstraBridge responses.
+These restrictions apply to the harness regardless of the selected Claude model:
 
 ```json
 {
@@ -184,21 +184,14 @@ used to filter or truncate AstraBridge responses:
 }
 ```
 
-Tool use improved noticeably. In the inspected part of the run, Sonnet invoked
-AstraBridge directly, retained the returned movement details and diagnostics,
+Adding these restrictions noticeably improved tool use through Claude Code CLI.
+The agent invoked AstraBridge directly, retained movement details and diagnostics,
 and regularly opened screenshots. It stopped writing parsers or using shell
-filters to reduce results to a few fields. It also responded to blocked movement,
-water entry, and damage by changing its actions.
+filters to reduce results to a few fields.
 
-This did not resolve the fundamental navigation difficulties. Sonnet still
-misjudged its position and route, travelled too far east, and had to reconsider
-its approach. Preserving tool results improved its use of the available evidence,
-but did not guarantee correct spatial reasoning or successful navigation.
-
-The prompt also explicitly required complete JSON results and prohibited
-truncation. The separate effects of that instruction, the denied commands, and
-the larger output limits were not isolated. This result applies to the tested
-Sonnet run; equivalent tests with Opus and Haiku have not been performed.
+This improved use of the tools did not resolve the fundamental navigation
+difficulties. Preserving complete results did not eliminate problems with spatial
+understanding and route finding.
 
 ## Claude Haiku 5.5 (xhigh)
 
