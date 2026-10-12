@@ -14,7 +14,7 @@ than a general ranking of model capabilities.
 | Gemini 3.8 Flash (high) | Found Caius Cosades in one run; became lost in Balmora in another. | agy CLI |
 | DeepSeek 4.1 Flash (max) | Completed the tutorial and saved; reached Balmora in one test, but then wandered in circles. | Codex CLI; AstraBridge Runner |
 | Claude Opus 5.5 | Completed the tutorial and found Caius Cosades with `low` effort; earlier runs had navigation difficulties. | Claude Code CLI |
-| Claude Sonnet 5.5 | Reached Balmora, but navigation suffered from discarded tool diagnostics. | Claude Code CLI |
+| Claude Sonnet 5.5 | Reached Balmora in earlier tests. Preventing output truncation improved tool use, but navigation difficulties persisted. | Claude Code CLI |
 | Claude Haiku 5.5 (xhigh) | Stalled during the tutorial, resumed after user prompting, then stopped inside the Census and Excise Office. | Claude Code CLI |
 | Grok 4.7 (high) | Left the starting ship with the custom runner, but navigation remained poor and API use was excessive. | Grok Build; AstraBridge Runner |
 
@@ -138,7 +138,7 @@ Earlier Opus and Sonnet runs had more serious navigation problems, including
 becoming lost after reaching Balmora. Their behavior was similar; Sonnet was
 faster and sometimes navigated better.
 
-Both models tended to shorten AstraBridge responses with scripts, discarding
+In those runs, both models tended to shorten AstraBridge responses with scripts, discarding
 useful movement details and diagnostics. This problem persisted in the
 successful Opus run, which still frequently used `grep` and `head` to truncate
 results.
@@ -146,6 +146,59 @@ results.
 Opus can complete the opening objective through Claude Code CLI. Whether lower
 reasoning effort improves performance remains unconfirmed from one run. A
 direct API comparison has not been performed.
+
+### Preventing tool-output truncation
+
+A subsequent Sonnet 5.5 test used the following Claude Code CLI `settings.json`
+configuration to increase output limits and deny commands that the model had
+used to filter or truncate AstraBridge responses:
+
+```json
+{
+  "bashOutputMaxChars": 128000,
+  "taskOutputMaxChars": 128000,
+  "permissions": {
+    "deny": [
+      "Bash(head *)",
+      "Bash(tail *)",
+      "Bash(grep *)",
+      "Bash(rg *)",
+      "Bash(sed *)",
+      "Bash(awk *)",
+      "Bash(gawk *)",
+      "Bash(cut *)",
+      "Bash(fold *)",
+      "Bash(split *)",
+      "Bash(jq *)",
+      "Bash(yq *)",
+      "Bash(perl *)",
+      "Bash(ruby *)",
+      "Bash(python *)",
+      "Bash(python3 *)",
+      "Bash(pypy3 *)",
+      "Bash(node *)",
+      "Bash(bun *)",
+      "Bash(php *)"
+    ]
+  }
+}
+```
+
+Tool use improved noticeably. In the inspected part of the run, Sonnet invoked
+AstraBridge directly, retained the returned movement details and diagnostics,
+and regularly opened screenshots. It stopped writing parsers or using shell
+filters to reduce results to a few fields. It also responded to blocked movement,
+water entry, and damage by changing its actions.
+
+This did not resolve the fundamental navigation difficulties. Sonnet still
+misjudged its position and route, travelled too far east, and had to reconsider
+its approach. Preserving tool results improved its use of the available evidence,
+but did not guarantee correct spatial reasoning or successful navigation.
+
+The prompt also explicitly required complete JSON results and prohibited
+truncation. The separate effects of that instruction, the denied commands, and
+the larger output limits were not isolated. This result applies to the tested
+Sonnet run; equivalent tests with Opus and Haiku have not been performed.
 
 ## Claude Haiku 5.5 (xhigh)
 
