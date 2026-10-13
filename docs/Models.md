@@ -179,6 +179,18 @@ Opus can complete the opening objective through Claude Code CLI. Whether lower
 reasoning effort improves performance remains unconfirmed from one run. A
 direct API comparison has not been performed.
 
+In a later run, Opus was observed reading shared Claude Code memory containing
+notes from previous playthroughs. That run is excluded from the results and model
+comparisons because its starting context was not independent.
+
+For clean comparisons, start a fresh Claude Code session with these parameters:
+
+```sh
+CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 \
+CLAUDE_CODE_DISABLE_CLAUDE_MDS=1 \
+claude --model opus
+```
+
 ## Claude Sonnet 5.5 (high)
 
 Sonnet was tested on Linux through Claude Code CLI. Blocking output-filtering
