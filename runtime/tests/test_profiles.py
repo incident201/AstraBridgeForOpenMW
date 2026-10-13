@@ -16,6 +16,16 @@ def runtime_at(tmp_path):
     return Runtime(tmp_path/'installation',tmp_path/'state',tmp_path/'game')
 
 
+@pytest.mark.parametrize('cache', [{'supported': False}, {'supported': True, 'nodes': [{'ref': 'known-point'}]}])
+def test_atlas_during_action_marks_cached_data_pending_without_gameplay_query(cache):
+    runtime = Runtime.__new__(Runtime)
+    runtime.atlas_cache = cache
+    runtime.session = SimpleNamespace(control=SimpleNamespace(status=lambda: {'operation': 'go'}))
+    result = runtime.atlas({})
+    assert result == {**cache, 'pending': True}
+    assert 'pending' not in cache
+
+
 def seed(root):
     (root/'saves/character').mkdir(parents=True)
     (root/'saves/character/progress.omwsave').write_bytes(b'saved character')

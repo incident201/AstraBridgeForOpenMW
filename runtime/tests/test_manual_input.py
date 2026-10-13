@@ -21,6 +21,58 @@ def text_input():
     return inputs
 
 
+@pytest.mark.asyncio
+async def test_absolute_pointer_cannot_warp_gameplay_camera(tmp_path):
+    runtime = Runtime(tmp_path/'install', tmp_path/'state', tmp_path/'game')
+    runtime.owner.acquire_manual('viewer')
+    calls = []
+    runtime.input = SimpleNamespace(event=calls.append)
+    runtime.session = SimpleNamespace(latest_observation={'ui_mode':'Gameplay'})
+    await runtime.input_event('viewer', {'type':'pointer','x':.9,'y':.8})
+    await runtime.input_event('viewer', {'type':'relative','x':2,'y':1})
+    assert calls == [{'type':'relative','x':2,'y':1}]
+    runtime.session.latest_observation = {'ui_mode':'Interface'}
+    await runtime.input_event('viewer', {'type':'pointer','x':.9,'y':.8})
+    assert calls[-1] == {'type':'pointer','x':.9,'y':.8}
+
+
+@pytest.mark.asyncio
+async def test_http_release_does_not_wait_for_websocket_input_backlog(tmp_path):
+    runtime = Runtime(tmp_path/'install', tmp_path/'state', tmp_path/'game')
+    runtime.running = lambda: True
+    runtime._mode = lambda mode: None
+    entered = asyncio.Event()
+    finish = asyncio.Event()
+
+    async def queued_input(token, event):
+        entered.set()
+        await finish.wait()
+
+    runtime.input_event = queued_input
+    headers = {'Authorization':'Bearer '+'x'*40}
+    client = TestClient(TestServer(application(runtime,'x'*40)))
+    await client.start_server()
+    try:
+        socket = await client.ws_connect('/v1/events',headers=headers)
+        await socket.send_json({'type':'manual.acquire'})
+        while (await socket.receive_json(timeout=1))['type'] != 'input.owner':pass
+        await socket.send_json({'type':'input','event':{'type':'relative','x':1,'y':1}})
+        await asyncio.wait_for(entered.wait(),1)
+        response = await client.post('/v1/runtime/manual/release',headers=headers,json={})
+        assert (await response.json())['result']['mode'] == 'idle'
+        assert runtime.owner.mode == 'idle'
+        runtime.owner.acquire_agent('Player')
+        response = await client.post('/v1/runtime/manual/release',headers=headers,json={})
+        assert (await response.json())['result']['mode'] == 'agent'
+        finish.set()
+        await socket.close()
+    finally:
+        finish.set()
+        runtime.owner.release()
+        runtime.running = lambda: False
+        await client.close()
+
+
 def test_text_input_has_bounded_delay_for_maximum_length(monkeypatch):
     calls = []
     monkeypatch.setattr('astra_daemon.input.subprocess.run', lambda *args, **kwargs: calls.append((args, kwargs)))

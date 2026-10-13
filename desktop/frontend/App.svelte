@@ -14,6 +14,9 @@
   import AtlasMap from './AtlasMap.svelte';
   import {ReplayViewer,type ReplayInfo} from './replay';
   import {Viewer,artifact,pointer} from './viewer';
+  import {MouseMotion,mouseMotion} from './manual-input';
+  let manualReleasing=false;
+  const manualMouse=new MouseMotion(event=>input(event));
   const pages=[['play','Play'],['atlas','Atlas'],['recordings','Recordings'],['profiles','Profiles'],['settings','Settings'],['diagnostics','Diagnostics'],['setup','Setup']];
   let dismissedRuntimeError='',stopping=false;
   let page='play',state:any={installed:false},runtime:any={},busy=false,error='',notice='',progress='';
@@ -36,6 +39,7 @@
   let atlas:any={},space='',selectedNode:any=null,atlasSection='points',mapRadius=35,atlasPage=0,expandedMap=false,metadataOpen=false,logName='daemon.log',logs:any={names:[],text:''},environment:any={},history:any[]=[];
   let profiles:any[]=[],selectedProfile:any=null,profileForm='',profileName='',lastProfile='';
   let mapView:AtlasMap,mapRevision=0;
+  let atlasLoading=false,atlasRequest=0,atlasRetry:ReturnType<typeof setTimeout>;
   $: if(preferencesReady){localStorage.setItem('overlayComments',String(showComments));localStorage.setItem('overlayActions',String(showActions));localStorage.setItem('overlayClocks',String(showClocks));}
   $: if(video&&runtime.running&&!runtime.stopping&&!runtime.session_end&&!viewerDisabled&&!watching&&!connecting&&!viewerClosing&&!busy&&!stopping)void autoWatch();
   $: if(!runtime.running&&(watching||connecting)&&!viewerClosing&&!busy)void endWatch();
@@ -50,10 +54,12 @@
   $: playbackRunning=viewMode==='replay'?replayPlaying:viewMode==='live'&&watching;
   $: timelinePosition=seeking?seekDraft:viewMode==='live'?(watching?replayInfo.duration:0):Math.min(replayPosition,replayInfo.duration);
   $: if(runtime.profile?.id&&runtime.profile.id!==lastProfile){
+    clearTimeout(atlasRetry);atlasRequest++;atlasLoading=false;
     lastProfile=runtime.profile.id;atlas={};space='';selectedNode=null;atlasPage=0;atlasSection='points';mapRadius=35;expandedMap=false;recordings=[];selectedRecording=null;metadata=null;metadataOpen=false;history=[];logs={names:[],text:''};configuration=null;
     replayInfo={id:null,ready:false,active:false,duration:0};replay?.close();replay=null;viewMode='live';
   }
   $: if(owner!=='manual'&&typeof document!=='undefined'&&document.pointerLockElement)void document.exitPointerLock();
+  $: if(runtime.ui_mode&&runtime.ui_mode!=='Gameplay'&&typeof document!=='undefined'&&document.pointerLockElement===video)void document.exitPointerLock();
 
   async function checkPrerequisites(startup=false){
     if(checkingPrerequisites)return;
@@ -88,6 +94,7 @@
   }
   async function navigate(next:string){
     closeMenus();
+    if(next!=='atlas'){clearTimeout(atlasRetry);atlasRequest++;atlasLoading=false;}
     if(page==='play'&&next!=='play'){releaseInput();if(viewMode!=='live')void goLive();}
     page=next;error='';
     if(next==='recordings')await loadRecordings();
@@ -225,26 +232,49 @@
   }
   async function changeQuality(){closeMenus();if(watching)await watch(false);}
   async function togglePointerCapture(){
-    try{if(document.pointerLockElement===video)document.exitPointerLock();else {video.focus();await video.requestPointerLock();}}
+    try{if(document.pointerLockElement===video)document.exitPointerLock();else {
+      video.focus();
+      try{await video.requestPointerLock({unadjustedMovement:true});}
+      catch{await video.requestPointerLock();}
+    }}
     catch(e){error=(e as Error).message;}
   }
   async function toggleRecordingFullscreen(){
     try{if(document.fullscreenElement===recordingSurface)await document.exitFullscreen();else await recordingSurface.requestFullscreen();}
     catch(e){error=(e as Error).message;}
   }
-  function releaseInput(){if(manual)window.astra.input({type:'manual.release'});if(document.pointerLockElement)void document.exitPointerLock();}
-  function input(event:any){if(manual&&viewMode==='live')window.astra.input({type:'input',event});}
-  function mousemove(event:MouseEvent){
-    if(!manual||viewMode!=='live')return;
-    if(document.pointerLockElement===video)input({type:'relative',x:event.movementX,y:event.movementY});
-    else {const value=pointer(video,event);if(value)input(value);}
+  async function releaseInput(){
+    manualMouse.clear();
+    if(document.pointerLockElement)void document.exitPointerLock();
+    if(!manual||manualReleasing)return;
+    manualReleasing=true;
+    try{runtime={...runtime,owner:await window.astra.invoke('release-manual')};}
+    catch(e){error=(e as Error).message;}
+    finally{manualReleasing=false;}
   }
-  function mousebutton(event:MouseEvent,down:boolean){if(!manual||viewMode!=='live')return;event.preventDefault();video.focus();const p=pointer(video,event);if(p)input(p);input({type:'button',button:event.button,down});}
+  function input(event:any){if(manual&&!manualReleasing&&viewMode==='live')window.astra.input({type:'input',event});}
+  function mousemove(event:MouseEvent){
+    if(!manual||manualReleasing||viewMode!=='live')return;
+    const value=mouseMotion(video,event,runtime.ui_mode);if(value)manualMouse.push(value);
+  }
+  function mousebutton(event:MouseEvent,down:boolean){if(!manual||manualReleasing||viewMode!=='live')return;event.preventDefault();video.focus();manualMouse.clear();if(runtime.ui_mode&&runtime.ui_mode!=='Gameplay'){const p=pointer(video,event);if(p)input(p);}input({type:'button',button:event.button,down});}
   function key(event:KeyboardEvent,down:boolean){if(!manual||viewMode!=='live'||event.repeat)return;event.preventDefault();input({type:'key',code:event.code,down});}
   function wheel(event:WheelEvent){if(!manual||viewMode!=='live')return;event.preventDefault();input({type:'wheel',steps:event.deltaY<0?1:-1});}
   async function loadRecordings(){await task(async()=>{recordings=await window.astra.invoke('recordings');if(!recordings.some(row=>row.id===selectedRecording?.id)){selectedRecording=null;metadata=null;metadataOpen=false;}});}
   async function selectRecording(row:any){selectedRecording=row;recordingPlaybackPosition=0;metadata=null;metadataOpen=false;if(row.metadata)await task(async()=>{metadata=await window.astra.invoke('artifact-json',{path:row.metadata});});}
-  async function loadAtlas(){await task(async()=>{atlas=await window.astra.invoke('atlas',{...(space?{space}:{}),radius_m:mapRadius,page:atlasPage,limit:100});mapRevision++;selectedNode=null;});}
+  async function loadAtlas(){
+    clearTimeout(atlasRetry);
+    const request=++atlasRequest,profile=runtime.profile?.id;
+    atlasLoading=true;
+    try{await task(async()=>{
+      const result=await window.astra.invoke('atlas',{...(space?{space}:{}),radius_m:mapRadius,page:atlasPage,limit:100});
+      if(request!==atlasRequest||profile!==runtime.profile?.id)return;
+      atlas=result;
+      if(!result.pending){mapRevision++;selectedNode=null;}
+      else atlasRetry=setTimeout(()=>{if(page==='atlas'&&request===atlasRequest)void loadAtlas();},1000);
+    });}
+    finally{if(request===atlasRequest)atlasLoading=false;}
+  }
   async function loadDiagnostics(){await task(async()=>{logs=await window.astra.invoke('logs',{name:logName});
     if(state.container?.running){environment=await window.astra.invoke('environment');history=await window.astra.invoke('sessions');}});}
   const formatBytes=(n:number)=>n>1024**3?(n/1024**3).toFixed(2)+' GB':(n/1024**2).toFixed(1)+' MB';
@@ -263,6 +293,7 @@
       if(message.type==='viewer.fullscreen')setViewerFullscreen(message.enabled);
       if(message.type==='status')runtime={...message.data,game_fps:message.data.game_fps??runtime.game_fps};
       if(message.type==='input.owner')runtime={...runtime,owner:message.data};
+      if(message.type==='input.mode'){manualMouse.clear();runtime={...runtime,ui_mode:message.ui_mode};}
       if(message.type==='error')error=message.error;
       if(message.type==='progress')progress=(progress+message.data).slice(-12000);
       if(message.type==='transfer')transfer=message.data;
@@ -284,7 +315,7 @@
     document.addEventListener('mousemove',revealFullscreenControls);
     document.addEventListener('pointerlockchange',pointerLockChanged);
     window.addEventListener('blur',releaseInput);
-    return()=>{clearInterval(timer);clearInterval(replayTimer);replay?.close();clearTimeout(fullscreenTimer);unsubscribe();releaseInput();void viewer.close();
+    return()=>{clearInterval(timer);clearInterval(replayTimer);clearTimeout(atlasRetry);atlasRequest++;replay?.close();clearTimeout(fullscreenTimer);unsubscribe();releaseInput();void viewer.close();
       document.removeEventListener('mousemove',revealFullscreenControls);document.removeEventListener('pointerlockchange',pointerLockChanged);window.removeEventListener('blur',releaseInput);
       document.removeEventListener('fullscreenchange',recordingFullscreenChanged);document.removeEventListener('click',outsideMenu);document.removeEventListener('keydown',menuEscape);};
   });
@@ -345,7 +376,7 @@
             {#if fullscreen}<button class="session-stop" disabled={stopping||runtime.stopping} title="Save the game, finish recording, and stop the session. Ask before stopping if saving is unavailable." on:click={()=>stopRuntime()}><Icon name="stop" size={17}/>{stopping||runtime.stopping?'Stopping…':'Stop session'}</button>{/if}
             <button class="icon-button" disabled={!watching&&viewMode!=='replay'} on:click={changeMute} aria-label={muted?'Unmute':'Mute'} title={muted?'Unmute':'Mute'}><Icon name={muted?'mute':'volume'} size={18}/></button>
             {#if viewMode!=='live'}<span class="view-only">View only</span>
-            {:else if manual}<button class="manual-button" aria-label="Release control" on:click={releaseInput}><Icon name="cursor" size={17}/>Release</button><button class="icon-button" aria-label={pointerCaptured?'Release pointer':'Lock pointer for camera'} aria-pressed={pointerCaptured} title="Capture mouse; Escape releases it" on:click={togglePointerCapture}><Icon name="mouse" size={17}/></button>
+            {:else if manual}<button class="manual-button" aria-label="Release control" disabled={manualReleasing} on:click={releaseInput}><Icon name="cursor" size={17}/>{manualReleasing?'Releasing…':'Release'}</button><button class="icon-button" aria-label={pointerCaptured?'Release pointer':'Lock pointer for camera'} aria-pressed={pointerCaptured} title="Capture mouse; Escape releases it" on:click={togglePointerCapture}><Icon name="mouse" size={17}/></button>
             {:else}<button class="manual-button" aria-label="Take manual control" disabled={!watching||owner==='agent'} title={owner==='agent'?'Agent owns input':'Control with keyboard and mouse'} on:click={()=>window.astra.input({type:'manual.acquire'})}><Icon name="cursor" size={17}/><span class="manual-label">Manual control</span></button>{/if}
             <button class="record-button" class:recording aria-label={recording?'Stop recording':'Start recording'} title={recording?'Stop recording':'Record at 1080p · 60 fps'} disabled={!runtime.running||busy} on:click={()=>task(()=>window.astra.invoke('record',{action:recording?'stop':'start'}))}><Icon name={recording?'stop':'record'} size={17}/>{#if recording}<span class="rec-label">REC</span>{/if}<span>{recording?formatTime(runtime.recording.duration):'Record'}</span></button>
             <details class="dropdown viewer-options"><summary class="icon-button" aria-label="Viewer options" title="Viewer options"><Icon name="settings" size={19}/></summary>
@@ -484,7 +515,7 @@
       </section>
     {:else if page==='atlas'&&state.installed}
       <section class="card atlas-card">
-        <div class="section-heading"><div><h2 title={atlas.location??'Travelled world'}>{atlas.location??'Travelled world'}</h2><p class="hint">Known routes in this profile · north is up</p></div>
+        <div class="section-heading"><div><h2 title={atlas.location??'Travelled world'}>{atlas.location??'Travelled world'}</h2><p class="hint">{atlas.pending?'Showing the last map. Waiting for the current action to finish.':atlasLoading?'Loading Atlas…':'Known routes in this profile · north is up'}</p></div>
           <div class="toolbar atlas-toolbar"><select aria-label="Atlas location" bind:value={space} on:change={()=>{atlasPage=0;void loadAtlas();}}><option value="">Current location</option>{#each atlas.spaces??[] as location}<option value={location.ref}>{location.location??location.label??location.ref}</option>{/each}</select>
           <button class="icon-button" disabled={busy} on:click={loadAtlas} aria-label="Refresh Atlas" title="Refresh Atlas"><Icon name="restart" size={18}/></button>
           <button class="icon-button" aria-label={expandedMap?'Show map sidebar':'Expand map'} title={expandedMap?'Show points and transitions':'Expand map'} aria-pressed={expandedMap} on:click={()=>expandedMap=!expandedMap}><Icon name="panel" size={18}/></button></div>
@@ -506,6 +537,7 @@
             {:else}<div class="scroll-region transition-list">{#each atlas.transitions??[] as transition}<article><h3>{transition.door?.name??transition.door?.description??'Recorded passage'}</h3><p>{locationName(transition.from_space)} <span aria-hidden="true">→</span> {locationName(transition.to_space)}</p><button disabled={busy} on:click={()=>{space=transition.to_space;atlasPage=0;void loadAtlas();}}>View destination</button></article>{:else}<p class="hint">No passages between locations recorded yet.</p>{/each}</div>{/if}
           </div>{/if}
         </div>
+        {:else if atlasLoading||atlas.pending}<div class="empty section-empty" role="status"><Icon name="atlas" size={36}/><h3>Loading Atlas…</h3><p>{atlas.pending?'Waiting for the current action to finish. The map will load automatically.':'Loading recorded routes and visited places.'}</p></div>
         {:else}<div class="empty section-empty"><Icon name="atlas" size={36}/><h3>No travelled map yet</h3><p>Routes and visited places appear here as you explore with this profile.</p><button on:click={()=>navigate('play')}>Go to Play</button></div>{/if}
       </section>
     {:else if page==='recordings'&&state.installed}

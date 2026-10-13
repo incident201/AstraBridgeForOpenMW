@@ -101,6 +101,17 @@ Atlas and knowledge data have separate lifetimes and are not receipt payloads.
 | `POST /v1/runtime/live/whep` | WebRTC SDP offer/answer through MediaMTX. |
 | `PATCH/DELETE /v1/runtime/live/whep/{id}` | WHEP session signaling/cleanup. |
 | `GET /v1/events` | WebSocket events, telemetry and authenticated manual input. |
+| `POST /v1/runtime/manual/release` | Release manual input without waiting behind WebSocket mouse events; does not release an agent. |
+
+Runtime status includes `ui_mode` for manual mouse routing. Gameplay camera
+motion uses relative pixel deltas; interface cursor motion uses normalized
+absolute positions. The daemon ignores absolute pointer events while its latest
+observation is gameplay. Desktop combines mouse movements into one event per
+display frame and requests unaccelerated Pointer Lock when supported. Release
+immediately stops new input and waits for the HTTP ownership acknowledgement.
+Key and button events refresh the passive UI observation and send an `input.mode`
+event, so switching between menus and gameplay does not wait for the telemetry
+poll. Entering an interface also releases Desktop Pointer Lock.
 
 ### Importing saves
 
@@ -254,6 +265,12 @@ action progress and separate game/capture/viewer metrics. Disconnection releases
 manual input; it does not end an explicitly connected agent session.
 
 ## Atlas map data
+
+While a gameplay action is running, the Runtime API returns the last retained
+Atlas response with `pending: true`. The cache may be empty on the first request.
+Clients should show a loading state and retry after the action finishes, rather
+than interpret that temporary response as an unexplored profile. Atlas queries
+do not interrupt gameplay.
 
 Atlas map responses include a map-only SVG and `map_markers` (`ref`, `label`,
 normalized `x`/`y`) for the returned visited nodes. `map_bounds` gives normalized

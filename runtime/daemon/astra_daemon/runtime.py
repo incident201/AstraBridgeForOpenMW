@@ -71,6 +71,7 @@ class Runtime:
             except (ValueError,BufferError):return default  # A worker may just have closed its mmap.
         return {'profile':self.profiles.public(),'running':self.running(),'starting':self.starting,'stopping':self.stopping,'session_end':self.termination,'stop_preparation':self.stop_preparation,'owner':self.owner.public(),'transitioning':self.transition,
                 'active_action':session.control.status() if session else None,
+                'ui_mode':(getattr(session,'latest_observation',None) or {}).get('ui_mode') if session else None,
                 'session':session.session_id if session else None,
                 'clocks':session.timeline.clocks() if session else None,
                 'timeline':session.timeline.recent() if session else [],
@@ -276,13 +277,33 @@ class Runtime:
                 raise BridgeError('manual_input_not_owned')
             if self.input is None:
                 raise BridgeError('input_display_unavailable')
-            worker = asyncio.create_task(asyncio.to_thread(self.input.event, event))
+            # Absolute screen positions become large camera deltas in SDL's
+            # relative mode. They are only suitable for the in-game interface.
+            if isinstance(event,dict) and event.get('type')=='pointer':
+                observation=self.session.latest_observation if self.session else None
+                if not observation or observation.get('ui_mode')=='Gameplay':return
+            def deliver():
+                self.input.event(event)
+                # Refresh immediately after input that can open/close a menu.
+                # The normal one-second telemetry poll is too late to decide
+                # whether the next absolute mouse position is safe to inject.
+                session=self.session
+                if isinstance(event,dict) and event.get('type') in {'key','button'} and session and hasattr(session,'observe'):
+                    with session.lock:
+                        session.observe(capture=False,passive=True)
+            worker = asyncio.create_task(asyncio.to_thread(deliver))
             try:
                 await asyncio.shield(worker)
             except asyncio.CancelledError:
                 with contextlib.suppress(Exception):
                     await worker
                 raise
+
+    async def release_manual(self):
+        # A separate HTTP request can overtake queued mouse events. Never release
+        # an agent that acquired control while this request was in flight.
+        token=self.owner.token if self.owner.mode=='manual' else None
+        return await self.manual(token,False)
 
     async def game(self, token, op, args):
         def stopped(end, **details):
@@ -436,7 +457,8 @@ class Runtime:
     def atlas(self, args):
         # Desktop queries project retained travel data. They must not run the
         # Game API's observe/pause action while a human or an agent is moving.
-        if self.session and self.session.control.status():return self.atlas_cache
+        if self.session and self.session.control.status():
+            return {**self.atlas_cache, 'pending': True}
         import contextlib
         offline=self.session is None
         atlas=ExplorationAtlas(self.root/'atlas/exploration-memory.json') if offline else self.session.atlas

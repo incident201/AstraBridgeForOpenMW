@@ -188,6 +188,7 @@ app.whenReady().then(async()=>{
         if(!['start','stop','status'].includes(args.action))throw new Error('Invalid recording operation');
         return core.api('/v1/runtime/recording/'+args.action,'POST',{});
       }
+      if(operation==='release-manual')return core.api('/v1/runtime/manual/release','POST',{});
       if(operation==='atlas'){await core.ensureDaemon();return core.api('/v1/runtime/atlas?'+new URLSearchParams(args).toString());}
       if(operation==='environment')return core.api('/v1/runtime/environment');
       if(operation==='sessions')return core.api('/v1/runtime/sessions');

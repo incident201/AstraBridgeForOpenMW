@@ -93,6 +93,7 @@ def application(runtime: Runtime, token: str):
         if action=='status':return answer(runtime.owner.public())
         raise web.HTTPNotFound()
     async def end_agent(request):return answer(await runtime.release(admin=True))
+    async def release_manual(request):return answer(await runtime.release_manual())
     async def record(request):
         if not runtime.running():raise BridgeError('game_not_running')
         action=request.match_info['action']
@@ -177,6 +178,9 @@ def application(runtime: Runtime, token: str):
                     elif kind=='manual.release':result=await runtime.manual(connection,False)
                     elif kind=='input':
                         await runtime.input_event(connection,value.get('event'))
+                        event=value.get('event')
+                        if isinstance(event,dict) and event.get('type') in {'key','button'}:
+                            await socket.send_json({'type':'input.mode','ui_mode':runtime.status()['ui_mode']})
                         continue
                     else:raise BridgeError('invalid_event')
                     await socket.send_json({'type':'input.owner','data':result})
@@ -221,7 +225,7 @@ def application(runtime: Runtime, token: str):
         web.patch('/v1/runtime/config',configuration),web.post('/v1/runtime/import-ini',ini),
         web.get('/v1/game/schema',schema),web.post('/v1/game/command',game),
         web.post('/v1/agent/{action}',agent),web.get('/v1/agent/status',agent),
-        web.post('/v1/runtime/agent/end',end_agent),web.post('/v1/runtime/recording/{action}',record),
+        web.post('/v1/runtime/agent/end',end_agent),web.post('/v1/runtime/manual/release',release_manual),web.post('/v1/runtime/recording/{action}',record),
         web.get('/v1/runtime/profiles',profiles),web.post('/v1/runtime/profiles/{operation}',profiles),
         web.post('/v1/runtime/profiles/{profile}/saves/import',import_save),
         web.get('/v1/runtime/replay',replay_info),
