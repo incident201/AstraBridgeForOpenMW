@@ -13,7 +13,7 @@ than a general ranking of model capabilities.
 | GPT-6 Luna (max) | Completed none of its assigned tasks. Once reached Balmora, but could not find Caius Cosades. | Codex CLI; AstraBridge Runner |
 | Gemini 3.8 Flash (high) | Inconsistent navigation; successful runs alternate with prolonged wandering and repeated reinterpretation of landmarks. | agy CLI |
 | DeepSeek 4.1 Flash (max) | Completed the tutorial and saved; reached Balmora in one test, but then wandered in circles. | Codex CLI; AstraBridge Runner |
-| Claude Opus 5.5 (high) | Efficient navigation, evidence-based route planning, and effective recovery from local obstacles in a clean comparison. | Claude Code CLI |
+| Claude Opus 5.5 (high) | Can navigate autonomously and recover from mistakes, but route planning is uneven and can involve substantial detours. | Claude Code CLI |
 | Claude Sonnet 5.5 (high) | Better tool use with output filtering blocked; recovers from local obstacles, but longer route planning remains inefficient. | Claude Code CLI |
 | Claude Haiku 5.5 (xhigh) | Stalled during the tutorial, resumed after user prompting, then stopped inside the Census and Excise Office. | Claude Code CLI |
 | Grok 4.7 (high) | Left the starting ship with the custom runner, but navigation remained poor and API use was excessive. | Grok Build; AstraBridge Runner |
@@ -165,38 +165,31 @@ attributed to information being removed during compaction.
 
 ## Claude Opus 5.5 (high)
 
-Opus was tested on Linux through Claude Code CLI with reasoning effort `high`,
-in a fresh profile without knowledge from previous playthroughs. The clean run
-showed efficient navigation and effective recovery from local obstacles. From
-the same starting save, it reached the verified destination with less active
-in-game time and fewer AstraBridge operations than the other models in that
-comparison, including Astra and Sol.
+Opus was tested on Linux through Claude Code CLI with reasoning effort `high`.
+It can retain its goal, navigate autonomously, and recover from unsuccessful
+approaches. Route planning is uneven: it can follow a short, direct route, but
+can also spend substantial time on detours and repeated travel.
 
-It read the journal and saved dialogue before moving, checked its resources,
-and recorded a checkpoint with supporting evidence. It then connected the
-written directions to visible landmarks and maintained a coherent route.
-Landmark recognition was a particular strength: it identified the relevant
-landmark early and used it to choose the next direction instead of repeatedly
-reinterpreting the route. It distinguished an inferred landmark association
-from a destination confirmed through the game's interaction text.
+With explicit instructions to preserve complete responses, tool use is generally
+reliable. Opus reads quest directions, regularly views screenshots, consults maps
+and the Atlas, and uses movement diagnostics. Navigation difficulties persist
+even when it retains the full tool output.
 
-Failed movements remained local problems rather than derailing the plan. Opus
-changed ground targets, sidestepped obstacles, backed out of blocked approaches,
-and switched movement methods when necessary. It used longer movements where
-the terrain allowed them and more precise targets around obstacles. It also
-revised an incorrect explanation for incoming damage after inspecting the
-scene, rather than continuing to act on the original assumption.
+A weakness is connecting landmarks and map observations into a reliable route.
+When a landmark is missing or uncertain, Opus can make increasingly specific
+estimates of the destination's position without confirming the reference point.
+Repeated observation and returns to familiar locations do not always resolve
+that uncertainty quickly.
 
-Tool handling was reliable in this run. With explicit instructions to preserve
-complete output, it read screenshots regularly and used movement diagnostics.
-The transcript contained no output-filtering commands or explicit reads of
-shared memory. This result does not support the earlier suggestion that low
-reasoning effort is needed for successful play. Repeated clean runs are still
-needed to establish how consistently this performance holds over longer tasks.
+Recovery is a useful strength. Opus changes movement targets and methods, backs
+away from blocked terrain, and uses known points to retrace its route. It checks
+destination identities, rejects incorrect destinations, and records failed
+approaches in its checkpoint. It can abandon an unsuccessful search strategy
+and continue toward the goal, although this may require considerable extra
+movement and tool use.
 
-A previous run read shared Claude Code memory containing notes from other
-playthroughs. That run is excluded from the results and model comparisons.
-For clean comparisons, start a fresh Claude Code session with these parameters:
+Claude Code's shared memory can carry knowledge between playthroughs. Disable
+automatic memory and CLAUDE.md loading when starting an independent session:
 
 ```sh
 CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 \
