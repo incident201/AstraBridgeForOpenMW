@@ -13,7 +13,7 @@ than a general ranking of model capabilities.
 | GPT-6 Luna (max) | Completed none of its assigned tasks. Once reached Balmora, but could not find Caius Cosades. | Codex CLI; AstraBridge Runner |
 | Gemini 3.8 Flash (high) | Inconsistent navigation; successful runs alternate with prolonged wandering and repeated reinterpretation of landmarks. | agy CLI |
 | DeepSeek 4.1 Flash (max) | Completed the tutorial and saved; reached Balmora in one test, but then wandered in circles. | Codex CLI; AstraBridge Runner |
-| Claude Opus 5.5 | Completed the tutorial and found Caius Cosades with `low` effort; earlier runs had navigation difficulties. | Claude Code CLI |
+| Claude Opus 5.5 (high) | Efficient navigation, evidence-based route planning, and effective recovery from local obstacles in a clean comparison. | Claude Code CLI |
 | Claude Sonnet 5.5 (high) | Better tool use with output filtering blocked; recovers from local obstacles, but longer route planning remains inefficient. | Claude Code CLI |
 | Claude Haiku 5.5 (xhigh) | Stalled during the tutorial, resumed after user prompting, then stopped inside the Census and Excise Office. | Claude Code CLI |
 | Grok 4.7 (high) | Left the starting ship with the custom runner, but navigation remained poor and API use was excessive. | Grok Build; AstraBridge Runner |
@@ -163,26 +163,39 @@ The custom-runner test retained the full text history, including reasoning,
 without context compaction. The failures in that run therefore cannot be
 attributed to information being removed during compaction.
 
-## Claude Opus 5.5
+## Claude Opus 5.5 (high)
 
-Opus was tested on Linux through Claude Code CLI. With reasoning effort `low`, it
-completed the tutorial and found and spoke with Caius Cosades in Balmora in
-approximately 45 minutes. It actively used screenshots and recovered from
-navigation difficulties along the way.
+Opus was tested on Linux through Claude Code CLI with reasoning effort `high`,
+in a fresh profile without knowledge from previous playthroughs. The clean run
+showed efficient navigation and effective recovery from local obstacles. From
+the same starting save, it reached the verified destination with less active
+in-game time and fewer AstraBridge operations than the other models in that
+comparison, including Astra and Sol.
 
-Earlier runs had more serious navigation problems. Opus frequently shortened
-AstraBridge responses with scripts, discarding useful movement details and
-diagnostics. This persisted in the successful run, which still used `grep` and
-`head` to truncate results.
+It read the journal and saved dialogue before moving, checked its resources,
+and recorded a checkpoint with supporting evidence. It then connected the
+written directions to visible landmarks and maintained a coherent route.
+Landmark recognition was a particular strength: it identified the relevant
+landmark early and used it to choose the next direction instead of repeatedly
+reinterpreting the route. It distinguished an inferred landmark association
+from a destination confirmed through the game's interaction text.
 
-Opus can complete the opening objective through Claude Code CLI. Whether lower
-reasoning effort improves performance remains unconfirmed from one run. A
-direct API comparison has not been performed.
+Failed movements remained local problems rather than derailing the plan. Opus
+changed ground targets, sidestepped obstacles, backed out of blocked approaches,
+and switched movement methods when necessary. It used longer movements where
+the terrain allowed them and more precise targets around obstacles. It also
+revised an incorrect explanation for incoming damage after inspecting the
+scene, rather than continuing to act on the original assumption.
 
-In a later run, Opus was observed reading shared Claude Code memory containing
-notes from previous playthroughs. That run is excluded from the results and model
-comparisons because its starting context was not independent.
+Tool handling was reliable in this run. With explicit instructions to preserve
+complete output, it read screenshots regularly and used movement diagnostics.
+The transcript contained no output-filtering commands or explicit reads of
+shared memory. This result does not support the earlier suggestion that low
+reasoning effort is needed for successful play. Repeated clean runs are still
+needed to establish how consistently this performance holds over longer tasks.
 
+A previous run read shared Claude Code memory containing notes from other
+playthroughs. That run is excluded from the results and model comparisons.
 For clean comparisons, start a fresh Claude Code session with these parameters:
 
 ```sh
@@ -258,9 +271,9 @@ and regularly opened screenshots. It no longer reduced gameplay results to a few
 fields with parsers or shell filters; later attempts to invoke prohibited filters
 were blocked by the harness.
 
-This improved use of the tools did not resolve the fundamental navigation
-difficulties. Preserving complete results did not eliminate problems with spatial
-understanding and route finding.
+For Sonnet, this improved use of the tools did not resolve the navigation
+difficulties described above. Preserving complete results did not eliminate its
+problems with spatial understanding and route finding.
 
 ## Claude Haiku 5.5 (xhigh)
 
