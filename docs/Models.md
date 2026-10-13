@@ -8,7 +8,7 @@ than a general ranking of model capabilities.
 
 | Model | Observed result | Tested harness |
 | --- | --- | --- |
-| GPT-6 Astra (xhigh) | Completed multiple story and faction quests autonomously. | Codex CLI |
+| GPT-6 Astra (high / xhigh) | Sustained autonomous play, efficient navigation, and effective recovery from mistakes; overall quality remains close to Sol. | Codex CLI |
 | GPT-6.1 Sol (high / xhigh) | Sustained autonomous play, efficient navigation, and reliable recovery from unsuccessful approaches. | Codex CLI; AstraBridge Runner |
 | GPT-6 Luna (max) | Completed none of its assigned tasks. Once reached Balmora, but could not find Caius Cosades. | Codex CLI; AstraBridge Runner |
 | Gemini 3.8 Flash (high) | Inconsistent navigation; successful runs alternate with prolonged wandering and repeated reinterpretation of landmarks. | agy CLI |
@@ -32,11 +32,27 @@ continued to play successfully, while Luna continued to struggle. Codex CLI is
 therefore a practical choice for ordinary GPT gameplay; the custom runner is
 useful for more controlled comparisons.
 
-### GPT-6 Astra (xhigh)
+### GPT-6 Astra (high / xhigh)
 
-Astra demonstrated sustained autonomous play. Earlier extended tests showed no
-noticeable difference in gameplay quality between Astra and Sol. Astra reasons a
-little faster; because the results were so close, most subsequent testing used Sol.
+Astra demonstrated sustained autonomous play with both `high` and `xhigh`
+reasoning efforts. Its overall gameplay quality remains close to Sol. Recent
+navigation observations suggest a modest efficiency advantage for Astra, with
+fewer tool operations and less active gameplay time spent reaching a destination.
+Astra also tends to reason a little faster.
+
+It combines screenshots, verbal directions, maps, and previous observations to
+maintain its objective and choose useful movements. It regularly inspects images
+and uses the returned movement diagnostics to guide subsequent actions.
+
+Astra handles uncertainty well. It can acknowledge that a landmark has not been
+identified, check a destination's identity, and reject an incorrect destination.
+It still makes route mistakes, but can revise its interpretation and continue
+searching without prolonged repetition of the same unsuccessful approach.
+
+Astra checks its equipment and consumables early and incorporates them into
+movement and exploration. Recovery from failed
+movement commands is generally effective. It changes its target, direction, or
+movement method when the current approach stops making progress.
 
 Astra's completed tasks included:
 
@@ -47,10 +63,8 @@ Astra's completed tasks included:
 - The first Imperial Legion assignment.
 
 These runs were fully autonomous, without user hints, manual control, or other
-intervention. Astra used screenshots, route descriptions, and previous
-observations to navigate and maintain its goals over long sessions. It handled
-navigation in Vivec successfully, recognized a lack of progress, and changed its
-approach when needed.
+intervention. Astra also handled navigation in Vivec successfully and maintained
+its goals over long sessions.
 
 ### GPT-6.1 Sol (high / xhigh)
 
