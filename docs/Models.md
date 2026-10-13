@@ -14,8 +14,8 @@ than a general ranking of model capabilities.
 | Gemini 3.8 Flash (high) | Inconsistent navigation; successful runs alternate with prolonged wandering and repeated reinterpretation of landmarks. | agy CLI |
 | DeepSeek 4.1 Flash (max) | Completed the tutorial and saved; reached Balmora in one test, but then wandered in circles. | Codex CLI; AstraBridge Runner |
 | Claude Opus 5.5 (high) | Can navigate autonomously and recover from mistakes, but route planning is uneven and can involve substantial detours. | Claude Code CLI |
-| Claude Sonnet 5.5 (high) | Better tool use with output filtering blocked; recovers from local obstacles, but longer route planning remains inefficient. | Claude Code CLI |
-| Claude Haiku 5.5 (xhigh) | Stalled during the tutorial, resumed after user prompting, then stopped inside the Census and Excise Office. | Claude Code CLI |
+| Claude Sonnet 5.5 (high) | Recovers from local obstacles, but longer route planning remains inefficient. | Claude Code CLI |
+| Claude Haiku 5.5 (xhigh) | Poor recovery from blocked progress; tends to wait or ask for help instead of revising its plan. | Claude Code CLI |
 | Grok 4.7 (high) | Left the starting ship with the custom runner, but navigation remained poor and API use was excessive. | Grok Build; AstraBridge Runner |
 
 ## GPT models
@@ -163,69 +163,26 @@ The custom-runner test retained the full text history, including reasoning,
 without context compaction. The failures in that run therefore cannot be
 attributed to information being removed during compaction.
 
-## Claude Opus 5.5 (high)
+## Claude models
 
-Opus was tested on Linux through Claude Code CLI with reasoning effort `high`.
-It can retain its goal, navigate autonomously, and recover from unsuccessful
-approaches. Route planning is uneven: it can follow a short, direct route, but
-can also spend substantial time on detours and repeated travel.
+Opus, Sonnet, and Haiku were tested through Claude Code CLI on Linux. The harness
+settings below apply to all three models. Model-specific observations follow;
+reliable tool handling does not by itself imply reliable navigation.
 
-With explicit instructions to preserve complete responses, tool use is generally
-reliable. Opus reads quest directions, regularly views screenshots, consults maps
-and the Atlas, and uses movement diagnostics. Navigation difficulties persist
-even when it retains the full tool output.
-
-A weakness is connecting landmarks and map observations into a reliable route.
-When a landmark is missing or uncertain, Opus can make increasingly specific
-estimates of the destination's position without confirming the reference point.
-Repeated observation and returns to familiar locations do not always resolve
-that uncertainty quickly.
-
-Recovery is a useful strength. Opus changes movement targets and methods, backs
-away from blocked terrain, and uses known points to retrace its route. It checks
-destination identities, rejects incorrect destinations, and records failed
-approaches in its checkpoint. It can abandon an unsuccessful search strategy
-and continue toward the goal, although this may require considerable extra
-movement and tool use.
+### Shared harness configuration
 
 Claude Code's shared memory can carry knowledge between playthroughs. Disable
-automatic memory and CLAUDE.md loading when starting an independent session:
+automatic memory and CLAUDE.md loading when starting an independent session.
+Replace `MODEL` with `opus`, `sonnet`, or `haiku`:
 
 ```sh
 CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 \
 CLAUDE_CODE_DISABLE_CLAUDE_MDS=1 \
-claude --model opus
+claude --model MODEL
 ```
 
-## Claude Sonnet 5.5 (high)
-
-Sonnet was tested on Linux through Claude Code CLI. Blocking output-filtering
-commands and increasing output limits noticeably improved its use of AstraBridge.
-It retained movement details and diagnostics and regularly inspected screenshots.
-The harness configuration is documented below.
-
-Sonnet can recognize blocked movement and change its immediate actions. It
-tries another direction, backs out, or switches movement methods when an
-assisted route fails. It also checks destination names and can reject an
-incorrect destination. These are useful signs of recovery from local mistakes.
-
-Longer route planning remains inefficient. The model can misjudge how landmarks
-and explored areas relate to each other, make speculative assumptions about the
-destination, and spend substantial gameplay time on detours and repeated travel.
-It can keep making locally reasonable movements without resolving the larger
-navigation problem.
-
-Resource planning has also been uneven: useful consumables were discovered late,
-after avoidable difficulties. Sonnet persisted and reached its destination in the
-comparison, but used substantially more active gameplay time and operations than
-Sol. Its navigation problems therefore cannot be explained solely by discarded
-tool output.
-
-### Preventing tool-output truncation
-
-The following Claude Code CLI `settings.json` configuration increases output
-limits and denies commands used to filter or truncate AstraBridge responses.
-These restrictions apply to the harness regardless of the selected Claude model:
+In `settings.json`, increase output limits and deny commands used to filter or
+truncate AstraBridge responses:
 
 ```json
 {
@@ -258,39 +215,73 @@ These restrictions apply to the harness regardless of the selected Claude model:
 }
 ```
 
-Adding these restrictions noticeably improved tool use through Claude Code CLI.
-The agent invoked AstraBridge directly, retained movement details and diagnostics,
-and regularly opened screenshots. It no longer reduced gameplay results to a few
-fields with parsers or shell filters; later attempts to invoke prohibited filters
-were blocked by the harness.
+Also instruct the agent to preserve complete tool responses, including movement
+diagnostics, rather than reduce them to success/failure or discard output.
+These settings and instructions address a recurring tool-use problem: shell
+filters and custom parsers remove information the model needs to understand
+what happened. Blocking those commands noticeably improved tool use, but did
+not eliminate navigation difficulties.
 
-For Sonnet, this improved use of the tools did not resolve the navigation
-difficulties described above. Preserving complete results did not eliminate its
-problems with spatial understanding and route finding.
+### Claude Opus 5.5 (high)
 
-## Claude Haiku 5.5 (xhigh)
+Opus can retain its goal, navigate autonomously, and recover from unsuccessful
+approaches. Route planning is uneven: it can follow a short, direct route, but
+can also spend substantial time on detours and repeated travel.
 
-Haiku was tested on Linux through Claude Code CLI with reasoning effort `xhigh`.
-It left the ship's interior, but stalled on the route from the ship to the shore
-and handed control back to the user. After the user told it to continue, it
-advanced through character creation and reached the Census and Excise Office.
-It then became stuck there and again disconnected the agent to ask for help.
-The tutorial was not completed.
+With explicit instructions to preserve complete responses, tool use is generally
+reliable. Opus reads quest directions, regularly views screenshots, consults maps
+and the Atlas, and uses movement diagnostics. Navigation difficulties persist
+even when it retains the full tool output.
 
-A recurring weakness was recovery from blocked progress. Haiku often expected
-the next tutorial step to happen automatically and tried more waiting. Early
-waits while controls were disabled were appropriate. Later, it repeatedly waited
-with movement enabled and no relevant change in the observed state. In the
-office, it used repeated thirty-second waits and retried a locked door without
-progress. It also tried movement, dialogue, and exploration, but struggled to
-turn the available evidence into a revised plan.
+A weakness is connecting landmarks and map observations into a reliable route.
+When a landmark is missing or uncertain, Opus can make increasingly specific
+estimates of the destination's position without confirming the reference point.
+Repeated observation and returns to familiar locations do not always resolve
+that uncertainty quickly.
 
-Its shell commands frequently truncated AstraBridge responses with `head` or
-filtered them down to a few fields with `grep`; some attempts discarded results
-entirely. This reduced the diagnostics available to the model, as observed in
-the other Claude Code CLI tests. The contribution of the model and harness
-cannot be separated from this run alone. Haiku has not been tested through a direct API
-connection.
+Recovery is a useful strength. Opus changes movement targets and methods, backs
+away from blocked terrain, and uses known points to retrace its route. It checks
+destination identities, rejects incorrect destinations, and records failed
+approaches in its checkpoint. It can abandon an unsuccessful search strategy
+and continue toward the goal, although this may require considerable extra
+movement and tool use.
+
+### Claude Sonnet 5.5 (high)
+
+Sonnet retains movement details and diagnostics and regularly inspects
+screenshots with output filtering blocked.
+
+Sonnet can recognize blocked movement and change its immediate actions. It
+tries another direction, backs out, or switches movement methods when an
+assisted route fails. It also checks destination names and can reject an
+incorrect destination. These are useful signs of recovery from local mistakes.
+
+Longer route planning remains inefficient. The model can misjudge how landmarks
+and explored areas relate to each other, make speculative assumptions about the
+destination, and spend substantial gameplay time on detours and repeated travel.
+It can keep making locally reasonable movements without resolving the larger
+navigation problem.
+
+Resource planning has also been uneven: useful consumables were discovered late,
+after avoidable difficulties. Sonnet persisted and reached its destination in the
+comparison, but used substantially more active gameplay time and operations than
+Sol. Its navigation problems therefore cannot be explained solely by discarded
+tool output.
+
+### Claude Haiku 5.5 (xhigh)
+
+Haiku struggles to turn observations into useful actions when progress is blocked.
+It tends to wait for the situation to resolve itself, even when movement is
+available and nothing in the observed state suggests that waiting will help.
+It can attempt movement, dialogue, and exploration, but has difficulty combining
+the results into a revised plan.
+
+Autonomous persistence is also weak. Haiku stopped and asked for help during the
+tutorial, resumed after user prompting, and then stalled again. It did not
+complete the tutorial.
+
+Tool-output truncation also reduced the diagnostics available to Haiku. This is
+the same harness-level issue addressed by the shared configuration above.
 
 ## Grok 4.7 (high)
 
