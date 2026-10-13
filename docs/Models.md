@@ -8,7 +8,7 @@ than a general ranking of model capabilities.
 
 | Model | Observed result | Tested harness |
 | --- | --- | --- |
-| GPT-6 Astra (high / xhigh) | Sustained autonomous play, efficient navigation, and effective recovery from mistakes; overall quality remains close to Sol. | Codex CLI |
+| GPT-6 Astra (high / xhigh) | Sustained autonomous play, efficient navigation, practical resource planning, and effective recovery from mistakes. | Codex CLI |
 | GPT-6.1 Sol (high / xhigh) | Sustained autonomous play, efficient navigation, and reliable recovery from unsuccessful approaches. | Codex CLI; AstraBridge Runner |
 | GPT-6 Luna (max) | Completed none of its assigned tasks. Once reached Balmora, but could not find Caius Cosades. | Codex CLI; AstraBridge Runner |
 | Gemini 3.8 Flash (high) | Inconsistent navigation; successful runs alternate with prolonged wandering and repeated reinterpretation of landmarks. | agy CLI |
@@ -32,13 +32,15 @@ continued to play successfully, while Luna continued to struggle. Codex CLI is
 therefore a practical choice for ordinary GPT gameplay; the custom runner is
 useful for more controlled comparisons.
 
+Astra and Sol both demonstrated strong autonomous gameplay, with similar overall
+quality. Recent navigation observations showed Astra using fewer tool operations
+and less active gameplay time. Astra also tends to reason a little faster.
+
 ### GPT-6 Astra (high / xhigh)
 
 Astra demonstrated sustained autonomous play with both `high` and `xhigh`
-reasoning efforts. Its overall gameplay quality remains close to Sol. Recent
-navigation observations suggest a modest efficiency advantage for Astra, with
-fewer tool operations and less active gameplay time spent reaching a destination.
-Astra also tends to reason a little faster.
+reasoning efforts. It navigates efficiently, maintains long-term goals, and
+builds sequences of actions that lead to progress.
 
 It combines screenshots, verbal directions, maps, and previous observations to
 maintain its objective and choose useful movements. It regularly inspects images
