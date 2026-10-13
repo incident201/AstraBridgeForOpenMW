@@ -9,12 +9,12 @@ than a general ranking of model capabilities.
 | Model | Observed result | Tested harness |
 | --- | --- | --- |
 | GPT-6 Astra (xhigh) | Completed multiple story and faction quests autonomously. | Codex CLI |
-| GPT-6.1 Sol (xhigh) | Completed extended story and faction quest sequences autonomously. | Codex CLI; AstraBridge Runner |
+| GPT-6.1 Sol (high / xhigh) | Sustained autonomous play, efficient navigation, and reliable recovery from unsuccessful approaches. | Codex CLI; AstraBridge Runner |
 | GPT-6 Luna (max) | Completed none of its assigned tasks. Once reached Balmora, but could not find Caius Cosades. | Codex CLI; AstraBridge Runner |
-| Gemini 3.8 Flash (high) | Found Caius Cosades in one run; became lost in Balmora in another. | agy CLI |
+| Gemini 3.8 Flash (high) | Inconsistent navigation; successful runs alternate with prolonged wandering and repeated reinterpretation of landmarks. | agy CLI |
 | DeepSeek 4.1 Flash (max) | Completed the tutorial and saved; reached Balmora in one test, but then wandered in circles. | Codex CLI; AstraBridge Runner |
 | Claude Opus 5.5 | Completed the tutorial and found Caius Cosades with `low` effort; earlier runs had navigation difficulties. | Claude Code CLI |
-| Claude Sonnet 5.5 | Reached Balmora in earlier tests. Preventing output truncation improved tool use, but navigation difficulties persisted. | Claude Code CLI |
+| Claude Sonnet 5.5 (high) | Better tool use with output filtering blocked; recovers from local obstacles, but longer route planning remains inefficient. | Claude Code CLI |
 | Claude Haiku 5.5 (xhigh) | Stalled during the tutorial, resumed after user prompting, then stopped inside the Census and Excise Office. | Claude Code CLI |
 | Grok 4.7 (high) | Left the starting ship with the custom runner, but navigation remained poor and API use was excessive. | Grok Build; AstraBridge Runner |
 
@@ -32,11 +32,11 @@ continued to play successfully, while Luna continued to struggle. Codex CLI is
 therefore a practical choice for ordinary GPT gameplay; the custom runner is
 useful for more controlled comparisons.
 
-### GPT-6 Astra (xhigh) and GPT-6.1 Sol (xhigh)
+### GPT-6 Astra (xhigh)
 
-Both models demonstrated sustained autonomous play. No noticeable difference
-in gameplay quality was observed. Astra reasons a little faster. Because the
-results were so close, most subsequent testing used Sol.
+Astra demonstrated sustained autonomous play. Earlier extended tests showed no
+noticeable difference in gameplay quality between Astra and Sol. Astra reasons a
+little faster; because the results were so close, most subsequent testing used Sol.
 
 Astra's completed tasks included:
 
@@ -46,21 +46,36 @@ Astra's completed tasks included:
 - Fargoth's hiding-place quest, which required observing him from the lighthouse.
 - The first Imperial Legion assignment.
 
-Sol also completed Fargoth's hiding-place quest, a large portion of the Thieves
-Guild assignments, and the Pilgrim's Path for admission to the Tribunal Temple.
-It progressed through the main quest as far as the journey to the Urshilaku
-camp. These runs were fully autonomous, without user hints, manual control, or
-other intervention.
+These runs were fully autonomous, without user hints, manual control, or other
+intervention. Astra used screenshots, route descriptions, and previous
+observations to navigate and maintain its goals over long sessions. It handled
+navigation in Vivec successfully, recognized a lack of progress, and changed its
+approach when needed.
 
-Both models used screenshots, route descriptions, and previous observations to
-navigate and maintain their goals over long sessions. Astra handled navigation
-in Vivec successfully. Both could recognize a lack of progress and change their
-approach.
+### GPT-6.1 Sol (high / xhigh)
 
-They also continued working when AstraBridge tools malfunctioned. In one such
-case, a faulty `revisit` could take the player to the wrong floor inside a
-building. Astra and Sol distinguished the incorrect tool behavior from normal
-gameplay, adjusted their actions, and found other ways to pursue the same goal.
+Sol demonstrated sustained autonomous play through extended main-quest and
+faction assignments. Both `high` and `xhigh` reasoning efforts have been tested.
+It retains the objective and builds sequences of actions that lead to progress.
+
+Navigation is generally efficient, although Sol still makes mistakes. It can
+acknowledge that a landmark has not been identified, check a destination before
+accepting it as the goal, and abandon an unsuccessful approach. It combines
+screenshots, verbal directions, maps, and previous observations to revise its
+route and reduce repeated ineffective actions.
+
+Sol also incorporates available equipment and consumables into movement plans.
+It checks resources early and uses them to overcome difficult terrain. In a
+comparison from the same starting state, it reached the destination with
+substantially less active gameplay time and fewer AstraBridge operations than
+Sonnet or Gemini.
+
+Recovery is a particular strength. Failed movement commands and incorrect
+initial route choices do not usually prevent it from continuing toward the goal.
+Both Sol and Astra also continued working when AstraBridge tools malfunctioned.
+For example, an earlier faulty `revisit` could take the player to the wrong floor.
+They distinguished incorrect tool behavior from normal gameplay and found other
+ways to pursue the same objective.
 
 ### GPT-6 Luna (max)
 
@@ -81,19 +96,25 @@ or navigation.
 
 ## Gemini 3.8 Flash (high)
 
-Gemini was tested through agy CLI on Linux. It understands AstraBridge command
-syntax well, uses the tools effectively, and shows signs of understanding its
-surroundings through game screenshots. It remembers the overall objective and
-continues trying to achieve it, but often takes more actions than Astra or Sol.
+Gemini was tested through agy CLI on Linux. It generally understands AstraBridge
+command syntax, regularly inspects screenshots, and shows signs of understanding
+its surroundings. It remembers the overall objective and continues trying to
+achieve it.
 
-Results vary noticeably from session to session. In one test, Gemini
-independently reached Balmora and found Caius Cosades. In another, it became
-lost and repeatedly circled Balmora.
+Navigation and planning are inconsistent. Successful runs coexist with sessions
+involving prolonged wandering, repeated routes, and much larger numbers of
+actions than Sol. The model has difficulty combining separate observations into
+a stable understanding of the area and its remaining unexplored directions.
 
-A recurring problem is fixation on an incorrect assumption. The model can keep
-performing ineffective actions without reconsidering its interpretation or
-trying a different approach. Difficulty recovering from mistakes may explain
-some of the variation between runs, but that explanation has not been confirmed.
+A recurring weakness is landmark interpretation. Gemini can treat a plausible
+landmark as confirmed, later reconsider it, and then repeat the same pattern
+elsewhere. Frequent screenshot reads, Atlas queries, and returns to recorded
+points do not consistently resolve this uncertainty or produce a coherent route.
+
+Recovery is often slow and inconsistent, requiring many intermediate
+observations, detours, and attempts. The model may remain attached to an incorrect
+assumption or repeatedly revise its interpretation without making useful
+progress. Navigation instability persists despite generally competent tool use.
 
 ## DeepSeek 4.1 Flash (max)
 
@@ -126,26 +147,45 @@ The custom-runner test retained the full text history, including reasoning,
 without context compaction. The failures in that run therefore cannot be
 attributed to information being removed during compaction.
 
-## Claude Opus 5.5 / Sonnet 5.5
+## Claude Opus 5.5
 
-Both models were tested on Linux through Claude Code CLI.
+Opus was tested on Linux through Claude Code CLI. With reasoning effort `low`, it
+completed the tutorial and found and spoke with Caius Cosades in Balmora in
+approximately 45 minutes. It actively used screenshots and recovered from
+navigation difficulties along the way.
 
-With reasoning effort `low`, Opus completed the tutorial and found and spoke
-with Caius Cosades in Balmora in approximately 45 minutes. It actively used
-screenshots and recovered from navigation difficulties along the way.
-
-Earlier Opus and Sonnet runs had more serious navigation problems, including
-becoming lost after reaching Balmora. Their behavior was similar; Sonnet was
-faster and sometimes navigated better.
-
-In those runs, both models tended to shorten AstraBridge responses with scripts, discarding
-useful movement details and diagnostics. This problem persisted in the
-successful Opus run, which still frequently used `grep` and `head` to truncate
-results.
+Earlier runs had more serious navigation problems. Opus frequently shortened
+AstraBridge responses with scripts, discarding useful movement details and
+diagnostics. This persisted in the successful run, which still used `grep` and
+`head` to truncate results.
 
 Opus can complete the opening objective through Claude Code CLI. Whether lower
 reasoning effort improves performance remains unconfirmed from one run. A
 direct API comparison has not been performed.
+
+## Claude Sonnet 5.5 (high)
+
+Sonnet was tested on Linux through Claude Code CLI. Blocking output-filtering
+commands and increasing output limits noticeably improved its use of AstraBridge.
+It retained movement details and diagnostics and regularly inspected screenshots.
+The harness configuration is documented below.
+
+Sonnet can recognize blocked movement and change its immediate actions. It
+tries another direction, backs out, or switches movement methods when an
+assisted route fails. It also checks destination names and can reject an
+incorrect destination. These are useful signs of recovery from local mistakes.
+
+Longer route planning remains inefficient. The model can misjudge how landmarks
+and explored areas relate to each other, make speculative assumptions about the
+destination, and spend substantial gameplay time on detours and repeated travel.
+It can keep making locally reasonable movements without resolving the larger
+navigation problem.
+
+Resource planning has also been uneven: useful consumables were discovered late,
+after avoidable difficulties. Sonnet persisted and reached its destination in the
+comparison, but used substantially more active gameplay time and operations than
+Sol. Its navigation problems therefore cannot be explained solely by discarded
+tool output.
 
 ### Preventing tool-output truncation
 
@@ -186,8 +226,9 @@ These restrictions apply to the harness regardless of the selected Claude model:
 
 Adding these restrictions noticeably improved tool use through Claude Code CLI.
 The agent invoked AstraBridge directly, retained movement details and diagnostics,
-and regularly opened screenshots. It stopped writing parsers or using shell
-filters to reduce results to a few fields.
+and regularly opened screenshots. It no longer reduced gameplay results to a few
+fields with parsers or shell filters; later attempts to invoke prohibited filters
+were blocked by the harness.
 
 This improved use of the tools did not resolve the fundamental navigation
 difficulties. Preserving complete results did not eliminate problems with spatial
