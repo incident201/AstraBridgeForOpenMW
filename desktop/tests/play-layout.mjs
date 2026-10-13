@@ -20,7 +20,9 @@ await page.addInitScript(({hasFrame})=>{
  window.fixture={state,runtime,calls:[],emit,set:(patch)=>{Object.assign(runtime,patch);emit();}};
  window.astra={subscribe:fn=>{handlers.push(fn);return()=>{};},input:message=>{
   window.fixture.calls.push(message);if(message.type==='manual.acquire')runtime.owner={mode:'manual'};
-  if(message.type==='manual.release')runtime.owner={mode:'idle'};emit();
+  if(message.type==='manual.release')runtime.owner={mode:'idle'};
+  if(message.type==='manual.acquire'||message.type==='manual.release')handlers.forEach(fn=>fn({type:'input.owner',data:structuredClone(runtime.owner)}));
+  emit();
  },invoke:async(op,args)=>{
   window.fixture.calls.push({op,args});
   if(op==='status')return structuredClone(state);
@@ -28,6 +30,7 @@ await page.addInitScript(({hasFrame})=>{
   if(op==='replay-info')return window.fixture.replay??{id:null,ready:false,active:recording,duration:0};
   if(op==='viewer-fullscreen')return {enabled:args.enabled};
   if(op==='record'){if(window.fixture.failRecord)throw Error('Recording could not start. Check the output folder permissions.');recording=args.action==='start';runtime.recording=recording?{recording:true,duration:125,encoder:'h264_nvenc'}:null;emit();}
+  if(op==='release-manual'){runtime.owner={mode:'idle'};emit();return structuredClone(runtime.owner);}
   if(op==='agent-end'){runtime.owner={mode:'idle'};emit();}
   if(op==='start'){runtime.running=true;state.container.running=true;emit();}
   if(op==='stop'&&window.fixture.cancelStop)return {cancelled:true};
@@ -107,7 +110,30 @@ try{
  for(const label of ['Commentary overlay','Action history overlay','Session clocks'])await page.getByLabel(label,{exact:true}).check();
  await page.keyboard.press('Escape');
  await page.evaluate(()=>window.fixture.set({owner:{mode:'idle'},active_action:null}));await shot('idle-960');
- await page.getByRole('button',{name:'Take manual control',exact:true}).click();await shot('manual-960');
+ await page.getByRole('button',{name:'Take manual control',exact:true}).click();
+ await page.waitForFunction(()=>document.activeElement===document.querySelector('video[aria-label="Live Morrowind game"]'));
+ await page.keyboard.press('w');
+ for(const down of [true,false])assert.ok(await page.evaluate(down=>window.fixture.calls.some(x=>x.type==='input'&&x.event?.code==='KeyW'&&x.event.down===down),down),'Manual acquisition must focus gameplay keys');
+ await shot('manual-960');
+ await page.evaluate(()=>window.fixture.calls=[]);
+ await page.mouse.move(700,300);await page.waitForTimeout(50);await page.mouse.move(720,310);
+ await page.waitForFunction(()=>window.fixture.calls.some(x=>x.type==='input'&&x.event?.type==='relative'&&(x.event.x!==0||x.event.y!==0)));
+ await page.getByRole('button',{name:'Lock pointer for camera',exact:true}).click();
+ await page.waitForFunction(()=>document.pointerLockElement===document.querySelector('video[aria-label="Live Morrowind game"]'));
+ assert.ok(await page.evaluate(()=>document.activeElement===document.pointerLockElement),'Pointer capture must focus the game keyboard target');
+ await page.evaluate(()=>window.fixture.calls=[]);
+ // CDP absolute mouse moves generate cancelling warp pairs while locked.
+ // Deliver a relative DOM event and exercise the real browser frame scheduler.
+ await page.evaluate(()=>document.pointerLockElement.dispatchEvent(new MouseEvent('mousemove',{movementX:8,movementY:-3,bubbles:true})));
+ await page.waitForFunction(()=>window.fixture.calls.some(x=>x.type==='input'&&x.event?.type==='relative'&&x.event.x===8&&x.event.y===-3));
+ await page.evaluate(()=>document.exitPointerLock());
+ await page.waitForFunction(()=>!document.pointerLockElement);
+ await page.keyboard.down('w');
+ const releases=await page.evaluate(()=>window.fixture.calls.filter(x=>x.type==='input'&&x.event?.type==='release').length);
+ await page.getByLabel('Viewer options',{exact:true}).click();
+ assert.ok(await page.evaluate(()=>window.fixture.calls.filter(x=>x.type==='input'&&x.event?.type==='release').length)>releases,'Leaving the game surface must release held keys');
+ await page.keyboard.up('w');await page.keyboard.press('Escape');
+ assert.equal(await page.evaluate(()=>window.fixture.runtime.owner.mode),'manual');
  await page.getByRole('button',{name:'Release control',exact:true}).click();
  await page.getByRole('button',{name:'Pause playback',exact:true}).click();await shot('paused-960');
  await page.getByRole('button',{name:'Return to live',exact:true}).click();

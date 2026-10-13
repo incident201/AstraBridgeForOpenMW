@@ -113,6 +113,13 @@ local function onFrame()
             if r and r.id == pending.cmd.id and r.session == pending.cmd.session then
                 reply(pending.cmd, r.result, r.error)
                 pending = nil
+            elseif pending.cmd.op == 'observe' and pending.cmd.args._passive
+                and bus:get('ready') and not bus:get('request') then
+                -- A human can load a save while a passive UI refresh is in
+                -- flight. Player storage/reset drops that request. Reattach
+                -- the read to the ready player instead of blocking input until
+                -- timeout. Never replay an action across a load.
+                bus:set('request', pending.cmd)
             end
         end
         if pending and now > pending.deadline then

@@ -13,8 +13,8 @@ export class MouseMotion {
   private pending:Motion|null=null;
   private frame:number|null=null;
   constructor(private send:(event:Motion)=>void,
-    private schedule:(callback:FrameRequestCallback)=>number=requestAnimationFrame,
-    private cancel:(id:number)=>void=cancelAnimationFrame){}
+    private schedule:(callback:FrameRequestCallback)=>number=callback=>window.requestAnimationFrame(callback),
+    private cancel:(id:number)=>void=id=>window.cancelAnimationFrame(id)){}
   push(event:Motion){
     if(event.type==='relative'&&this.pending?.type==='relative'){
       this.pending={type:'relative',x:this.pending.x+event.x,y:this.pending.y+event.y};

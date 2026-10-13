@@ -113,6 +113,15 @@ Key and button events refresh the passive UI observation and send an `input.mode
 event, so switching between menus and gameplay does not wait for the telemetry
 poll. Entering an interface also releases Desktop Pointer Lock.
 
+Acquiring manual control focuses the game surface for keyboard input. Pointer
+Lock restores that focus; moving focus to Desktop controls releases held game
+keys and buttons. Losing application focus releases manual ownership.
+
+Loading a save through the game UI recreates player script storage. The menu
+transport restores a passive observation lost during that transition once the
+player is ready, so input and UI-mode updates can continue. State-changing
+commands are never replayed across a load.
+
 ### Importing saves
 
 In Desktop, stop the game, open **Profiles**, select the destination profile

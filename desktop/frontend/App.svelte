@@ -239,6 +239,10 @@
     }}
     catch(e){error=(e as Error).message;}
   }
+  async function focusManualSurface(){
+    await tick();
+    if(manual&&!manualReleasing&&page==='play'&&viewMode==='live')video?.focus();
+  }
   async function toggleRecordingFullscreen(){
     try{if(document.fullscreenElement===recordingSurface)await document.exitFullscreen();else await recordingSurface.requestFullscreen();}
     catch(e){error=(e as Error).message;}
@@ -253,6 +257,7 @@
     finally{manualReleasing=false;}
   }
   function input(event:any){if(manual&&!manualReleasing&&viewMode==='live')window.astra.input({type:'input',event});}
+  function releaseHeldInput(){manualMouse.clear();input({type:'release'});}
   function mousemove(event:MouseEvent){
     if(!manual||manualReleasing||viewMode!=='live')return;
     const value=mouseMotion(video,event,runtime.ui_mode);if(value)manualMouse.push(value);
@@ -292,7 +297,10 @@
     const unsubscribe=window.astra.subscribe(message=>{
       if(message.type==='viewer.fullscreen')setViewerFullscreen(message.enabled);
       if(message.type==='status')runtime={...message.data,game_fps:message.data.game_fps??runtime.game_fps};
-      if(message.type==='input.owner')runtime={...runtime,owner:message.data};
+      if(message.type==='input.owner'){
+        runtime={...runtime,owner:message.data};
+        if(message.data.mode==='manual')void focusManualSurface();
+      }
       if(message.type==='input.mode'){manualMouse.clear();runtime={...runtime,ui_mode:message.ui_mode};}
       if(message.type==='error')error=message.error;
       if(message.type==='progress')progress=(progress+message.data).slice(-12000);
@@ -301,7 +309,12 @@
     });
     const recordingFullscreenChanged=()=>recordingFullscreen=document.fullscreenElement===recordingSurface;
     document.addEventListener('fullscreenchange',recordingFullscreenChanged);
-    const pointerLockChanged=()=>{pointerCaptured=document.pointerLockElement===video;if(!document.pointerLockElement)revealFullscreenControls();};
+    const pointerLockChanged=()=>{
+      pointerCaptured=document.pointerLockElement===video;
+      manualMouse.clear();
+      if(pointerCaptured)void focusManualSurface();
+      else revealFullscreenControls();
+    };
     const outsideMenu=(event:MouseEvent)=>{
       const active=(event.target as Element)?.closest('details.dropdown');
       document.querySelectorAll<HTMLDetailsElement>('details.dropdown[open]').forEach(menu=>{if(menu!==active)menu.open=false;});
@@ -401,7 +414,7 @@
           <!-- svelte-ignore a11y_media_has_caption a11y_no_noninteractive_tabindex a11y_no_noninteractive_element_interactions -->
           <video class:concealed={viewMode==='replay'} bind:this={video} muted={muted||viewMode!=='live'||page==='recordings'} autoplay playsinline tabindex="0" aria-label="Live Morrowind game"
             on:mousemove={mousemove} on:mousedown={e=>mousebutton(e,true)} on:mouseup={e=>mousebutton(e,false)}
-            on:keydown={e=>key(e,true)} on:keyup={e=>key(e,false)} on:wheel|nonpassive={wheel} on:contextmenu|preventDefault={()=>{}}></video>
+            on:keydown={e=>key(e,true)} on:keyup={e=>key(e,false)} on:blur={releaseHeldInput} on:wheel|nonpassive={wheel} on:contextmenu|preventDefault={()=>{}}></video>
           <!-- svelte-ignore a11y_media_has_caption -->
           <video class:concealed={viewMode!=='replay'} bind:this={replayVideo} muted={muted} playsinline aria-label="Recording replay"
             on:timeupdate={replayTime} on:seeked={replayTime} on:play={()=>replayPlaying=true} on:pause={()=>replayPlaying=false}></video>

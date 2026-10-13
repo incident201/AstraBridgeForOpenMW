@@ -138,3 +138,9 @@ def test_long_unicode_messages_survive_logger_prefixes_and_byte_boundaries():
         if i<len(chunks):assert result is None
     assert result==value
     assert not decoder.parts
+
+
+def test_passive_ui_observation_recovers_after_manual_save_load():
+    root = Path(__file__).resolve().parents[1]
+    result = subprocess.run(['lua', 'tests/manual_load.lua'], cwd=root, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
