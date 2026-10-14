@@ -7,7 +7,7 @@ from .journal import json_text
 
 def text_estimate(value):
     if isinstance(value, dict):
-        return sum(text_estimate(v) for k, v in value.items() if k not in ('encrypted_content', 'saved_image'))
+        return sum(text_estimate(v) for k, v in value.items() if k not in ('encrypted_content', 'signature', 'saved_image'))
     if isinstance(value, list): return sum(text_estimate(v) for v in value)
     if isinstance(value, str): return math.ceil(len(value.encode('utf-8')) / 4)
     return 1

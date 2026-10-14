@@ -1,2 +1,2 @@
 """Thin provider adapters and AstraBridge tool infrastructure."""
-__version__ = "0.1.2"
+__version__ = "0.1.3"

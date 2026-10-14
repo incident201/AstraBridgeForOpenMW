@@ -2,14 +2,14 @@
 
 `astrabridge-runner` is an optional host Python application for playing through
 native AstraBridge tools. It supports OpenAI through **Sign in with ChatGPT**
-and the Responses API, DeepSeek through its API, and Grok through the xAI
-Responses API with an API key. It manages transport,
+and the Responses API, DeepSeek through its API, Grok through the xAI
+Responses API, and Gemini through Google's Interactions API with an API key. It manages transport,
 history, images, context and logs. The model makes every game decision.
 
 ## Install and prepare
 
 Use Python 3.11+, AstraBridge 0.3.5+ and the normal container/GPU prerequisites.
-Install the `astrabridge_runner-0.1.2-py3-none-any.whl` in a Python environment,
+Install the `astrabridge_runner-0.1.3-py3-none-any.whl` in a Python environment,
 or install the source package:
 
 ```sh
@@ -135,6 +135,43 @@ because xAI rejects tool schemas with root `anyOf`/`oneOf` alternatives. This is
 an equivalent transformation of the exported schemas; the runner still validates
 arguments against the original AstraBridge definitions before executing a tool.
 
+For Gemini, provide `GEMINI_API_KEY` in the environment, then use:
+
+```sh
+astrabridge-runner models --provider gemini --json
+astrabridge-runner run --provider gemini --model gemini-3.8-flash --reasoning high \
+  --skill /path/to/api-skill --log-dir /path/to/private-sessions \
+  --task "Start a new game, complete the tutorial and save."
+```
+
+Gemini uses the Google Gemini Developer API at
+`https://generativelanguage.googleapis.com/v1beta/interactions`, authenticated
+with the `x-goog-api-key` header. It does not use Vertex AI, an external proxy or
+ChatGPT authorization. Gemini 3.8 Flash supports `low`, `medium` and `high`;
+`max`/`xhigh` are not aliases. Model discovery reads all pages of the API catalog
+and uses its reported context limit. Thinking levels and image/tool support
+are checked against the adapter's documented general-purpose model list;
+unsupported variants fail before connecting to the game.
+
+Requests use `store:false` and explicit client-owned history. All model steps,
+including opaque thought signatures, are retained unchanged for following
+requests and resume. Function definitions come directly from AstraBridge's
+exported schemas; responses return the full structured tool result. Only game
+and runner resource tools are enabled. Built-in Google Search, code execution
+and managed agents are not enabled.
+
+Gemini currently returns complete responses rather than streaming text. Tool
+calls execute only after a successful completed or requires-action response;
+truncated, failed and malformed responses cannot trigger a game action. The
+HTTP read timeout is one hour, with separate connection/write timeouts. Existing
+screenshot limits, checkpoint compaction and session recovery apply unchanged.
+No Google SDK or additional package dependency is required.
+
+See Google's [Interactions API](https://ai.google.dev/gemini-api/docs/interactions-overview),
+[stateless function calling](https://ai.google.dev/gemini-api/docs/function-calling#stateless-function-calling),
+[thinking levels](https://ai.google.dev/gemini-api/docs/thinking) and
+[model catalog](https://ai.google.dev/api/models).
+
 Do not put keys in arguments, source files or gameplay prompts. DeepSeek uses
 its Chat Completions transport; OpenAI uses the public Responses endpoint with
 OAuth, `store:false` and `stream:true`, not Codex or ChatGPT backend endpoints.
@@ -166,8 +203,8 @@ Checkpoint compaction is enabled for all providers. It triggers around 75% of
 the configured context window, between completed tool cycles. The budget uses
 actual API usage plus estimates for new items; estimates are not exact billing
 counts. Ciphertext is not treated as plain reasoning text.
-The budget includes reasoning tokens when xAI reports them separately from
-visible completion tokens; the original API usage remains in the logs.
+The budget includes reasoning tokens when xAI or Gemini reports them separately
+from visible completion tokens; the original API usage remains in the logs.
 
 A separate request to the same model, without tools, creates a compact JSON
 checkpoint: goal, existing plan, verified facts, uncertainty, failed attempts,
@@ -226,7 +263,8 @@ The active session's complete text history and image archive are retained;
 compaction only changes model context. Logs therefore still grow during a long
 session. Repeated API screenshots share the files in `images/`.
 `astrabridge_runner.journal.read_api_record(session_directory, relative_path)`
-restores the original JSON request, including image data URLs, and verifies image
+restores the original JSON request, including image data URLs and Gemini inline
+base64 image fields, and verifies image
 hashes. It also reads older records with inline images without modifying them.
 
 Preview cleanup of old inactive sessions:

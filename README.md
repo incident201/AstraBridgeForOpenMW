@@ -60,7 +60,7 @@ unavailable, choose **Stop without saving** or **Cancel**.
 
 ## Connect an agent
 
-For direct OpenAI or DeepSeek connections, see the optional
+For direct OpenAI, DeepSeek, Grok or Gemini connections, see the optional
 [AstraBridge Runner](docs/agent-runner.md).
 
 In **Setup → Storage and skill**, select **Enable CLI command** to register

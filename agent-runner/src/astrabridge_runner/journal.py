@@ -65,7 +65,7 @@ class Journal:
         if isinstance(value, list):
             return [self.clean(v) for v in value]
         if isinstance(value, dict):
-            private = {'authorization', 'api_key', 'deepseek_api_key', 'xai_api_key', 'grok_api_key', 'access_token', 'refresh_token', 'id_token', 'code_verifier', 'client_secret', 'authorization_code'}
+            private = {'authorization', 'api_key', 'deepseek_api_key', 'xai_api_key', 'grok_api_key', 'gemini_api_key', 'google_api_key', 'x-goog-api-key', 'access_token', 'refresh_token', 'id_token', 'code_verifier', 'client_secret', 'authorization_code'}
             return {k: self.clean(v) for k, v in value.items() if k.lower() not in private}
         return value
 
@@ -137,6 +137,16 @@ class Journal:
             if isinstance(item, list):
                 return [visit(child, [*location, index]) for index, child in enumerate(item)]
             if isinstance(item, dict):
+                if item.get('type') == 'image' and item.get('mime_type') in extensions and isinstance(item.get('data'), str):
+                    # Gemini uses bare base64. Archive the same bytes as other
+                    # providers, remembering how to restore this exact field.
+                    encoded = 'data:' + item['mime_type'] + ';base64,' + item['data']
+                    image_location = [*location, 'data']
+                    reference = visit(encoded, image_location)
+                    if reference in references:
+                        references[reference].setdefault('base64_locations', []).append(image_location)
+                        return {key: reference if key == 'data' else visit(child, [*location, key])
+                                for key, child in item.items()}
                 return {key: visit(child, [*location, key]) for key, child in item.items()}
             return item
 
@@ -187,5 +197,6 @@ def read_api_record(root, name):
                 target = target[key]
             if target[location[-1]] != reference:
                 raise ValueError('Archived API image reference was modified.')
-            target[location[-1]] = restored
+            target[location[-1]] = (base64.b64encode(data).decode('ascii')
+                                    if location in info.get('base64_locations', []) else restored)
     return value

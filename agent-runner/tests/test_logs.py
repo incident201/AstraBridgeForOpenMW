@@ -134,3 +134,39 @@ def test_api_record_reader_supports_previous_inline_records_and_checks_image_int
             journal.read_api_record('../manifest.json')
     finally:
         journal.close()
+
+
+def test_native_gemini_images_share_storage_and_restore_base64_and_data_urls(tmp_path):
+    journal = Journal(tmp_path)
+    data = b'\x89PNG\r\n\x1a\n' + bytes(range(256)) * 4096
+    encoded = base64.b64encode(data).decode('ascii')
+    value = {'method': 'POST', 'path': 'interactions', 'body': {'input': [
+        {'type': 'user_input', 'content': [
+            {'type': 'image', 'mime_type': 'image/png', 'data': encoded},
+            {'type': 'image', 'mime_type': 'image/png', 'data': encoded}]},
+        {'type': 'function_result', 'call_id': 'call_1', 'result': [
+            {'type': 'image', 'mime_type': 'image/png', 'data': encoded}]},
+        {'type': 'user_input', 'content': [
+            {'type': 'input_image', 'image_url': 'data:image/png;base64,' + encoded}]}]}}
+    try:
+        for index in (1, 2):
+            path = journal.api_record(index, 'request', value)
+            assert journal.read_api_record(path) == value
+            with gzip.open(journal.root / path, 'rt') as stream:
+                stored = json.load(stream)
+            assert len(json.dumps(stored)) < 3000
+            reference = next(iter(stored['image_archive']['references'].values()))
+            assert len(reference['locations']) == 4 and len(reference['base64_locations']) == 3
+        assert len(list((journal.root / 'images').iterdir())) == 1
+        assert value['body']['input'][0]['content'][0]['data'] == encoded
+    finally:
+        journal.close()
+
+
+def test_gemini_secret_field_names_are_removed_even_without_a_registered_value(tmp_path):
+    journal = Journal(tmp_path)
+    try:
+        assert journal.clean({'GEMINI_API_KEY': 'secret', 'GOOGLE_API_KEY': 'secret',
+                              'x-goog-api-key': 'secret', 'ordinary': 'value'}) == {'ordinary': 'value'}
+    finally:
+        journal.close()

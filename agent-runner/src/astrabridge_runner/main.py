@@ -10,12 +10,13 @@ from .locking import FileLock
 from .logs import prune_sessions
 from .providers.deepseek import DeepSeek
 from .providers.grok import Grok
+from .providers.gemini import Gemini
 from .providers.openai import OpenAI
 from .runner import Runner
 
 
 def parser():
-    root = argparse.ArgumentParser(description='AstraBridge native-tool runner: ChatGPT OAuth, DeepSeek API or Grok API.')
+    root = argparse.ArgumentParser(description='AstraBridge native-tool runner: ChatGPT OAuth, DeepSeek, Grok or Gemini API.')
     root.add_argument('--auth-dir', type=Path, help='Protected ChatGPT credential directory')
     sub = root.add_subparsers(dest='command', required=True)
     auth = sub.add_parser('auth'); actions = auth.add_subparsers(dest='auth_action', required=True)
@@ -24,17 +25,17 @@ def parser():
     actions.add_parser('status'); actions.add_parser('accounts')
     use = actions.add_parser('use'); use.add_argument('account')
     logout = actions.add_parser('logout'); logout.add_argument('--account')
-    models = sub.add_parser('models'); models.add_argument('--provider', choices=('openai', 'deepseek', 'grok'), required=True)
+    models = sub.add_parser('models'); models.add_argument('--provider', choices=('openai', 'deepseek', 'grok', 'gemini'), required=True)
     models.add_argument('--account'); models.add_argument('--json', action='store_true')
-    run = sub.add_parser('run'); run.add_argument('--provider', choices=('openai', 'deepseek', 'grok'), required=True)
+    run = sub.add_parser('run'); run.add_argument('--provider', choices=('openai', 'deepseek', 'grok', 'gemini'), required=True)
     run.add_argument('--model', required=True); run.add_argument('--reasoning', required=True,
-        help='Provider reasoning effort; Grok 4.7 supports low, medium, high and xhigh')
+        help='Provider reasoning effort; Gemini 3.8 Flash supports low, medium and high; Grok 4.7 also supports xhigh')
     run.add_argument('--skill', type=Path, required=True); run.add_argument('--account')
     run.add_argument('--task'); run.add_argument('--log-dir', type=Path, default=Path('astrabridge-sessions'))
     run.add_argument('--context-window', type=int); run.add_argument('--image-context', type=int, choices=(1, 2), default=2)
     run.add_argument('--compaction', choices=('checkpoint', 'off'), default='checkpoint')
     run.add_argument('--compact-at', type=float, default=.75, help='Context fraction triggering compaction (default .75)')
-    run.add_argument('--astra'); run.add_argument('--base-url', help='DeepSeek deployment override; ChatGPT and Grok use their official API routes')
+    run.add_argument('--astra'); run.add_argument('--base-url', help='DeepSeek deployment override; other providers use their official API routes')
     resume = sub.add_parser('resume'); resume.add_argument('session', type=Path); resume.add_argument('--task')
     logs = sub.add_parser('logs', help='Manage private runner session archives')
     log_actions = logs.add_subparsers(dest='logs_action', required=True)
@@ -56,6 +57,11 @@ def provider(name, journal, args, model, effort, account=None):
         if not key:
             raise ValueError('Set XAI_API_KEY in the environment; do not put keys in arguments or prompts.')
         return Grok(key, journal, model, effort)
+    if name == 'gemini':
+        key = os.environ.get('GEMINI_API_KEY')
+        if not key:
+            raise ValueError('Set GEMINI_API_KEY in the environment; do not put keys in arguments or prompts.')
+        return Gemini(key, journal, model, effort)
     if name == 'deepseek':
         key = os.environ.get('DEEPSEEK_API_KEY')
         if not key:

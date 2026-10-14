@@ -24,7 +24,7 @@ import json,os,sys,time,struct,zlib
 from pathlib import Path
 root=Path(__file__).parent
 args=sys.argv[1:];i=args.index('--config');args=args[:i]+args[i+2:]
-with (root/'calls.jsonl').open('a') as f:f.write(json.dumps({'args':args,'has_key':any(key in os.environ for key in ('DEEPSEEK_API_KEY','XAI_API_KEY','GROK_API_KEY'))})+'\\n')
+with (root/'calls.jsonl').open('a') as f:f.write(json.dumps({'args':args,'has_key':any(key in os.environ for key in ('DEEPSEEK_API_KEY','XAI_API_KEY','GROK_API_KEY','GEMINI_API_KEY','GOOGLE_API_KEY'))})+'\\n')
 state_file=root/'state.json';state=json.loads(state_file.read_text()) if state_file.exists() else {'images':0,'moves':0}
 def emit(result):print(json.dumps({'ok':True,'result':result}));state_file.write_text(json.dumps(state));sys.exit(0)
 if args[:2]==['agent','tools']:emit(json.loads((root/'tools.json').read_text()))
