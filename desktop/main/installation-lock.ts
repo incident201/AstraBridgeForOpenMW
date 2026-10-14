@@ -12,8 +12,10 @@ async function processCreatedAt(pid:number):Promise<number|null> {
   try {
     if (process.platform === 'win32') {
       const command = `[DateTimeOffset]::new((Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime()).ToUnixTimeMilliseconds()`;
+      // Cold PowerShell startup can exceed two seconds on a busy Windows host.
+      // A timeout still preserves the legacy lock rather than guessing ownership.
       const {stdout} = await execute('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command],
-        {encoding:'utf8', windowsHide:true, timeout:2000, maxBuffer:4096});
+        {encoding:'utf8', windowsHide:true, timeout:10000, maxBuffer:4096});
       const created = Number(stdout.trim());
       return Number.isFinite(created) && created > 0 ? created : null;
     }
