@@ -305,3 +305,17 @@ self.position=V.new(0,0,0)
 local missingPrefix=N.new({groundPoint=longFloor})
 assert(N.step(missingPrefix,nil,.1)==nil and missingPrefix.endpointMismatch,
     'a failed prefix probe must not walk through a gap or towards a different floor')
+
+-- Body/floor obstruction can be missed by the earlier high-ray mesh check.
+-- A supplied travelled path remains usable, with live checks rather than a
+-- blind shortcut or another attempt at the same obstructed native route.
+self.position=V.new(0,0,0)
+local travelled={self.position,V.new(0,70,0),V.new(70,70,0)}
+local bodyBlocked={goal=travelled[#travelled],path={self.position,travelled[#travelled]},
+    index=2,recordedPath=travelled,sincePlan=0,replans=1,status='planned',pathStatus='planned'}
+N.begin(bodyBlocked);bodyBlocked.blockedBy='geometry'
+assert(N.recover(bodyBlocked,0) and bodyBlocked.recorded and bodyBlocked.path==travelled)
+assert(N.report(bodyBlocked).reason=='navmesh_physical_obstruction')
+terrain.contact=function()return {kind='geometry'}end
+terrain.walkLine=function()return nil end
+assert(N.clearance(bodyBlocked,travelled[2])==0,'A remembered route must not bypass a current physical obstruction')

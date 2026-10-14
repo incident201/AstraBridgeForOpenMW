@@ -23,6 +23,25 @@ def test_checked_ground_routes_preserve_curves_and_original_goal():
     r=subprocess.run(['lua','tests/ground_graph.lua'],cwd=root,capture_output=True,text=True)
     assert r.returncode==0,r.stdout+r.stderr
 
+
+@pytest.mark.parametrize('script', ['steering.lua', 'query_slices.lua'])
+def test_supported_steering_and_incremental_physics_queries(script):
+    root = Path(__file__).resolve().parents[1]
+    result = subprocess.run(['lua', 'tests/' + script], cwd=root, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_motor_diagnostics_export_aggregates_without_private_geometry():
+    result = {'navigation': {'motor': {
+        'moving_seconds': 3.2, 'turning_seconds': .1, 'blocked_seconds': 0,
+        'planning_seconds': .2, 'stop_count': 1, 'target_changes': 4,
+        'planner_queries': 250, 'planner_slices': 2, 'max_update_seconds': .01,
+    }}}
+    check_result(result)
+    result['navigation']['motor']['path_points'] = [[1, 2, 3]]
+    with pytest.raises(BridgeError):
+        check_result(result)
+
 @pytest.mark.parametrize('args',[{'ref':'raw_world_id'},{'ref':'passage_x','seconds':0},{'ref':'passage_x','position':[1,2,3]},{'ref':'passage_x','run':1}])
 def test_go_stays_bounded(args):
     with pytest.raises(BridgeError):validate('go',args)

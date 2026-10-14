@@ -1,6 +1,7 @@
 -- Physics-backed route planning on a narrow curved deck. Floor support is
 -- represented by checked strips, independent of the search implementation.
 local mod=arg[1] or 'mod'
+package.path=mod..'/?.lua;'..package.path
 math.atan2=math.atan2 or math.atan
 local V={};V.__index=V
 function V.new(x,y,z)return setmetatable({x=x,y=y,z=z or 0},V)end
@@ -48,6 +49,7 @@ local nearby={NAVIGATOR_FLAGS={Walk=1,Swim=2,UsePathgrid=8},FIND_PATH_STATUS={Su
 nearby._astraActorSweep=function()return {hit=false},1 end
 nearby.findPath=function(a,b)return 2,{a,V.new(b.x,b.y,-100)}end
 package.preload['openmw.nearby']=function()return nearby end
+package.preload['openmw.core']=function()return {getRealTime=function()return 0 end}end
 package.preload['openmw.self']=function()return player end
 package.preload['openmw.util']=function()return {vector3=V.new}end
 package.preload['openmw.types']=function()return {Actor={
@@ -102,3 +104,20 @@ local void=N.new({groundPoint=V.new(280,280)})
 assert(not void.localPath and void.endpointMismatch,'short graph must not substitute a nearer point for its exact unsupported goal')
 print('Curved short route, long checked prefix and unchanged-goal completion passed.')
 print('Checked prefix survives 110-query cutoff; wrong goal height and unsupported exact goal rejected.')
+
+-- Continuing a prefix during an active action uses a resumable query task.
+-- Keep the real graph/floor fixture; only the frame scheduler is fabricated.
+terrain.queryTask=function(fn,total)
+    return coroutine.create(function()coroutine.yield();return fn()end)
+end
+terrain.resumeQueryTask=function(task,limit)
+    local ok,result=coroutine.resume(task)
+    assert(ok,result)
+    return coroutine.status(task)=='dead',result,0
+end
+reset({V.new(0,0),V.new(0,112),V.new(448,112),V.new(448,0),V.new(576,0)})
+local sliced=N.new({groundPoint=longGoal})
+N.begin(sliced)
+finish(sliced)
+assert(sliced.goal==longGoal and not sliced.recoveryTask,'A sliced prefix must finish at the original supported goal')
+print('Active prefix continuation yields without changing goal or losing floor validation.')

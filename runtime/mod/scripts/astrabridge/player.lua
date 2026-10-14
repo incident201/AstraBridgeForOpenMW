@@ -1296,7 +1296,7 @@ local function drivePursuit(p,g,rangeKind,dt)
         s.progressPosition=self.position;s.progressTime=s.elapsed
     end
     local point=N.step(s.nav,g,dt)
-    if s.nav.status=='waiting' then
+    if s.nav.status=='waiting' or s.nav.status=='planning' then
         s.status='waiting';s.progressTime=s.elapsed;stopMovement();return
     end
     if not point then
@@ -1644,21 +1644,22 @@ local function onFrame(dt)
                         local N=require('scripts.astrabridge.navigation')
                         if N.reached(p.navigator) and N.canFinish(p.navigator) then pause(p.cmd,{paused=true,reason='arrived'});return end
                         local waypoint=require('scripts.astrabridge.navigation').step(p.navigator,nil,dt)
-                        if not waypoint then pause(p.cmd,{paused=true,reason=p.navigator.endpointMismatch and 'endpoint_mismatch'
+                        if not waypoint then pause(p.cmd,{paused=true,reason=p.navigator.failureReason or (p.navigator.endpointMismatch and 'endpoint_mismatch'
                             or p.navigator.status=='height_mismatch' and 'height_mismatch'
-                            or p.navigator.path and 'path_end_out_of_reach' or 'no_path'});return end
-                        if p.navigator.status=='waiting' then
+                            or p.navigator.path and 'path_end_out_of_reach' or 'no_path')});return end
+                        if p.navigator.status=='waiting' or p.navigator.status=='planning' then
                             stopMovement();p.elapsed=p.elapsed+dt;p.progressTime=p.elapsed
                             if p.elapsed>=(p.maxSeconds or 8) then pause(p.cmd,{paused=true,reason='step_limit'}) end
                             return
                         end
-                        local yaw,pitch,fraction=N.motion(p.navigator,waypoint,dt,active.run,camera.getYaw())
+                        local yaw,pitch,fraction,forward,side=N.motion(p.navigator,waypoint,dt,active.run,camera.getYaw())
                         self.controls.yawChange=Turning.delta(camera.getYaw(),yaw,dt)
                         self.controls.pitchChange=Turning.delta(camera.getPitch(),pitch,dt)
                         local turnTolerance=p.navigator.detour and 5 or 20
-                        active.move=math.abs(Scene.angle(yaw-camera.getYaw()))<math.rad(turnTolerance)
-                            and math.abs(pitch-camera.getPitch())<math.rad(8) and fraction or 0
-                        if active.move==0 then stopMovement() end
+                        if forward~=nil then active.move=forward;active.strafe=side
+                        else active.move=math.abs(Scene.angle(yaw-camera.getYaw()))<math.rad(turnTolerance)
+                            and math.abs(pitch-camera.getPitch())<math.rad(8) and fraction or 0 end
+                        if active.move==0 and active.strafe==0 then stopMovement() end
                         p.elapsed=p.elapsed+dt
                         local stall=N.stalled(p.navigator,p.elapsed)
                         if stall then
@@ -1672,6 +1673,7 @@ local function onFrame(dt)
                     if lockGoal then yaw,pitch=Scene.lookAngles(lockGoal) end
                     local reached=false
                     local moveFraction=1
+                    local steerForward,steerSide
                     local aimTarget=lockGoal
                     if p.kind~='move_local' then
                         local g=Scene.resolve(p.target,true)
@@ -1702,7 +1704,7 @@ local function onFrame(dt)
                         end
                         if p.navigator then
                             local waypoint=require('scripts.astrabridge.navigation').step(p.navigator,visible and g or nil,dt)
-                            if p.navigator.status=='waiting' then
+                            if p.navigator.status=='waiting' or p.navigator.status=='planning' then
                                 stopMovement();p.elapsed=p.elapsed+dt;p.progressTime=p.elapsed
                                 if p.elapsed>=p.seconds then pause(p.cmd,{paused=true,reason='step_limit'}) end
                                 return
@@ -1711,10 +1713,10 @@ local function onFrame(dt)
                                 pause(p.cmd,{paused=true,reason=p.navigator.status=='no_path' and 'no_path' or 'navigation_unavailable'});return
                             end
                             if not reached and not waypoint then
-                                pause(p.cmd,{paused=true,reason='path_end_out_of_reach'});return
+                                pause(p.cmd,{paused=true,reason=p.navigator.failureReason or 'path_end_out_of_reach'});return
                             end
                             if not reached and waypoint then
-                                yaw,pitch,moveFraction=require('scripts.astrabridge.navigation').motion(p.navigator,waypoint,dt,active.run,camera.getYaw())
+                                yaw,pitch,moveFraction,steerForward,steerSide=require('scripts.astrabridge.navigation').motion(p.navigator,waypoint,dt,active.run,camera.getYaw())
                             elseif not visible then pause(p.cmd,{paused=true,reason='target_lost'});return end
                         end
                     end
@@ -1766,7 +1768,8 @@ local function onFrame(dt)
                         end
                         pause(p.cmd,{paused=true,reason='focused'});return
                     elseif p.kind=='approach' then
-                        if math.abs(ye)<math.rad(20) and math.abs(pe)<math.rad(8) and not reached then active.move=moveFraction end
+                        if not reached and steerForward~=nil then active.move=steerForward;active.strafe=steerSide
+                        elseif math.abs(ye)<math.rad(20) and math.abs(pe)<math.rad(8) and not reached then active.move=moveFraction end
                     elseif p.kind=='move_local' then
                         local d=p.destination-self.position
                         if math.sqrt(d.x*d.x+d.y*d.y)<4 then pause(p.cmd,{paused=true,reason='arrived'});return end

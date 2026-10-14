@@ -175,6 +175,39 @@ agent continues to receive aggregate movement and obstruction diagnostics. This
 adds collision sensing, rather than replacing OpenMW's movement solver,
 pathfinder or player controls.
 
+### Ground-route steering
+
+The Lua motor in `navigation.lua`, `terrain.lua`, and `steering.lua` follows
+native, recorded, and local detour paths with ordinary movement controls. It
+selects a farther steering target only when a body sweep and sampled floor
+support validate the connecting corridor. Recorded routes retain their floor
+profile; a shortcut cannot connect separate levels or cross an unsupported gap.
+Dense floor samples therefore do not each require a separate stop and turn.
+If a native route later fails the body/floor check and a travelled route was
+supplied, the motor tries that recorded path before another local bypass. The
+recorded path still receives live physical checks throughout execution.
+
+Moderate turns combine forward and sideways input while the camera turns at its
+normal bounded angular speed. Large initial turns remain stationary. Movement
+slows for corners, short stopping distances, and the final destination, and
+acceleration is smoothed. A new collision or missing support stops input
+immediately. The checked distance covers the proposed movement at the current
+speed and frame duration, including low frame rates. OpenMW still performs all
+actual movement and collision resolution.
+
+During movement, local detour searches and graph searches for the next checked
+prefix retain their state between synchronized player frames.
+Each slice has a physics-query count and time budget, while the complete search
+retains its total query limit. The player stops while a new detour is being
+planned; interruption and the caller's action budget still apply. Dynamic
+obstacles are checked again during execution, rather than trusted from the
+earlier search.
+
+Public `navigation.motor` diagnostics contain aggregate drive, turn, blockage,
+planning and update-cost statistics. They expose no path points, world positions
+or collision geometry. These changes use the existing private actor sweep and
+do not add a new native binding.
+
 ## 3. A stable pause boundary
 
 The native `_astraPause` binding applies the same `AstraBridge` pause tag used
@@ -318,7 +351,7 @@ not against current upstream `master`.
 
 | Feature | Main implementation |
 |---|---|
-| Public actions, finite movement/turning, moving-target approach and interruption | [player.lua](../runtime/mod/scripts/astrabridge/player.lua), [navigation.lua](../runtime/mod/scripts/astrabridge/navigation.lua), [movement_input.lua](../runtime/mod/scripts/astrabridge/movement_input.lua) |
+| Public actions, finite movement/turning, moving-target approach and interruption | [player.lua](../runtime/mod/scripts/astrabridge/player.lua), [navigation.lua](../runtime/mod/scripts/astrabridge/navigation.lua), [steering.lua](../runtime/mod/scripts/astrabridge/steering.lua), [movement_input.lua](../runtime/mod/scripts/astrabridge/movement_input.lua) |
 | Visibility, camera-range target selection, inspection range and bridge-seam walking-point correction | [scene.lua](../runtime/mod/scripts/astrabridge/scene.lua), [recognition.lua](../runtime/mod/scripts/astrabridge/recognition.lua) |
 | Local movement directions and short collision-checked connections | [terrain.lua](../runtime/mod/scripts/astrabridge/terrain.lua) |
 | Persistent object knowledge, notes and travelled routes | [knowledge.py](../runtime/daemon/astra_bridge/knowledge.py), [exploration.py](../runtime/daemon/astra_bridge/exploration.py), [trajectory.lua](../runtime/mod/scripts/astrabridge/trajectory.lua) |

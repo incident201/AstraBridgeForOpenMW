@@ -6,6 +6,8 @@ local types=require('openmw.types')
 local util=require('openmw.util')
 local Space=require('scripts.astrabridge.space')
 local Mobility=require('scripts.astrabridge.mobility')
+local Steering=require('scripts.astrabridge.steering')
+local Turning=require('scripts.astrabridge.turning')
 local M={}
 local function mode()return Mobility.mode and Mobility.mode() or 'walk' end
 local function horizontal(v)return math.sqrt(v.x*v.x+v.y*v.y)end
@@ -218,18 +220,27 @@ local function remainingLength(n)
     for i=n.rejoinIndex or n.index,#n.path do length=length+(n.path[i]-previous):length();previous=n.path[i] end
     return length
 end
-local function lookAhead(path,index)
+local function lookAhead(path,index,n)
+    local speed=types.Actor.getRunSpeed and types.Actor.getRunSpeed(self) or 200
+    local horizon=math.max(70,math.min(210,speed*.35))
+    local deviation=n and n.recorded and 6 or 25
+    local heightDeviation=n and n.recorded and 15 or 25
+    if n then
+        local clock=n.steerClock or 0
+        if n.lookaheadPath==path and n.lookaheadIndex==index and clock-(n.lookaheadTime or 0)<.12 then return index end
+        n.lookaheadPath=path;n.lookaheadTime=clock
+    end
     local function search()
-        for j=math.min(#path,index+12),index+1,-1 do
+        for j=math.min(#path,index+20),index+1,-1 do
             local d=path[j]-self.position
             local len2=d.x*d.x+d.y*d.y
-            if len2>=1 and len2<=140*140 then
+            if len2>=1 and len2<=horizon*horizon then
                 local safe=true
                 for k=index,j-1 do
                     local v=path[k]-self.position
                     local t=math.max(0,math.min(1,(v.x*d.x+v.y*d.y)/len2))
                     local error=v-d*t
-                    if horizontal(error)>6 or math.abs(error.z)>15 then safe=false;break end
+                    if horizontal(error)>deviation or math.abs(error.z)>heightDeviation then safe=false;break end
                 end
                 if safe and corridor(self.position,path[j]) then return j end
             end
@@ -237,19 +248,32 @@ local function lookAhead(path,index)
         return index
     end
     local terrain=require('scripts.astrabridge.terrain')
-    if terrain.withQueryBudget then return terrain.withQueryBudget(120,search) or index end
-    return search()
+    local selected
+    if terrain.withQueryBudget then selected=terrain.withQueryBudget(120,search)
+    else selected=search() end
+    selected=selected or index
+    if n then n.lookaheadIndex=selected end
+    return selected
+end
+local function installDetour(n,detour)
+    n.detourJoin=nil;n.detourPath=detour.points;n.detourIndex=1;n.detour=detour.points[1]
+    n.rejoinIndex=detour.joinIndex;n.status='detour'
 end
 local function checkedRecovery(n)
     local terrain=require('scripts.astrabridge.terrain')
+    if terrain.queryTask then
+        n.recoveryTask=terrain.queryTask(function()return localDetour(n)end,2400)
+        n.status='planning'
+        return true
+    end
     local detour=terrain.withQueryBudget(2400,function()return localDetour(n)end)
     if not detour then return false end
-    n.detourJoin=nil;n.detourPath=detour.points;n.detourIndex=1;n.detour=detour.points[1]
-    n.rejoinIndex=detour.joinIndex;n.status='detour'
+    installDetour(n,detour)
     return true
 end
 local function plan(n,g)
     if n.recorded then return end
+    n.recoveryTask=nil;n.groundTask=nil
     n.waterWalking=Mobility.has('WaterWalking')
     if g then n.lastGoal=g;n.goal=destination(g) end
     n.mode=mode()
@@ -348,6 +372,15 @@ local function plan(n,g)
         end
         if not direct and terrain.withQueryBudget and nearby._astraActorSweep then
             local temporary={path={n.goal},index=1,goal=n.goal}
+            if n.motor and terrain.queryTask then
+                -- Initial planning happens while paused. Continuation of a
+                -- checked prefix happens during movement and must be sliced
+                -- just like obstacle recovery.
+                n.groundTask=temporary
+                n.recoveryTask=terrain.queryTask(function()return localDetour(temporary,true)end,2400)
+                n.status='planning'
+                return
+            end
             local route=terrain.withQueryBudget(2400,function()return localDetour(temporary,true)end)
             route=route or temporary.graphPrefix
             if route then direct=route.points;n.localPrefix=route.prefix or nil end
@@ -403,7 +436,8 @@ function M.new(g)
     end
     return n
 end
-function M.step(n,g,dt)
+local function step(n,g,dt)
+    n.steerClock=(n.steerClock or 0)+dt
     if n.mode and n.mode~=mode() then
         n.recorded=false;n.recordedPath=nil;n.detour=nil;n.detourPath=nil;n.detourIndex=nil
         n.detourJoin=nil;n.rejoinIndex=nil;n.mode=mode();plan(n,g)
@@ -411,6 +445,41 @@ function M.step(n,g,dt)
     local previous=n.previousPosition or self.position
     n.previousPosition=self.position
     n.lastMovement=(n.volume or n.mode=='swim') and (self.position-previous):length() or horizontal(self.position-previous)
+    if n.recoveryTask then
+        local terrain=require('scripts.astrabridge.terrain')
+        local started=require('openmw.core').getRealTime()
+        local done,result,queries=terrain.resumeQueryTask(n.recoveryTask,160)
+        local duration=require('openmw.core').getRealTime()-started
+        local stats=n.motor
+        if stats then
+            stats.planner_queries=stats.planner_queries+queries
+            stats.planner_slices=stats.planner_slices+1
+            stats.max_update_seconds=math.max(stats.max_update_seconds,duration)
+        end
+        if not done then
+            n.status='planning';n.driveAmount=0
+            if n.progress then n.progress.last=n.progress.last+dt end
+            Steering.sample(n,dt,0,'planning')
+            return self.position
+        end
+        n.recoveryTask=nil
+        if n.groundTask then
+            result=result or n.groundTask.graphPrefix
+            n.groundTask=nil
+            if result then
+                n.path=result.points;n.index=1;n.localPrefix=result.prefix or nil
+                n.localPath=true;n.endpointMismatch=nil;n.status='local';n.pathStatus='local'
+            else n.status=n.pathStatus or 'no_path' end
+        elseif result then installDetour(n,result)
+        elseif not n.recorded and n.attempts==1 then plan(n,nil)
+        else n.status='blocked';n.failureReason='blocked';return nil end
+    end
+    if n.recoveryTask then
+        n.status='planning';n.driveAmount=0
+        if n.progress then n.progress.last=n.progress.last+dt end
+        Steering.sample(n,dt,0,'planning')
+        return self.position
+    end
     if n.waitRemaining then
         n.waitRemaining=n.waitRemaining-dt
         if n.waitRemaining>0 then n.status='waiting';return self.position end
@@ -418,10 +487,10 @@ function M.step(n,g,dt)
     end
     if n.detour then
         if n.detourPath then
-            n.detourIndex=lookAhead(n.detourPath,n.detourIndex)
+            n.detourIndex=lookAhead(n.detourPath,n.detourIndex,n)
             n.detour=n.detourPath[n.detourIndex]
         end
-        local radius=n.detourPath and 8 or 24
+        local radius=n.detourPath and (n.inputDelayFrames==0 and 3 or 8) or 24
         if (n.volume and (n.detour-self.position):length() or horizontal(n.detour-self.position))>radius
             or not n.volume and math.abs(n.detour.z-self.position.z)>=35 then n.status='detour';return n.detour end
         if n.detourPath then
@@ -457,7 +526,7 @@ function M.step(n,g,dt)
     while n.index<=#n.path do
         local d=n.path[n.index]-self.position
         -- Never skip a waypoint on a different floor merely because its XY matches.
-        local radius=n.index<#n.path and 10 or 24
+        local radius=n.index<#n.path and (n.inputDelayFrames==0 and 3 or 10) or 24
         if n.index==#n.path and n.goal then
             local gap=horizontal(n.path[n.index]-n.goal)
             local tolerance=n.arrivalTolerance or 25
@@ -516,17 +585,26 @@ function M.step(n,g,dt)
     -- Look ahead only along a nearly straight piece of the existing route.
     -- The body-width collision test prevents cutting a doorway corner or an
     -- opened door leaf. Recorded routes retain their original floor profile.
-    if (n.recorded or n.localPath) and not n.volume and n.mode~='swim' then
-        n.index=lookAhead(n.path,n.index)
+    if not n.volume and n.mode~='swim' then
+        n.index=lookAhead(n.path,n.index,n)
     end
     return n.path[n.index]
+end
+function M.step(n,g,dt)
+    local clock=n.motor and require('openmw.core').getRealTime
+    local started=clock and clock() or 0
+    local point=step(n,g,dt)
+    if n.motor and clock then n.motor.max_update_seconds=math.max(n.motor.max_update_seconds,clock()-started) end
+    return point
 end
 function M.begin(n)
     n.attempts=0;n.blockedBy=nil;n.recoveryPositions={}
     n.obstacleAnchor=nil;n.obstacleIndex=nil
     n.progress=nil;n.progressPath=nil
     n.turnWaypoint=nil;n.turnSpent=0;n.turnPause=0
-
+    if not n.groundTask then n.recoveryTask=nil end
+    Steering.begin(n)
+    n.lookaheadPath=nil;n.lookaheadIndex=nil;n.lookaheadTime=nil
 end
 function M.reached(n)
     local d=n.goal-self.position
@@ -546,7 +624,7 @@ function M.canFinish(n)
     end)
     return ok and clear or false
 end
-function M.clearance(n,point)
+function M.clearance(n,point,distance)
     -- This guard uses physical contact only, never an enumeration of actors.
     local ok,hit=pcall(function()
         local d=point-self.position
@@ -555,7 +633,7 @@ function M.clearance(n,point)
         if length<1 then return nil end
         local terrain=require((n.volume or n.mode=='swim') and 'scripts.astrabridge.volume' or 'scripts.astrabridge.terrain')
         local check=terrain.bodyContact or terrain.contact
-        local to=self.position+d*math.min(1,65/length)
+        local to=self.position+d*math.min(1,(distance or 65)/length)
         if ground then to=util.vector3(to.x,to.y,self.position.z) end
         local hit=check(self.position,to)
         if ground then
@@ -634,6 +712,13 @@ function M.recover(n,yaw)
     if n.blockedBy=='door' or n.blockedBy=='probe_unavailable' then return false end
     if not n.path then return false end
     n.detour=nil;n.detourPath=nil;n.detourJoin=nil;n.rejoinIndex=nil
+    -- A mesh route can pass the high rays yet fail the real body/floor check
+    -- at a stair corner. Prefer the supplied travelled route before inventing
+    -- another local bypass. Its segments still receive live physical checks.
+    if n.blockedBy=='geometry' and not n.recorded and useRecorded(n,'navmesh_physical_obstruction') then
+        n.lookaheadPath=nil;n.progress=nil;n.progressPath=nil
+        return true
+    end
     if checkedRecovery(n) then return true end
     if not n.recorded and n.attempts==1 then plan(n,nil);return n.path~=nil and not n.endpointMismatch end
     return false
@@ -643,6 +728,7 @@ function M.report(n)
         source=n.recorded and 'recorded_trail' or n.localPath and 'local_collision' or 'navmesh',reason=n.failureReason or n.fallbackReason,
         standing_point=n.standingPoint or false,waypoint=n.index,waypoints=n.path and #n.path,
         stalled_seconds=n.stalledSeconds and math.floor(n.stalledSeconds*10)/10}
+    if n.motor then out.motor=Steering.report(n) end
     out.movement_mode=n.mode or 'walk'
     if n.volume then out.source='local_collision_3d' end
     if n.goal then
@@ -683,14 +769,47 @@ function M.moveFraction(waypoint,dt,run,n)
     local horizon=math.max(dt,delay==0 and .2 or .02)*math.max(1,delay)
     return math.min(1,math.max(0,remaining-queued)/math.max(24,speed*horizon))
 end
-function M.motion(n,waypoint,dt,run,yawNow)
+local function motion(n,waypoint,dt,run,yawNow)
     local d=waypoint-self.position
     local h=horizontal(d)
     local yaw=h>1 and math.atan2(d.x,d.y) or yawNow
     local pitch=(n.volume or n.mode=='swim') and math.max(-math.rad(89),math.min(math.rad(89),-math.atan2(d.z,h))) or 0
     local error=math.abs((yaw-yawNow+math.pi)%(2*math.pi)-math.pi)
-    local allowance=math.rad(n.detour and 5 or 10)
     if n.turnWaypoint~=waypoint then n.turnWaypoint=waypoint;n.turnSpent=0 end
+    if n.inputDelayFrames==0 and not n.volume and n.mode~='swim' then
+        local speedGetter=run and types.Actor.getRunSpeed or types.Actor.getWalkSpeed
+        local speed=speedGetter and speedGetter(self) or 200
+        local path=n.detourPath or n.path
+        local index=n.detourPath and n.detourIndex or n.index
+        local nextPoint=path and index and path[index+1]
+        local nextTurn
+        if nextPoint then
+            local nextDelta=nextPoint-waypoint
+            nextTurn=Turning.angle(math.atan2(nextDelta.x,nextDelta.y)-yaw)
+                *math.min(1,speed*.35/math.max(1,h))
+        end
+        local final=not n.detour and path and index==#path
+        local amount=Steering.amount(n,h,speed,dt,final,nextTurn)
+        local turn=Turning.delta(yawNow,yaw,dt)
+        local actorYaw=self.rotation and self.rotation:getYaw() or yawNow
+        local facing=actorYaw+turn
+        local forward,side=Steering.controls(yaw,facing,amount,Turning.angle(yaw-yawNow-turn))
+        if forward==0 and side==0 then
+            n.driveAmount=0;n.turnPause=math.min(dt,math.max(0,1.6-(n.turnSpent or 0)))
+            n.turnSpent=(n.turnSpent or 0)+n.turnPause
+            Steering.sample(n,dt,0,'turn',waypoint)
+            return yaw,pitch,0,0,0
+        end
+        n.turnPause=0
+        if M.clearance(n,waypoint,math.max(65,speed*math.max(dt,.02)+12))==0 then
+            n.driveAmount=0
+            Steering.sample(n,dt,0,'blocked',waypoint)
+            return yaw,pitch,0,0,0
+        end
+        Steering.sample(n,dt,amount,nil,waypoint)
+        return yaw,pitch,amount,forward,side
+    end
+    local allowance=math.rad(n.detour and 5 or 10)
     n.turnPause=0
     if error>allowance then
         n.turnPause=math.max(0,math.min(dt,1.6-(n.turnSpent or 0)))
@@ -700,6 +819,14 @@ function M.motion(n,waypoint,dt,run,yawNow)
     fraction=fraction*math.max(0,math.cos(error))^3
     if error>allowance then fraction=0 end
     fraction=fraction*M.clearance(n,waypoint)
+    if n.motor then Steering.sample(n,dt,fraction,error>allowance and 'turn' or 'blocked',waypoint) end
     return yaw,pitch,fraction
+end
+function M.motion(n,waypoint,dt,run,yawNow)
+    local clock=n.motor and require('openmw.core').getRealTime
+    local started=clock and clock() or 0
+    local yaw,pitch,amount,forward,side=motion(n,waypoint,dt,run,yawNow)
+    if n.motor and clock then n.motor.max_update_seconds=math.max(n.motor.max_update_seconds,clock()-started) end
+    return yaw,pitch,amount,forward,side
 end
 return M

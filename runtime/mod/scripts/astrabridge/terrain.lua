@@ -11,20 +11,44 @@ local Space=require('scripts.astrabridge.space')
 local Mobility=require('scripts.astrabridge.mobility')
 local M={radius=6,units=70}
 local queryBudget
-local function castRay(from,to,opts)
-    if queryBudget then
-        if queryBudget.left<=0 then error('local_collision_query_limit') end
-        queryBudget.left=queryBudget.left-1
+local function consumeQuery()
+    if not queryBudget then return end
+    if queryBudget.task and queryBudget.task.remaining<=0 then error('local_collision_query_limit') end
+    if queryBudget.left<=0 or queryBudget.deadline and core.getRealTime()>=queryBudget.deadline then
+        if queryBudget.task then coroutine.yield('local_collision_query_slice')
+        else error('local_collision_query_limit') end
     end
+    queryBudget.left=queryBudget.left-1
+    if queryBudget.task then queryBudget.task.remaining=queryBudget.task.remaining-1 end
+end
+local function castRay(from,to,opts)
+    consumeQuery()
     return nearby.castRay(from,to,opts)
 end
 function M.withQueryBudget(limit,fn)
+    local previous=queryBudget
     local budget={left=limit};queryBudget=budget
     local ok,result=pcall(fn)
-    queryBudget=nil
+    queryBudget=previous
     M.lastQueryCount=limit-budget.left
     if not ok and not tostring(result):find('local_collision_query_limit',1,true) then error(result) end
     return ok and result or nil
+end
+function M.queryTask(fn,total)
+    return {thread=coroutine.create(fn),remaining=total}
+end
+function M.resumeQueryTask(task,limit)
+    local previous=queryBudget
+    local budget={left=limit,task=task,
+        deadline=core.getRealTime and core.getRealTime()+.004 or nil};queryBudget=budget
+    local ok,result=coroutine.resume(task.thread)
+    queryBudget=previous
+    local count=limit-budget.left
+    if not ok then
+        if not tostring(result):find('local_collision_query_limit',1,true) then error(result) end
+        return true,nil,count
+    end
+    return coroutine.status(task.thread)=='dead',result,count
 end
 local cache,targets,marks,markOrder,serial,epoch=nil,{}, {},{},0,'test'
 local function round(n)return math.floor(n*100+.5)/100 end
@@ -74,10 +98,7 @@ end
 -- since OpenMW sphere casts do not yet support an ignore list.
 function M.bodyContact(from,to)
     if nearby._astraActorSweep then
-        if queryBudget then
-            if queryBudget.left<=0 then error('local_collision_query_limit') end
-            queryBudget.left=queryBudget.left-1
-        end
+        consumeQuery()
         local hit,fraction=nearby._astraActorSweep(self.object,from,to)
         if hit.hit then return {kind=kind(hit.hitObject),distance=horizontal(to-from)*(fraction or 0),normal=hit.hitNormal,fraction=fraction} end
         return nil

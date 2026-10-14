@@ -1,4 +1,5 @@
 package.path='mod/?.lua;'..package.path
+package.preload['openmw.core']=function()return {getRealTime=function()return 0 end}end
 math.atan2=math.atan2 or math.atan
 local V={};V.__index=V
 function V.new(x,y,z)return setmetatable({x=x,y=y,z=z},V)end
