@@ -123,13 +123,45 @@ def test_native_definitions_preserve_the_single_source_of_tool_schemas(fixture):
         original = copy.deepcopy(fixture['tools']['tools'])
         converted = api.definitions(original)
         for source, native in zip(original, converted):
-            assert native['name'] == source['name'] and native['parameters'] == source['input_schema']
+            assert native['name'] == source['name']
             assert native['parameters'] is not source['input_schema']
             assert set(native) == {'type', 'name', 'description', 'parameters'}
             Draft202012Validator.check_schema(native['parameters'])
         assert original == fixture['tools']['tools']
     finally:
         api.close()
+
+
+@pytest.mark.parametrize('name,cases', [
+    ('astra_map', [{}, {'action': 'local'}, {'action': 'pan'}, {'action': 'pan', 'dx': 1},
+                   {'action': 'pan', 'dx': 'wrong'}, {'action': 'zoom', 'factor': 2},
+                   {'action': 'zoom', 'factor': 2, 'fit': True}, {'action': 'local', 'dx': 1}]),
+    ('astra_walk', [{}, {'ref': 'ground_1'}, {'ref': 'ground_1', 'x': 1},
+                    {'x': 1, 'y': 2, 'observation': 3}, {'x': 1, 'y': 2},
+                    {'x': 1.5, 'y': 2, 'observation': 3}]),
+])
+def test_google_conditional_schema_adaptation_preserves_argument_validation(fixture, name, cases):
+    from astrabridge_runner.providers.gemini import parameters
+    source = next(tool['input_schema'] for tool in fixture['tools']['tools'] if tool['name'] == name)
+    adapted = parameters(source)
+    def check(node):
+        if isinstance(node, dict):
+            assert not set(node.get('required', [])) - set(node.get('properties', {}))
+            for value in node.values():check(value)
+        elif isinstance(node, list):
+            for value in node:check(value)
+    check(adapted)
+    before, after = Draft202012Validator(source), Draft202012Validator(adapted)
+    for args in cases:
+        assert before.is_valid(args) == after.is_valid(args), args
+
+
+def test_schema_conversion_does_not_rewrite_literal_objects_or_weaken_closed_objects():
+    from astrabridge_runner.providers.gemini import parameters
+    schema = {'type': 'object', 'properties': {'required': {'const': {'required': ['literal']}}}}
+    assert parameters(schema) == schema
+    with pytest.raises(ProviderError, match='restricted additional properties'):
+        parameters({'type': 'object', 'required': ['unknown'], 'additionalProperties': False})
 
 
 def test_gemini_loop_keeps_signatures_full_results_and_two_recent_screenshots(fixture, monkeypatch):

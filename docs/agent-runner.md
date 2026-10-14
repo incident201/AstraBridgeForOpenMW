@@ -156,7 +156,10 @@ unsupported variants fail before connecting to the game.
 Requests use `store:false` and explicit client-owned history. All model steps,
 including opaque thought signatures, are retained unchanged for following
 requests and resume. Function definitions come directly from AstraBridge's
-exported schemas; responses return the full structured tool result. Only game
+exported schemas; responses return the full structured tool result. Google requires
+property declarations inside required-only conditional schema branches. The
+adapter adds unconstrained declarations there without changing validation; the
+original AstraBridge schemas still validate every call locally. Only game
 and runner resource tools are enabled. Built-in Google Search, code execution
 and managed agents are not enabled.
 

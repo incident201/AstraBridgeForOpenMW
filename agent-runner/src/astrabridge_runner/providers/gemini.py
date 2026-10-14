@@ -31,6 +31,34 @@ MODEL_EFFORTS = {
 }
 
 
+def parameters(schema):
+    """Google requires even conditional required-only branches to name properties.
+
+    Empty property schemas impose no new constraint; the enclosing schema still
+    validates types and values. Do not relax an additional-properties restriction.
+    """
+    if isinstance(schema, list):
+        return [parameters(item) for item in schema]
+    if not isinstance(schema, dict):
+        return schema
+    result = copy.deepcopy(schema)
+    # Only traverse schema locations. Literal values in const/enum/default and
+    # argument names inside properties are data, even when named "required".
+    for key in ('properties', 'patternProperties', '$defs', 'definitions', 'dependentSchemas'):
+        if isinstance(schema.get(key), dict):
+            result[key] = {name: parameters(value) for name, value in schema[key].items()}
+    for key in ('items', 'contains', 'additionalProperties', 'unevaluatedProperties',
+                'propertyNames', 'if', 'then', 'else', 'not', 'allOf', 'anyOf', 'oneOf', 'prefixItems'):
+        if key in schema:
+            result[key] = parameters(schema[key])
+    missing = set(schema.get('required', [])) - set(schema.get('properties', {}))
+    if missing:
+        if schema.get('additionalProperties', True) is not True:
+            raise ProviderError('Cannot adapt a required-only schema with restricted additional properties.')
+        result.setdefault('properties', {}).update({key: {} for key in sorted(missing)})
+    return result
+
+
 class Gemini:
     name = 'gemini'
     streamed = False
@@ -109,7 +137,7 @@ class Gemini:
 
     def definitions(self, tools):
         return [{'type': 'function', 'name': tool['name'], 'description': tool['description'],
-                 'parameters': copy.deepcopy(tool['input_schema'])} for tool in tools]
+                 'parameters': parameters(tool['input_schema'])} for tool in tools]
 
     def user_item(self, text):
         return {'type': 'user_input', 'content': [{'type': 'text', 'text': text}]}
