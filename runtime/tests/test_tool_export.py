@@ -80,3 +80,29 @@ def test_api_skill_reuses_rules_and_has_native_instructions(tmp_path):
             if anchor:
                 headings={re.sub(r'[^\w\- ]','',h.lower()).replace(' ','-') for h in re.findall(r'^#{1,6}\s+(.+)$',target.read_text(),re.M)}
                 assert anchor in headings,(path,link)
+
+
+def test_native_skill_examples_preserve_literal_strings_and_checkpoint_arguments():
+    import ast
+    from astra_daemon.api_skill import tool_prose
+    checkpoint={'goal':'Reach the known door','next_step':'Observe','evidence_refs':[]}
+    examples=[('comment "I will inspect [the door] and [ACTOR_REF]."', 'astra_comment', {'text':'I will inspect [the door] and [ACTOR_REF].'}),
+              ("knowledge checkpoint '"+json.dumps(checkpoint)+"'", 'astra_knowledge',
+               {'action':'checkpoint','checkpoint':checkpoint})]
+    schemas={tool['name']:tool['input_schema'] for tool in tools_catalog()['tools']}
+    for source,name,expected in examples:
+        rendered=tool_prose('`'+source+'`').strip().strip('`')
+        call=ast.parse(rendered,mode='eval').body
+        actual={kw.arg:json.loads(ast.get_source_segment(rendered,kw.value)) for kw in call.keywords}
+        assert call.func.id==name and actual==expected
+        Draft202012Validator(schemas[name]).validate(actual)
+
+
+def test_native_skill_keeps_json_field_names_and_optional_arguments_distinct():
+    from astra_daemon.api_skill import tool_prose
+    rendered=tool_prose('| JSON field | Meaning |\n|---|---|\n'
+                        '| `trigger` | Use `trigger Inventory` to open the menu. |\n\n'
+                        '`strike [ACTOR_REF] --charge 0.8`\n')
+    assert '| `trigger` |' in rendered
+    assert '`astra_trigger(name="Inventory")`' in rendered
+    assert '`astra_strike(charge=0.8)`' in rendered

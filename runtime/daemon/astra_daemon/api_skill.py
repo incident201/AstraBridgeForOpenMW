@@ -28,6 +28,10 @@ def tool_prose(text):
         elif value.startswith('astrabridge '):return 'host session management'
         base=value.split()[0] if value.strip() else ''
         if base in commands:
+            # Brackets in prose mark optional arguments, not literal tool values.
+            # Do not remove brackets inside JSON arrays/checkpoint payloads.
+            value=re.sub(r''''[^']*'|"(?:\\.|[^"\\])*"|\[(?:--[^\[\]\n]+|[A-Z][A-Z0-9_]*)\]''',
+                         lambda match: '' if match[0].startswith('[') else match[0], value)
             try:values=shlex.split(value)[1:]
             except ValueError:values=value.split()[1:]
             if definitions[base]['invocation']['json_payload'] and values:
@@ -50,9 +54,15 @@ def tool_prose(text):
                 elif position<len(positional):
                     field=positional[position];position+=1;spec=props.get(field['name'])
                     if not spec:continue
-                    if token in spec.get('enum',[]):item=json.dumps(token)
+                    if field['type']=='json':
+                        try:item=json.dumps(json.loads(token),ensure_ascii=False,separators=(',',':'))
+                        except ValueError:
+                            if re.fullmatch(r'[A-Z][A-Z0-9_]*',token):item=token
+                            else:continue
+                    elif token in spec.get('enum',[]):item=json.dumps(token)
                     elif re.fullmatch(r'[A-Z][A-Z0-9_]*',token):item=token
                     elif spec.get('type') in ('number','integer') and re.fullmatch(r'-?\d+(?:\.\d+)?',token):item=token
+                    elif spec.get('type')=='string':item=json.dumps(token,ensure_ascii=False)
                     else:continue
                     args.append(field['name']+'='+item)
             return '`'+tool_name(base)+('('+', '.join(args)+')' if args else '')+'`'
@@ -73,6 +83,7 @@ def tool_prose(text):
     for i,part in enumerate(parts):
         if part.startswith('```json'):continue
         lines=[]
+        field_table=False
         for line in part.splitlines():
             line=re.sub(r'All commands follow `astrabridge game`\.?','',line)
             lower=line.lower()
@@ -81,7 +92,15 @@ def tool_prose(text):
             if 'commands follow' in lower or 'commands below follow' in lower or 'commands follow `astrabridge' in lower:continue
             if 'all commands' in lower and 'astrabridge' in lower:continue
             if line.startswith('Every gameplay command') or line.startswith('Use this reference for argument syntax'):continue
-            line=re.sub(r'`([^`]+)`',inline,line)
+            if line.startswith(('| Field |','| JSON field |','| Value |')):
+                field_table=True
+            elif not line.startswith('|'):
+                field_table=False
+            if field_table and line.startswith('|'):
+                leading,field,description=line.split('|',2)
+                line=leading+'|'+field+'|'+re.sub(r'`([^`]+)`',inline,description)
+            else:
+                line=re.sub(r'`([^`]+)`',inline,line)
             if line.startswith('| Syntax'):line=re.sub(r'\| Syntax[^|]*\|','| Tool |',line,count=1)
             line=line.replace('CLI','tool interface').replace('720p screenshot','ordinary 720p screenshot')
             lines.append(line.rstrip())
@@ -100,7 +119,16 @@ def build_api_skill(source, target):
     (target/'references').mkdir(parents=True)
     original=(source/'SKILL.md').read_text(encoding='utf-8')
     rules=tool_prose(section(original,'Mandatory gameplay boundaries'))
-    loop=tool_prose(section(original,'Observe → act → verify → remember'))
+    loop=section(original,'Observe → act → verify → remember')
+    loop=loop.replace('Use `finish-session` for explicit save/finalize/close, or application\n'
+                      '`astrabridge agent disconnect` for handoff. Application stop attempts a save;\n'
+                      'restart does not save automatically.',
+                      'Use `finish-session` when asked to save and end play. The host manages handoff\n'
+                      'and runtime restart.')
+    loop=loop.replace('in tool wrappers', 'when reading tool results')
+    loop=loop.replace('before retrying; reusing a request ID retrieves the old result rather than\nexecuting again.',
+                      'before deciding whether another action is needed.')
+    loop=tool_prose(loop)
     # Lifecycle is owned by the host; the shared gameplay loop still describes
     # explicit finish-session and ordinary saves, without a host transport recipe.
     loop=loop.replace('Application stop/restart does not\nsave progress automatically.',
@@ -126,7 +154,9 @@ automatically. A small recent image window is present in the model context;
 earlier images remain available in the archive. Use `view_saved_image` with a supplied `image_ref`
 to see an earlier frame. Historical frames are not current game state. A runner
 may replace older text with a model-written context checkpoint. After resuming
-or restoring context, verify current state and obtain fresh interaction handles.
+or restoring context, read `astra_knowledge(action="brief")`, verify current
+state and obtain fresh interaction handles. Use `astra_status(player=true)`
+or a relevant `astra_inspect` query to recover omitted character details.
 
 If `user_requested_stop` is returned, stop taking game actions and notify the
 host. Never restart or reconnect behind the user's back. Host installation,
@@ -160,6 +190,12 @@ For detailed procedures, call `read_skill_reference` with an ID from this table:
             text=text.split('### Host GPU configuration')[0]
             text='\n'.join(line for line in text.splitlines() if not line.startswith('| Application:'))
             text='The host manages the selected profile and agent connection. Each profile has isolated saves, Atlas, notes and knowledge.\n\n'+text
+        if path.stem=='information':
+            start=text.index('Choose an ID before submitting an important mutation:')
+            end=text.index('Every ordinary command',start)
+            text=text[:start]+'Use the returned `request_id` with `action-result REQUEST_ID` to recover an uncertain result.\n\n'+text[end:]
+            text=text.replace('Reusing the same ID and arguments returns the saved receipt under `response` and **never executes the action again**; using it with different arguments is rejected.',
+                              'Reading a receipt returns the saved result under `response` without executing the action again.')
         rendered=tool_prose(text)
         (target/'references'/path.name).write_text(rendered,encoding='utf-8')
     # The model receives tool names/argument help, never execution bindings.

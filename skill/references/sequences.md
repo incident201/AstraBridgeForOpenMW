@@ -4,7 +4,14 @@ Read this when the next few actions are already determined by observed informati
 
 ## Conditional waits and sequences
 
-`wait-until fatigue --percent 100 --seconds 30` advances simulation until fatigue reaches the percentage. Other conditions are `landed` (ground support; see [jumping and falling](navigation.md#jumping-and-falling)), `animation` (idle/recovered), `passage --bearing-deg B --meters M` (locally clear, M≤6), `ui --ui-mode MODE`, and `controls` (player input enabled; optional `--control looking` or `jumping`). It returns `condition_met` or `condition_timeout`, with ordinary interruption on death, unexpected UI/location or `stop`. Waiting consumes game time. A modal can be open even in `Gameplay`; handle it through `ui` before waiting again.
+`wait-until fatigue --percent 100 --seconds 30` advances simulation until fatigue
+reaches the requested percentage. Other waits include `wait-until landed`,
+`wait-until animation`, `wait-until passage --bearing-deg B --meters M` (M≤6),
+`wait-until ui --ui-mode MODE`, and `wait-until controls --control looking`.
+The controls condition also accepts `controls` (default) or `jumping`.
+Read `summary.reason`: `condition_met` confirms the condition;
+`condition_timeout` means the budget expired. Death, unexpected UI/location or
+`stop` can interrupt a wait. Resolve a modal through `ui` before waiting again.
 
 `sequence` composes ordinary public actions, resolving owned item/spell names against fresh inventory/spell handles:
 
@@ -12,9 +19,14 @@ Read this when the next few actions are already determined by observed informati
 astrabridge game sequence '{"actions":[{"op":"use_item","name":"EXACT_OWNED_ITEM_NAME"},{"op":"wait_until","condition":"animation","seconds":5},{"op":"act","move":1,"seconds":3}],"max_seconds":15,"stop_on_damage":true,"stop_health_pct":35}'
 ```
 
-Steps use API names with underscores: `act`, `jump`, `air_move`, `look`, `go`, `walk`, `revisit`, `return_to`, `approach`, `interact`, `move_local`, `use_item`, `select_spell`, `select_enchanted`, `cast`, `strike`, `chain`, `wait_until`, `trigger`, `choose`, `edit`, `adjust`, `focus`, `target_info`, `fly`, `swim`, `rest`, `buy`, `travel`, `lock`, `unlock`. Each step contains `op` plus that operation's normal fields. Item/spell selection also accepts an exact unique `name`. Every step is validated before execution. Do not preselect replies from dialogue that has not been opened/read.
+Allowed `op` values are `"act"`, `"adjust"`, `"air_move"`, `"approach"`, `"buy"`,
+`"cast"`, `"chain"`, `"choose"`, `"edit"`, `"fly"`, `"focus"`, `"go"`, `"interact"`,
+`"jump"`, `"lock"`, `"look"`, `"move_local"`, `"rest"`, `"return_to"`, `"revisit"`,
+`"select_enchanted"`, `"select_spell"`, `"strike"`, `"swim"`, `"target_info"`,
+`"travel"`, `"trigger"`, `"unlock"`, `"use_item"`, `"wait_until"` and `"walk"`.
+Use underscores in these operation names. Each step contains `op` plus that operation's normal fields. Item/spell selection also accepts an exact unique `name`. Every step is validated before execution. Do not preselect replies from dialogue that has not been opened/read.
 
-A `select` object resolves a fresh handle immediately before its step. Filters: exact `name`, substring `contains`, `kind`, `panel`, `role`, `control`, `instance`, and scene-only `actor_kind` (`npc`/`creature`) and `nearest:true`. Source is inferred from the operation (`scene`, `ui`, `inventory`, `spells`). Scene name filters only match names currently exposed or previously recognized; they cannot discover an unknown distant name. Disabled, unavailable or ambiguous choices stop the sequence. `bind:"npc"` stores the selected handle; `ref:"$npc"` reuses it later, with normal visibility/freshness checks. For UI that changes, use a fresh selector at each step.
+A `select` object resolves a fresh handle immediately before its step. Filters: exact `name`, substring `contains`, `kind`, `panel`, `role`, `control`, `instance`, and scene-only `actor_kind` (`npc`/`creature`) and `nearest:true`. Source is inferred from the operation (`"scene"`, `"ui"`, `"inventory"`, `"spells"`). Scene name filters only match names currently exposed or previously recognized; they cannot discover an unknown distant name. Disabled, unavailable or ambiguous choices stop the sequence. `bind:"npc"` stores the selected handle; `ref:"$npc"` reuses it later, with normal visibility/freshness checks. For UI that changes, use a fresh selector at each step.
 
 `expect` can check `ui_mode`, `location`, `location_changed`, action `outcome`, `gold_delta`, or `inventory_delta:{"name":"EXACT_NAME","delta":N}`. A failed check returns `expectation_failed` and skips all remaining actions. It cannot undo the completed step.
 
@@ -24,7 +36,12 @@ Example for an already opened dialogue offering barter:
 astrabridge game sequence '{"actions":[{"op":"choose","select":{"control":"service_barter"},"expect":{"ui_mode":"Barter"}},{"op":"buy","name":"OBSERVED_ITEM_NAME","quantity":2,"max_total":50}],"max_seconds":30}'
 ```
 
-Default total simulation budget is 60 seconds; it has no fixed upper cap. The total simulation deadline and health/damage guards are checked at dispatch and every motor frame, including long `act`, turns and individual casts/strikes. Frame timing and the final pause can add roughly a frame to the measured limit; submitted atomic UI operations cannot be undone. A combat `chain` uses its own continuous motor deadline. `stop_on_damage` defaults to true and `stop_health_pct` to 0 (disabled). Interruptions stop the remaining sequence; already consumed items are not replayed. Only the final observation captures a screenshot. Sequence boundaries retain ordinary brief command pauses; use a combat `chain` for continuous concurrent movement/casting, and `interact --approach` for uninterrupted approach/aim/activation.
+Default total simulation budget is 60 seconds. `stop_on_damage` defaults to
+true and `stop_health_pct` to 0 (disabled). Interruptions stop remaining steps;
+already completed actions are not undone. Only the final observation captures a
+screenshot. Individual steps can briefly pause between actions; use a combat
+`chain` for continuous movement/casting, or `interact --approach` to approach and
+activate together.
 
 ## When to combine steps
 
@@ -67,10 +84,9 @@ Use an item whose identity/count have been observed and which you have decided
 to take. A stack needs its observed count instead of an assumed one. A failed
 check does not undo the interaction: inspect the returned result before retrying.
 
-Only the final observation captures an image. Intermediate structured results,
-`steps`, `completed_actions` and the stopping reason remain available. This saves
-model round trips and screenshots without turning a sequence into an atomic
-transaction. Individual steps can still have their ordinary brief pause boundary.
+Read `action.steps` for individual results and `summary` for completion counts
+and the stopping reason. Earlier steps may have changed the world even if a
+later step failed.
 
 ## Require a measurable horizontal displacement
 
@@ -87,12 +103,12 @@ particular destination. An unavailable/non-comparable measurement fails the
 check, even for a zero threshold, with `actual:null` and
 `reason: movement_not_comparable`.
 
-Failure returns `expectation_failed`, includes the actual value in `steps[].checks`
+Failure returns `expectation_failed`, includes the actual value in `action.steps[].checks`
 and prevents subsequent steps. Basic horizontal-input failures are detected by
 `summary` even without an explicit expectation. Thus jumping up and falling
 back down against an obstacle cannot make a requested walk forward succeed.
 
-Each `steps[]` entry retains its available `summary` and operation-specific details. The sequence's
+Each `action.steps[]` entry retains its available `summary` and operation-specific details. The sequence's
 summary preserves a failed/blocked/partial child result; it reports success only
 when all steps and checks complete. `summary.stopped_step` locates the failed or
 unstarted step. Read the summary status as well as its warnings.

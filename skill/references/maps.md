@@ -1,7 +1,8 @@
 # In-game maps
 
-All commands below follow `astrabridge game`. These show the game's own Map
-window, including its fog of exploration, player arrow and ordinary markers.
+All commands follow `astrabridge game`.
+
+These commands show the game's own Map window, including its fog of exploration, player arrow and ordinary markers.
 `atlas` is separate: it remembers your travelled routes and notes. A map label
 does not provide a movement target or prove a walkable route.
 
@@ -18,12 +19,11 @@ does not provide a movement target or prove a walkable route.
 | `map markers [--query TEXT] [--page N] [--limit N]` | Read visible labels and normal tooltip notes without another image. Default page 0, limit 20; maximum limit 1000. |
 | `map close` | Close the map and restore its ordinary window size. The game stays paused until the next gameplay action. |
 
-For large views, open **`result.map.image`** with your image-viewing tool. This is
-a fresh completed game frame at native resolution, normally 1920×1080; the same
-view appears in Desktop and recordings. These calls omit a duplicate ordinary
+For large views, inspect **`result.map.image`**. It is the current large map
+image, normally 1920×1080, also shown in Desktop and recordings. These calls omit a duplicate ordinary
 screenshot. `map markers` returns text only.
 
-`map` data report `view_mode`, `fullscreen`, `zoom`, `min_zoom`, `max_zoom`,
+`result.map` reports `view_mode`, `fullscreen`, `zoom`, `min_zoom`, `max_zoom`,
 `limit_reached` and `can_pan_left/right/up/down`. At a limit, choose another
 direction or zoom instead of repeating the same request. Pan/zoom/view/center/
 markers/close require an open map and return `map_not_open` otherwise.

@@ -1,59 +1,57 @@
-# Recording and screenshot storage
+# Recording, screenshots and commentary
 
-Read this when starting, stopping or diagnosing a recording, or when a cached image has expired. All commands follow `astrabridge game`.
+Read this when managing a recording, sending spectator commentary or recovering
+an expired image. All commands follow `astrabridge game`.
 
-## Screenshot storage
+## Screenshots
 
-Runtime screenshots are a rolling cache: the latest 128 by default. The user can configure `screenshot_keep` (integer ≥8) through runtime settings. Screenshots explicitly attached by `remember` are protected; those notes retain up to six views each. Old automatic atlas links are returned only while their image exists. SQLite paths, nodes, names and door links survive cache cleanup. The CLI downloads returned images into a local export directory; use the returned files to inspect appearances and obstacles. The atlas stores travel knowledge, not a substitute rendered view.
+Use returned image paths for visual inspection. Runtime screenshots are a rolling
+cache; old automatic Atlas images can expire while the remembered routes remain.
+Images attached to an explicit `remember` note are protected. A historical image
+never establishes the current position or supplies fresh action handles.
 
-Map SVG/PNG files are generated only with `observe --map` or `atlas --map`. The atlas map reuses `atlas-current.svg/png`; other generated maps have an eight-file cache. User-named files and recordings are not pruned.
+`observe --map` and `atlas --map` additionally produce navigation diagrams;
+`map local` and `map world` return the game's own map image. See [maps](maps.md).
+
+If an image is missing or `artifact_error` is reported, the game action may still
+have completed. Inspect its result or receipt before retrying. Request a new
+observation when a current image is needed.
 
 ## Recording
 
-`record-start` starts a new MP4 in the configured directory. `record-status` reports its path, recording/capture state and errors. `record-stop` finalizes it for upload; successful nonempty recordings report `upload_ready:true`. Finalization copies encoded streams without recompressing, and may take time for large files.
+| Command | Result |
+|---|---|
+| `record-start` | Start recording to a new file in the user's configured recordings folder. |
+| `record-status` | Read its path, duration, recording/capture state and errors. |
+| `record-stop` | Finalize the recording. Successful nonempty output reports `upload_ready:true`; check errors before claiming success. |
+| `record-status --full` | Read additional recording diagnostics when reporting a problem. |
 
-The default is 1920×1080 at 60 fps: H.264 High, BT.709, 4:2:0, and stereo AAC-LC at 48 kHz / 384 kbps. Encoder selection is automatic: check the returned encoder; use `record-status --full` for detailed metadata and quality mode (software CRF 18 or hardware CQP 18; these are different measures). The final MP4 uses fast start and no edit lists. Active gameplay and UI work are included. Thinking pauses freeze the native sound mix as well as the recording clock, preserving music, voices, effects and reverberation. `look` and `scan` remain real recorded turns. There is no hidden camera inspection mode. Sound is controlled by the user's runtime configuration.
+Recording normally produces 1080p60 video with game audio. Encoder selection is
+automatic. Gameplay and UI actions are included; thinking pauses do not add idle
+video time. Turns from `look` and `scan` are recorded too.
 
-The Desktop live viewer is independent of recording. Its 720p30/1080p60 choice,
-connection and displayed waiting time do not change the recording timeline.
-Its replay timeline, playback pause and **Go live** button are viewer controls;
-they do not issue game actions or pause the agent. Continue using current
-`observe` results even when the user is watching past footage. There is no replay
-command to substitute for `record-start` or `record-stop`.
-The CLI downloads returned screenshots to local export files. Recordings are
-written directly to the selected host recordings folder, and the CLI returns
-those direct paths. Do not enter the container to find runtime files. If
-`artifact_error` is reported, the action itself may still have completed: inspect
-its result/receipt instead of repeating the mutation. Request a fresh observation
-if an image is needed.
+Recordings are saved to the host's configured folder. Use the returned path;
+container access is unnecessary. Finalization can take time for a long file.
+There is no automatic upload.
 
-Video and audio share the engine's sample clock; speaker latency does not alter the recording. `record-status --full` exposes capture performance through `rendered_frames`, `repeated_frames`, `ring_dropped_frames`, `encoder_queue_peak` and `frame_interval_ms`. Audio gaps/overruns are explicit errors. `av_difference_ms` compares encoded video duration with source audio duration, including final frame rounding; it is not a measurement of audible lip sync. `audio_monitor` reports speaker availability; monitoring failure does not discard recorded audio. An empty recording has no uploadable video.
-
-Keep the private engine render resolution stable during recording. Resizing Desktop or entering its Fullscreen view does not resize that render surface. `video_window_resized` requires a new recording. Matching native engine hooks are required. Screenshots use completed frames and are resized before PNG encoding, so no full-size screenshot files accumulate. All public pixel inputs, `rect` and `aim_point` use screenshot coordinates; `details screen` includes `render_width/render_height` for the separate game/video dimensions. Existing screenshot retention applies.
-
-Recording is fragmented while active for crash recovery. Normal stop prepares the upload file; if finalization fails, the original capture is preserved and the error is reported. Do not claim a recording succeeded without checking its final status. No automatic upload or file-size limit is imposed.
-
-`frame_interval_ms.median` and `p95` are lifetime estimates from a bounded
-histogram, refreshed at most once per second; `max` is the exact observed
-maximum rounded to three decimal places. Frame totals remain lifetime counts.
+Desktop viewer quality, replay position and playback pause do not control the
+game or recording. Keep using current action observations even while the user
+is reviewing earlier footage.
 
 ## Commentary and action timeline
 
-`astrabridge game comment "I will check the eastern door next."` publishes a
-spectator message while connected. It can be sent during an outstanding action;
-it does not take input ownership, observe, capture a screenshot or change pause
-state. Text must be nonempty and at most 4096 UTF-8 bytes. Keep comments brief
-and useful; do not send hidden reasoning or repeat every tool call. Action
-history is collected automatically. Ordinary messages in your external chat
-are not forwarded unless you also use this command.
+`comment "I will check the eastern door next."` publishes a spectator message.
+It can be sent while an action is running and does not pause or advance the
+game. Text must be nonempty and at most 4096 UTF-8 bytes. Use brief progress
+updates, discoveries or changes of approach; do not repeat every tool call or
+send private reasoning. Tool actions are logged automatically. External chat
+messages are not captured unless also sent with `comment`.
 
-The response includes `session`, `wall_seconds` (agent-connected time),
-`game_seconds` (engine simulation time), and, during recording,
-`recording` / `recording_seconds` (position on its source-media timeline).
-Thinking pauses count toward wall time, not simulation time or paused media.
-The profile stores a session timeline; recordings receive `.events.jsonl`
-sidecars. Desktop can toggle commentary, action history and clock overlays.
-Overlays do not change the recorded video. During replay, Desktop displays the
-historical comments/actions and clocks at that recording position, not live events. Viewer replay does not change these
-live command timestamps. Commentary is presentation history, not task memory;
-use `knowledge checkpoint` or notes for information needed after context loss.
+The result includes `wall_seconds` (agent-connected time), `game_seconds`
+(simulation time) and, during recording, `recording_seconds`. Thinking counts
+as wall time but not simulation time. Desktop can display comments, actions and
+clocks as optional overlays, synchronized with replay. These overlays do not
+become part of the recorded video.
+
+Comments are spectator history, not task memory. Use `knowledge checkpoint`
+or notes for information needed after context loss.

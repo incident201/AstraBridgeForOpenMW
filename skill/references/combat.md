@@ -1,6 +1,6 @@
 # Combat, magic, combined actions and tools
 
-All commands below are prefixed with `./astra`. References come from actual observations; see [commands.md](commands.md). This interface performs ordinary game actions: skill checks, animation time, resource costs and physics remain in effect.
+All commands follow `astrabridge game`. References come from actual observations; see [commands.md](commands.md). This interface performs ordinary game actions: skill checks, animation time, resource costs and physics remain in effect.
 
 ## Select equipment and magic
 
@@ -111,7 +111,7 @@ astrabridge game retreat ACTOR_REF --meters 2 --seconds 8 --actions '[{"op":"cas
 
 ## Ranged combat and multiple actors
 
-Physical ranged weapons use aim assistance based on visible target motion and the selected weapon/ammunition. Read `aim_assistance`, trajectory/reach reasons and ammunition changes. A blocked trajectory, absent ammunition or submerged head can prevent firing. Magic projectiles do not have the same ballistic solver.
+Physical ranged weapons use aim assistance based on visible target motion and the selected weapon/ammunition. Read `aim_assistance`, trajectory/reach reasons and ammunition changes. A blocked trajectory, absent ammunition or submerged head can prevent firing. Magic projectiles do not have the same aim assistance.
 
 For multiple actors, choose the intended current visible ref, especially when names are identical. After `target_down`, inspect the scene and explicitly `lock` the next live actor before the next series. Do not keep attacking a corpse or infer all other nearby actors are enemies. The AstraBridge ACI does not provide an omniscient hostility list.
 
@@ -123,7 +123,7 @@ There is no `pick-lock`/`disarm` high-level command. `strike` rejects tools as `
 
 1. Obtain the visible container/door ref. Approach it if necessary, then `focus` and read its normal lock/trap tooltip. Release any conflicting actor lock.
 2. `inspect inventory` → choose the owned tool's current ref → `use-item ITEM_REF`.
-3. Read `body.weapon` and `body.stance`. If not in weapon stance, `trigger ToggleWeapon`. Allow the draw animation to finish with a short `act` without attack; check `animation_busy`.
+3. Use `inspect combat` to confirm the selected tool. Read `body.stance` (omitted for the ordinary undrawn state). If not in weapon stance, `trigger ToggleWeapon`. Allow the draw animation to finish with a short `act` without attack; check `animation_busy`.
 4. Refocus the intended container/door and confirm it is in reach. Send one short normal Use pulse:
 
 ```sh

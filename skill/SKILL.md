@@ -81,7 +81,8 @@ report setup errors. See [session and recovery](references/session.md) when need
    responses only indicates availability, revision and `needs_revalidation`.
    After a load, recheck relevant conditions; reading brief does not clear that flag.
 4. Obtain a fresh `observe` and view its screenshot to establish the current
-   scene. Follow the user's choice of continuing, loading or starting anew; get
+   scene. Recover omitted character/equipment details with `status --player` when
+   needed. Follow the user's choice of continuing, loading or starting anew; get
    fresh save refs with `saves`. Never select an arbitrary latest/developer slot.
 
 Open returned screenshots with an image-viewing tool; paths alone show no image. The Desktop viewer may show past footage;

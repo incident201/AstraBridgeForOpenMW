@@ -51,8 +51,8 @@ New inventory quantities, journal changes and effect start/end events are preser
 
 ## Current working state
 
-`knowledge checkpoint 'JSON'` atomically replaces one current checkpoint in the
-active Atlas playthrough namespace, inside this Desktop profile's database.
+`knowledge checkpoint 'JSON'` replaces the current task checkpoint for this
+playthrough.
 `knowledge brief` retrieves it without advancing time, taking a screenshot or
 querying hidden game state. This is an agent-written plan and recollection, not
 a bridge-generated quest solution or a guarantee that the goal is complete.
@@ -65,7 +65,7 @@ astrabridge game knowledge brief
 Write only what actually happened; the example is a format template. Prefer
 references to real evidence and known places over copying entire conversations.
 All checkpoints require `goal` and `next_step` strings (up to 2000 characters
-each). `status` is `open` by default, or `done`/`abandoned`; `next_step` may be empty
+each). `checkpoint.status` is `open` by default, or `done`/`abandoned`; `next_step` may be empty
 for a closed goal. Each reference list allows at most eight distinct entries;
 `failed_attempts` allows up to eight nonempty strings of at most 600 characters.
 The normalized JSON payload must fit in 8192 UTF-8 bytes. Unknown fields are rejected.
@@ -86,9 +86,10 @@ place notes from a previous branch need a retained Atlas-node association.
 A node is a remembered place, not a promise that the current route is unobstructed.
 
 The write response contains `working_memory` with `available`, `revision` and
-`needs_revalidation`. The same small pointer appears in normal observations and
-in `agent connect`; the checkpoint's goal/text is not repeatedly injected.
-With no checkpoint, it reports `available:false` and brief returns `checkpoint:null`.
+`needs_revalidation`. The same pointer appears on connection and when its state changes in an
+observation. The goal/text is not repeatedly injected. With no checkpoint,
+`knowledge brief` returns `checkpoint:null`; ordinary observations omit the empty
+pointer.
 
 `brief` returns the checkpoint, current `branch`, `checkpoint_branch`, update
 time and short linked records under `references.evidence/notes/objects/places`.
@@ -103,8 +104,8 @@ remain readable with `needs_revalidation:true` and a reason such as `load`.
 Old task notes may still say `done`; they are historical agent conclusions,
 not proof of current inventory, door state or quest progress. Reading brief
 changes nothing. Verify the relevant conditions through gameplay and write a
-new checkpoint to acknowledge the new branch. Use a new request ID for that
-write; replaying an old receipt does not update the checkpoint.
+new checkpoint to acknowledge the new branch. Reading an old receipt does not
+update the checkpoint.
 
 A new game uses a fresh Atlas namespace with no checkpoint; loading the earlier
 playthrough can recover its checkpoint. New Desktop profiles have independent

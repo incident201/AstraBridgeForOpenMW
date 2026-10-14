@@ -31,7 +31,7 @@ For places already visited, start with `atlas --query "NAME"` / `revisit`, or `r
 | `move-local F --sideways-m R --seconds S --run --under-fire` | Direct movement to any finite relative horizontal offset; default time budget 30 s. Preserves its initial view direction, unlike path-following `go`. |
 | `approach OBJECT_REF --reach activate --seconds S --run --under-fire` | Approach a visible object/NPC, including an unfamiliar target without a name. Its name/details become available within tooltip range. Reach can be `activate` (default), `melee` or `touch`; latter two are useful for actors. Does **not** activate it. |
 | `focus OBJECT_REF --wait-ready` | Aim using an ordinary turn, without walking. `--wait-ready` can wait for a corpse to become lootable. Does **not** activate it. |
-| `interact OBJECT_REF --approach --run --seconds S` | Approach, aim and activate in one continuous motor action (default 30 s); no intermediate thinking pauses. With interaction, up to two small physically checked viewpoint adjustments may be attempted; `--no-adjust-viewpoint` disables these. Without `--approach`, it does not perform a full approach. This is the normal talk/open/pickup command. |
+| `interact OBJECT_REF --approach --run --seconds S` | Approach, aim and activate in one continuous action (default 30 s); no intermediate thinking pauses. It may make small viewpoint adjustments to reach the target; `--no-adjust-viewpoint` disables these. Without `--approach`, it does not perform a full approach. This is the normal talk/open/pickup command. |
 | `fly --forward-m F --sideways-m R --vertical-m U --seconds S --under-fire` | Local flight, requiring active levitation. Defaults F/R/U=0, S=10; finite offsets with combined length >0.1 m; S≥0.2, no fixed upper cap. |
 | `scan --pitch P` | Default pitch 0. Observe then turn through three 90° increments. Returns `views`, `final`, `completed`, `reason`, `elapsed`; does not restore the original heading. Requires no active live lock. |
 | `fov DEGREES` | Set horizontal FOV within 70…115°. Default AstraBridge view is 100°. |
@@ -39,7 +39,8 @@ For places already visited, start with `atlas --query "NAME"` / `revisit`, or `r
 `walk` also accepts `--under-fire`. This flag disables the early damage stop for the movement commands that support it; it does not confer protection. Ordinary navigation can stop on damage, a changed location/UI, obstruction, lost target, time limit or partial path. Check the returned reason and actual distance, not just `ok:true`.
 
 `pick`, visible object refs and screenshot walking points use the current OpenMW
-view distance, reported as `orientation.view_distance_m`. The standard setting
+view distance. Read its current value with `details orientation`
+(`view_distance_m`); observations report changed camera settings. The standard setting
 is about 102.4 m; changing it changes selection range. This is the camera's
 forward depth, so a visible point near a screen edge can be farther away in
 straight-line distance. Occlusion and normal inspection/activation range still
@@ -65,11 +66,11 @@ On narrow stairs and bridges, choose a visible tread, landing or part of the dec
 can raise or lower the player along the way; this does not make the old starting
 height a separate destination. Direct input still cannot plan around a wall.
 
-`point_not_ground` means the selected pixel could not be resolved to a visible walking surface; no movement was started. It does not establish that the staircase or bridge is unreachable. Choose the centre of a visible tread/deck or a fresh `ground` ref. Small seams between boards can resolve to nearby physical support, while railings, walls and unsupported points remain rejected. `ground` and `terrain.passages` are sparse samples: an omitted stairway may become selectable after turning, looking down or approaching its foot.
+`point_not_ground` means the selected pixel could not be resolved to a visible walking surface; no movement was started. It does not establish that the staircase or bridge is unreachable. Choose the centre of a visible tread/deck or a fresh `ground` ref. `ground` and `terrain.passages` are sparse samples: an omitted stairway may become selectable after turning, looking down or approaching its foot.
 
-An object may be above the standing surface, such as a hatch. Approach checks reach from the final eye position. Short missing navmesh connections may use `source: local_collision` after checking floor support and body clearance. A useful partial path can stop short and reports actual progress; it does not certify arrival. NPCs may move or disable player controls through a tutorial script. `player_controls_disabled` means wait or handle the current UI, rather than retrying movement against the restriction.
+An object may be above the standing surface, such as a hatch. Approach checks reach from the final eye position. A useful partial path can stop short and reports actual progress; it does not certify arrival. NPCs may move or disable player controls through a tutorial script. `player_controls_disabled` means wait or handle the current UI, rather than retrying movement against the restriction.
 
-`scan` starts with a new observation. Each returned view includes its zero-based `view`, actual `heading_deg` and screenshot. Do not infer a view's angle from a previous observation or filename sequence. The final view is the current camera direction. Inspect omitted objects from one stored view with `action-result REQUEST_ID --view N --section scene`.
+`scan` starts with a new observation. Each returned view includes its zero-based `view`, actual `heading_deg` and screenshot. Do not infer a view's angle from a previous observation or filename sequence. On a completed scan, the last view is the current camera direction; after interruption, use `final`. Inspect omitted objects from one stored view with `action-result REQUEST_ID --view N --section scene`.
 
 For a successful `scan`, the last view and `final` share one screenshot; an interrupted scan can have a different final frame. See [image selection](information.md#choose-text-or-an-image).
 
@@ -83,10 +84,10 @@ For a successful `scan`, the last view and `final` share one screenshot; an inte
 | `yaw` | Relative horizontal turn −180…180 degrees; positive right. |
 | `pitch` | Relative vertical turn −90…90 degrees, clamped to the supported view range; positive down. |
 | `run`, `sneak`, `attack` | Booleans, default false. `attack` holds ordinary Use during the step; prefer `strike`/`cast` for complete controlled uses. |
-| `trigger` | One ordinary trigger such as `Jump` or `Activate`. Prefer `trigger Inventory/Journal/GameMenu/Rest` for menus. |
+| `trigger` | One ordinary trigger such as `Jump` or `Activate`. Use `trigger Inventory`, `trigger Journal`, `trigger GameMenu` or `trigger Rest` for menus. |
 | `target` | Optional current visible-object handle for an already aimed, reachable activation. Prefer `interact` to manage aiming/reach. |
 
-The action runs continuously for the requested duration, then releases controls and pauses the world. There is no periodic three-second pause; transport and engine watchdog timeouts scale with the requested duration. UI changes, cell changes, death or a lost combat target can still interrupt it. Choose the duration from the observed surroundings and how soon another observation is needed. An attack may still have an unfinished animation: read `body.animation_busy`. The next `act` defaults to not sneaking, so include `sneak:true` on each intended sneaking step; `look` preserves an existing crouch. `stop` clears it.
+The action runs continuously for the requested duration, then releases controls and pauses the world. UI changes, cell changes, death or a lost combat target can still interrupt it. Choose the duration from the observed surroundings and how soon another observation is needed. An attack may still have an unfinished animation: read `body.animation_busy`. The next `act` defaults to not sneaking, so include `sneak:true` on each intended sneaking step; `look` preserves an existing crouch. `stop` clears it.
 
 ```sh
 astrabridge game act '{"move":1,"run":true,"seconds":10}'
@@ -96,12 +97,12 @@ astrabridge game act '{"sneak":true,"move":0.5,"seconds":1}'
 astrabridge game act '{"seconds":0.5}'
 ```
 
-The final example waits without input. Finite turns/settling can make actual elapsed time differ from the requested movement duration; use the reported `elapsed` and `motion`.
+The final example waits without input. Finite turns/settling can make actual elapsed time differ from the requested movement duration; use `summary.elapsed` and `action.motion`.
 
 ## Jumping and falling
 
 Read `body.on_ground`, `body.swimming` and `body.air_state` before choosing an
-operation. These remain explicit in compact observations. `air_state` is
+operation. These remain explicit in compact gameplay observations. `air_state` is
 `grounded`, `ascending`, `descending`, `airborne` (near the apex or without a
 reliable motion sample), `swimming`, or `levitating`. `vertical_speed_mps` is the
 observed change in the player's height per simulation second: positive up,
@@ -141,10 +142,9 @@ partial`: the jump started but has not finished. Read its state and continue
 with `air-move` or `wait-until landed`, rather than retrying `jump`. The world
 is paused at the end of each command even when the character is in midair.
 A short `air-move` reports `duration` when its input budget finishes; that does
-not imply landing. Both helpers release movement as soon as landing is
-observed, then allow a brief physics/mechanics update (about 0.05 s) with no
-movement input so landing damage is included. `landing_unstable` means support
-was lost again during that update; inspect the current body state. Entering water reports
+not imply landing. Both helpers stop movement on landing and report observed landing damage.
+`landing_unstable` means support was lost again before the action finished;
+inspect the current body state. Entering water reports
 `entered_water`, with `landed:false`; switch to swimming controls if needed.
 UI prompts, death, location changes and `stop` still interrupt the action.
 
@@ -171,7 +171,7 @@ Prefer the helpers when landing is the intended stopping point.
 
 ## Local walking surface: JSON first, SVG optional
 
-`observe` returns `terrain.passages` when available; `observe --full` also returns `terrain.rays`. Rays sample nearby directions; passages are candidate short moves with `ref`, `direction`, `bearing_deg`, `distance_m`, `height_change_m`, `slope` and `status`. The usual radius is 6 m. An omitted `clear_m` equals `distance_m`; omitted `height_change_m` is zero and omitted `slope` is level. Gaps between samples are unknown.
+`observe` returns `terrain.passages` when available; `observe --full` also returns `terrain.rays`. Rays sample nearby directions; passages are candidate short moves with `ref`, `direction`, `bearing_deg`, `distance_m`, `height_change_m`, `slope` and `terrain.passages[].status`. The usual radius is 6 m. An omitted `clear_m` equals `distance_m`; omitted `height_change_m` is zero and omitted `slope` is level. Gaps between samples are unknown.
 
 `local_map` is an SVG of those same public data. Its top is **forward relative to the character**. Blue indicates rising terrain, orange descending, green approximately level. Request it with `observe --map`; ordinary observations generate no map files.
 
@@ -183,7 +183,7 @@ Example decision sequence:
 astrabridge game observe
 # Choose a current terrain.passages entry from its direction, clearance and height.
 astrabridge game go PASSAGE_REF --seconds 5
-# Check action.reason, action.motion and the returned screenshot.
+# Check summary, action.motion and the returned screenshot.
 ```
 
 For a visibly reachable point not described well by a passage:
@@ -194,9 +194,11 @@ astrabridge game ground
 astrabridge game go GROUND_REF --seconds 8
 ```
 
-`arrived` uses a tolerance reported by navigation. `partial`, `path_end_out_of_reach`, `blocked`, or `height_mismatch` do not mean the destination was reached. A bridge, stair or landing can be visible but not connected by the current navmesh. Choose another visible waypoint or a short direct action supported by the screenshot; do not force a hidden route.
-
-`endpoint_mismatch` means the native path ended on a different height without a validated standing point or useful approach segment. An object approach may follow a useful native prefix, then replan; it reports partial progress if the destination remains unreachable. A short route may instead use physically sampled floor support (`navigation.source: local_collision`). Native navigation remains the default (`navmesh`). All movement uses normal collision and controls.
+`summary.destination_reached:true` confirms arrival for point navigation.
+`partial`, `path_end_out_of_reach`, `blocked`, `height_mismatch` and
+`endpoint_mismatch` do not. Check actual movement and remaining distance; a
+visible bridge, stair or landing may still lack a usable route. Choose another
+visible waypoint or a short direct action supported by the screenshot.
 
 ## Flight and water
 
@@ -213,15 +215,15 @@ astrabridge game fly --forward-m 8 --sideways-m 2 --vertical-m -1 --seconds 10
 
 With water walking active, local paths and visible-point selection use the water surface, preserving bridges above it. `water_walking_ended` interrupts an affected route. An active effect does not by itself prove the feet are on the surface. Check `swimming`, `submerged`, `on_ground`, height changes and the image.
 
-`swim --forward-m F --sideways-m R --vertical-m U --seconds S` requires the character to be swimming (default S=30). It also accepts `--ref REF`. Relative free-water movement uses local 3D collision checks; ordinary routes use native walking/swimming paths and replan at water/land transitions. Check breath, effect duration, observed movement and `navigation.movement_mode`. Ground combat maneuvers can still reject swimming.
+`swim --forward-m F --sideways-m R --vertical-m U --seconds S` requires the character to be swimming (default S=30). It also accepts `--ref REF`. Relative free-water movement uses local 3D collision checks; ordinary routes use native walking/swimming paths and replan at water/land transitions. Check breath, effect duration, observed movement and `action.navigation.movement_mode`. Ground combat maneuvers can still reject swimming.
 
 ## Travel memory: JSON nodes plus optional diagram
 
 `atlas --radius-m R` returns recorded travel memory around the current pose. R≥0.1 m, default 35; no fixed upper cap. Normal `observe.exploration` is a summary with the current node and a loop hint. Use `atlas` for details.
 
-Atlas is stored transactionally in `runtime/exploration-memory.sqlite3`; graphs, points and nodes have no retention-count limit. Private transforms align only the player's observed trajectory. The interface never exposes world coordinates or unseen geometry.
-
-Access learned travel memory through `atlas`, `recall`, `revisit` and `return-to`. `runtime/userdata/navmesh.db` belongs to OpenMW's internal pathfinding cache. Direct agent access to that file or its copies/exports is forbidden during gameplay under the [mandatory gameplay boundaries](../SKILL.md#mandatory-gameplay-boundaries), including troubleshooting failed movement. Report a missing public capability instead of inspecting the cache. The engine's normal use of this cache through public navigation commands remains allowed.
+Use the public Atlas and note commands for travel memory. The
+[gameplay boundaries](../SKILL.md#mandatory-gameplay-boundaries) also apply when
+a remembered route fails.
 
 ```sh
 astrabridge game atlas --list
@@ -232,14 +234,13 @@ astrabridge game atlas --route NODE_REF
 astrabridge game atlas --history --query "PLACE OR REASON"
 ```
 
-Ordinary Atlas queries return nodes in the selected space; `--list` returns the global space catalog and observed directed door transitions. `--query` searches names, landmarks and location labels across this playthrough. `--page` is zero-based; `--limit` defaults to 20 (1…1000), with `total`/`has_more`. `--level` filters an observed height band, not an inferred architectural floor. `--route` previews known walking legs and door transitions without moving. A route may contain `native_path_required` legs between known points; these remain attempts until the engine confirms a path. Names attached by `remember` are accepted when unique. `--space` reads a graph from another location without moving; its view is centred on the last recorded pose, and `archived:true` marks that historical view. Use the node ref with `revisit` from the active location; reaching another space requires learned door transitions. Old JSON/checkpoint files are imported without deleting them. Old visits lacking a trustworthy coordinate transform remain readable archives; a matching checkpoint can align them when loaded.
+Ordinary Atlas queries return nodes in the selected space; `--list` returns the global space catalog and observed directed door transitions. `--query` searches names, landmarks and location labels across this playthrough. `--page` is zero-based; `--limit` defaults to 20 (1…1000), with `total`/`has_more`. `--level` filters an observed height band, not an inferred architectural floor. `--route` previews known walking legs and door transitions without moving. A route may contain `native_path_required` legs between known points; these remain attempts until the engine confirms a path. Names attached by `remember` are accepted when unique. `--space` reads a graph from another location without moving; its view is centred on the last recorded pose, and `archived:true` marks that historical view. Use the node ref with `revisit` from the active location; reaching another space requires learned door transitions.
 
 Useful fields:
 
 - `nodes[]`: `ref`, display `label` (A1, A2…), distance/bearing/height relative to the player, `visits`, `can_revisit`, `route_distance_m`, observed landmarks, screenshot references and `untraversed_directions`. `distance_m` is horizontal straight-line distance; `route_distance_m` follows recorded travel. `revisit_source: recorded_trail` means a connected recorded route exists. `native_path_required` means the point is known but the current position has no connected trail; the engine must find a valid path. `can_revisit` permits an attempt; doors or NPCs may still block it.
 - `current_node`: the currently recognized recorded node, if any.
-- `svg`, optional `png` (only with `--map`): visualizations of the travelled path and observed local probes. PNG is generated only when `rsvg-convert` is available. Open it explicitly; returning a filename does not show it to the model.
-- `not_a_full_map`, `sampled_path`: reminders that the diagram is partial sampled memory.
+- `svg`, optional `png` (only with `--map`): visualizations of the travelled path and observed local probes. Inspect the returned diagram alongside the game image.
 
 Travel-memory diagrams use **north up**, unlike the local walking surface. Cyan is sampled travel, grey a different height, green observed probe rays, dashed lines directions not traversed. A dashed direction is not knowledge of what lies beyond it.
 
@@ -249,15 +250,21 @@ astrabridge game atlas --radius-m 35
 astrabridge game revisit NODE_REF --seconds 10
 ```
 
-`revisit NODE_REF [--run] [--seconds S] [--under-fire]` asks the motor to return to that recorded point. It is movement, not teleportation, and can fail or produce a partial path. Travel knowledge is persistent across cell visits, saves, loads and controller restarts. Loading an earlier save retains routes already learned in this playthrough; it does not imply that old doors, items or NPC states still apply. A new game uses a separate atlas profile.
+`revisit NODE_REF [--run] [--seconds S] [--under-fire]` attempts to return to that recorded point. It is movement, not teleportation, and can fail or produce a partial path. Travel knowledge is persistent across cell visits, saves, loads and controller restarts. Loading an earlier save retains routes already learned in this playthrough; it does not imply that old doors, items or NPC states still apply. A new game uses a separate atlas profile.
 
 Successful door links retain their approach and heading. Door links are learned only after actual crossings; the reverse direction is learned separately. `revisit` reacquires each door, turns to its observed heading and uses normal interaction, stopping on obstruction or an unexpected destination.
 
-The motor first tries the engine's normal pathfinder. If that route is incomplete or crosses physical geometry, it can fall back to the recorded travelled path (`navigation.source: recorded_trail`). This includes the actual stairs and doorway turns. It never connects different floors just because their XY positions match, or draws routes over missing samples. Expired motor handles do not erase a recorded route.
+Recorded routes include stairs and changes of floor. A route can still be
+blocked by a closed door, an NPC or changed geometry. Read `summary.reason`,
+`summary.encountered_blockers` and any `action.navigation` diagnostics before
+retrying. `no_route_progress` or `repeated_positions` means movement stalled;
+a time limit alone does not establish why progress was poor.
 
-At a learned door transition, the motor first matches fresh visible door geometry against its recorded center/floor. If needed it makes a bounded set of ordinary recorded camera turns. Old transitions without geometry require an unambiguous current label. Missing or ambiguous doors stop the route.
-
-Collision is checked during movement. For a blocking NPC the motor briefly waits, then attempts a short local detour with floor support and both legs checked; otherwise it stops with an obstruction reason. Static obstacles can also trigger a checked detour on a recorded trail. `navigation.recovery_count` counts recoveries across the action, including separate obstacles; it is not proof of arrival. Progress is measured along the active route or detour, with a short allowance for turning. Rotation or small oscillation does not reset the progress timer. `no_route_progress`/`repeated_positions` and the navigation reason identify stalled recovery. A closed door can block an older route. A time limit returns `step_limit`; continue from the current pose only if the result shows useful progress. Failed legs and successful traversals persist in the atlas. NPC blockages expire after eight simulation seconds, other route failures after 90; thinking on pause does not expire them. Loading/restarting revalidates old obstacles while preserving their history; `revisit` can try up to two alternative known legs within the original time budget. These cooldowns guide retries, not assertions that an obstacle still exists. `recorded_route_unavailable` means no route between known points/door links can be resolved. Long recorded paths are split internally into bounded motor legs and use the caller's total time budget; there is no total distance limit on a connected recorded journey. A disconnected permanent point within the current nominal view range can use native navigation, without inventing a connecting trail; this does not establish that the point is currently visible or reachable.
+`recorded_route_unavailable` means no usable connection through known routes and
+door links could be resolved. There is no total-distance limit on a connected
+recorded journey; allow enough time for its length. A known point without a
+connected recorded trail may still be attempted when nearby, but this does not
+prove that it is currently visible or reachable.
 
 ## Semantic notes and route history
 
@@ -271,14 +278,9 @@ These complement the automatically drawn travel path:
 | `recall --archived` | Read notes from older branches too; treat them explicitly as historical, not current-state facts. |
 | `connect PLACE_REF_FROM PLACE_REF_TO --via "OBSERVED_ROUTE"` | Record an agent-reported route between two known notes. Does not move or prove a path. |
 | `route` | Recent actual movement steps and the status of the remembered anchor. Does not plan a route. |
-| `return-to PLACE_REF --seconds S --run --under-fire` | Return to a note's persistent atlas node, including learned door transitions. Legacy notes without a verified atlas link still need a valid current-branch motor marker. |
+| `return-to PLACE_REF --seconds S --run --under-fire` | Return to a note's persistent atlas node, including learned door transitions. Older notes without an Atlas link may no longer be usable for movement. |
 
-For `return-to`/`revisit`, time defaults to 60 s and has no fixed upper cap. Always refresh `observe` before creating a note: `remember` uses the latest observation, not a fresh screenshot of its own.
-
-A long recorded journey keeps its selected itinerary through successful internal
-segments, including when a segment ends within arrival tolerance. The overall
-command still reports arrival only at its requested destination. An interrupted
-journey can choose a fresh known route from the actual stopping point.
+For `return-to`/`revisit`, time defaults to 60 s and has no fixed upper cap. `remember` uses the latest observation; a current observation returned by an action is sufficient. Request `observe` if that snapshot is no longer current.
 
 Record visible landmarks, how you entered, and decisions at junctions. If a point has multiple visits and little new progress, inspect its past screenshots and choose a different observed route. Avoid repeatedly issuing the same blocked movement without new evidence.
 
@@ -289,12 +291,10 @@ ended from obstacles encountered earlier. For example, `termination: time_limit`
 can coexist with `destination_reached:false`, `encountered_blockers:["actor"]`
 and `stalled_attempts:2`. This does not establish that more seconds will solve the
 route; inspect the current scene and navigation details before choosing a retry.
-The `actor` category is emitted only when a motor result actually reported it.
+An `actor` blocker means an actor was actually detected; lack of progress alone does not identify one.
 
 `action.attempts` retains each route attempt's reason and reported elapsed time. If a retry raises an error without returning
 an action result, its entry has `result_available:false`; this is not proof
 that no action was submitted. `action.steps`
-retains compact movement/interaction results and their outcome summaries. These
-are diagnostic additions; the learned-route planner, retry budget and collision
-rules are unchanged. Earlier blockers remain in the summary even when compact
+retains compact movement/interaction results and their outcome summaries. Earlier blockers remain in the summary even when compact
 output omits older steps; obtain the full receipt when investigating the path.

@@ -47,7 +47,7 @@ In a real observation, use:
 
 | Field | Meaning / action |
 |---|---|
-| `screenshot` | Current game-window PNG. Open it explicitly to see it. |
+| `screenshot` | Current game-window image for visual inspection. |
 | `observation` | Screenshot/observation number for coordinate-based UI operations. |
 | `ui_mode`, `ui.modal`, `ui.elements` | Which menu is open, whether a modal blocks it, and actual controls. Tutorial popups can still report `Gameplay`. |
 | `scene.objects` | Visible actors, doors, items, containers and activators; refs, categories, relative geometry and reach. `name` is optional: current close inspection or previously recognized instance. `description` requires current close inspection. |
@@ -60,7 +60,8 @@ In a real observation, use:
 | `terrain`, `local_map`, `exploration` | Local navigation data and recorded travel memory; see navigation reference. |
 | `messages`, `events`, `summary.events` | New observed messages, durable change events and confirmed action outcomes/interruptions. |
 
-Compact observations retain current scene/terrain handles and physical state.
+Compact gameplay observations retain current scene/terrain handles and physical state.
+Menu observations focus on the open UI.
 Unchanged resources, equipment details, permanent effects and image settings are
 omitted. `combat` and `effects` can contain only changed fields; unchanged details are
 not repeated. `effects` identifies updated active sources; `effect_ended` events
@@ -73,22 +74,22 @@ Use `details SECTION` or `--full` to expand information without guessing.
 
 `action.motion` reports what actually happened: forward/sideways/vertical movement, distance, turning, and location change. `action.navigation` reports useful remaining distance and obstruction/recovery diagnostics; detailed planning data is available with `--full`.
 
-`submitted` means the request was sent, not that an item was equipped, purchased or a door opened. A spell attempt can have `action.reason=completed` (animation finished) but `summary.status=failed`, `summary.reason=spell_failed`, and `cast_outcome=failed`. Verify the relevant effect, inventory, menu, HUD, or message.
+`submitted` means the request was sent, not that an item was equipped, purchased or a door opened. A spell attempt can have `action.reason=completed` (animation finished) but `summary.status=failed`, `summary.reason=spell_failed`, and `action.cast_outcome=failed`. Verify the relevant effect, inventory, menu, HUD, or message.
 
 ## Handles and freshness
 
 | Value | Obtain from | Use with | Refresh rule |
 |---|---|---|---|
-| `visible_…` | `observe` → `scene.objects[].ref` | `focus`, `approach`, `interact`; actor refs also `lock`, `strike`, `cast`, `chain` | Targets must remain valid/visible. Reobserve after movement or target loss. A remembered actor is not permission to track it through walls. |
-| `object_…` | `scene.objects[].memory_ref` or `knowledge objects` → `objects[].ref` | `knowledge add/list --object-ref`; never movement or interaction | Persistent within the atlas profile. A catalog entry is historical and does not prove that the object is currently visible. |
+| `visible_…` | `observe` → `scene.objects[].ref` | `focus`, `approach`, `interact`; actor refs also `lock`, `strike`, `cast`, `chain` | Use refs from the latest action observation; request `observe` if the target is absent or lost. A remembered actor is not permission to track it through walls. |
+| `object_…` | `scene.objects[].memory_ref` or `knowledge objects` → `objects[].ref` | `knowledge add --object-ref OBJECT_REF` / `knowledge list --object-ref OBJECT_REF`; never movement or interaction | Persistent within the atlas profile. A catalog entry is historical and does not prove that the object is currently visible. |
 | `item_…` | `inspect inventory` → `items[].ref` | `use-item`, `select-enchanted` | Stable while that instance remains owned in the same game epoch. Refresh after load/restart, removal or a changed stack. |
 | `spell_…` | `inspect spells` → `spells[].ref` | `select-spell` | Spell queries/actions can invalidate spell refs. Selection remains after its handle expires; refresh before a new selection. |
 | `ui_…` | `ui` → `elements[].ref`, or observation's `ui.elements` | `choose`, `edit`, `adjust`, `hover` | Bound to the active menu and its meaning. Refresh after choosing/editing, changing selection, price, contents or modal. Fading notifications, tooltips and scrolling alone do not invalidate unchanged actions. |
 | `document_…` | `ui.document.ref` or `read` | `read --ref` | Valid only for that opened book/scroll instance. Refresh after reopening or loading. |
 | `passage_…` | `observe` → `terrain.passages[].ref` | `go` | Short-lived local sample; refresh after moving. |
 | `ground_…` | `ground` → `ground_targets[].ref` | `go`, `walk --ref` | Short-lived visible-point sample; use promptly without moving first. |
-| `node_…` | `atlas` / observation → `exploration.nodes[].ref` | `revisit` | Persistent recorded node in this playthrough and space. Check `can_revisit` and `revisit_source`. |
-| `place_…` | `remember`, `recall` | `return-to`, `connect` | A semantic note linked to its persistent atlas node; legacy unlinked notes need a valid motor marker. |
+| `node_…` | `atlas.nodes[].ref` or the observation's `exploration.current_node` | `revisit` | Persistent recorded node in this playthrough and space. Check `can_revisit` and `revisit_source`. |
+| `place_…` | `remember`, `recall` | `return-to`, `connect` | A semantic note linked to its persistent atlas node; older notes without an Atlas link may no longer be usable for movement. |
 | `save_…` | `saves` → `saves[].ref` | `load` | Fetch a fresh save listing immediately before loading. |
 
 Do not pass an NPC ref to `go` or an inventory `item_…` ref to `choose`. Prefer persistent node refs; unique remembered names and labels from the current atlas also resolve. Those are different handle types. After load/new-game/restart, discard transient refs. `status --player` does not invalidate item/spell handles.
@@ -114,7 +115,7 @@ Do not pass an NPC ref to `go` or an inventory `item_…` ref to `choose`. Prefe
 | `read [--ref DOCUMENT_REF] [--offset N] [--limit N]` | Text of the currently open book/scroll. Default 4000 characters, maximum 8000 per chunk; no page turning or scrolling required. |
 | `read --all` / `read --search "TEXT"` | Assemble the opened document internally, or return matching passages with Unicode offsets. |
 
-Use `inspect stats` for skill progress, attribute damage and base/modifier details. Character summary includes identity, sign, level, health/magicka/fatigue, eight attributes and skill values, weight/capacity, gold, bounty, reputation, equipment/magic and active effects. Effects provide name/source, description, `harmful`, strength where applicable, affected attribute/skill, total/remaining duration or `permanent`. `from_equipment` marks an effect tied to equipped gear.
+Use `inspect stats` for skill progress, attribute damage and base/modifier details. Character summary includes identity, sign, level, health/magicka/fatigue, eight attributes and skill values, weight/capacity, gold, bounty, reputation, equipment/magic and active effects. `inspect effects` provides name/source, descriptions, `harmful`, strength where applicable, affected attribute/skill, total/remaining duration or `permanent`. `from_equipment` marks an effect tied to equipped gear.
 
 `body.levitation`, `water_walking`, `water_breathing`, and `slow_fall` mean the effect is active. They do not prove that the character is airborne, on the water surface, or safe from drowning. Check `on_ground`, `swimming`, `submerged` and observed movement.
 
@@ -126,19 +127,18 @@ Read `result.summary` first for ordinary actions, `revisit` and `sequence`:
 
 | Field | Meaning |
 |---|---|
-| `status`, `reason` | The effective feedback status/reason; the summary does not apply a separate success rule. |
+| `summary.status`, `summary.reason` | Effective outcome and reason. Read these before deciding the next action. |
 | `termination` | Present when different from `reason`, notably `time_limit` for a simulation/wall/turn/condition time limit. The specific reason remains alongside it. |
 | `horizontal_displacement_m` | Measured horizontal distance between the action's start and finish. For a sequence/revisit, this is its overall endpoint displacement, not a sum of steps or travelled path length. `null` means a comparable measurement is unavailable, including a changed coordinate frame. |
 | `destination_reached` | Present for navigation to a destination (`go`, `walk`, `move-local`, `fly`, `swim`, `revisit`, `return-to`). It reflects `arrived`; a general sequence has no inferred overall destination. |
 | `encountered_blockers` | When present, distinct `blocked_by` values actually reported during the action, including earlier attempts. They describe history, not necessarily what is blocking the final position. No NPC or wall is inferred from a lack of progress alone. |
-| `stalled_attempts` | When nonzero, reported no-progress/blocked attempts. Revisit counts its stopped route attempts, independently of its motor's recovery/replan counters. Nested results are counted once. |
+| `stalled_attempts` | When nonzero, reported no-progress/blocked attempts. This is separate from the reason the overall command ended. |
 | `warnings` | When present, includes `no_horizontal_progress` when an explicit horizontal movement failed to advance; zero overall displacement by itself does not imply failure. |
 | `completed_actions`, `total_actions`, `stopped_step` | When present, sequence counts and the one-based step that stopped or could not start. A completed input can still fail its expected result. |
 
-For explicitly directed `act`, `jump` and `air-move`, less than 0.05 m of horizontal
-endpoint displacement after at least 0.2 s of requested and elapsed input produces
-`no_horizontal_progress`. Falling/rising does not count as horizontal movement.
-Short inputs and stationary jumps are exempt. A confirmed activation combined
+For directed `act`, `jump` and `air-move`, `no_horizontal_progress` means the
+requested horizontal movement made no meaningful advance. Rising or falling
+alone is not horizontal progress. Very short inputs and stationary jumps are exempt. A confirmed activation combined
 with unsuccessful movement is partial: its confirmed side effects remain in events.
 
 ## Keep outcome diagnostics in wrappers

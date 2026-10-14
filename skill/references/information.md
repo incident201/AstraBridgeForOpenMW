@@ -2,7 +2,7 @@
 
 ## Choose the smallest useful response
 
-- Ordinary action responses give a compact current observation, its screenshot, action outcome and important changes. Changed equipment condition, ammunition/charges and effect durations are reported; unchanged details are available through `inspect` or `details`. Repeated UI text is omitted when its revision is unchanged.
+- Ordinary action responses give a compact current observation, its screenshot, action outcome and important changes. Changed equipment condition, ammunition/charges and effect durations are reported; unchanged details are available through `inspect` or `details`. Already delivered UI text is omitted while unchanged; `details ui` retrieves it again.
 - `details SECTION` reads the latest observation without moving, querying a hidden source or creating a screenshot. Sections: `scene`, `ui`, `effects`, `combat`, `stats`, `body`, `terrain`, `exploration`, `messages`, `orientation`, `screen`, `target_lock`, `working_memory`. Optional `--observation OBS` rejects an outdated snapshot. Lists accept `--query`, `--page`, `--limit`.
 - `ui --query "TEXT" --panel repair` searches all rows of the currently opened menu, including rows outside the viewport. `--role`, `--page` and `--limit` narrow results. Opening a list does not reveal responses to topics that have not been selected or contents of closed containers.
 - `inspect inventory --query "TEXT"` searches owned items. Entries include type, condition, charges/uses when applicable, normal tooltip information and opaque item/instance handles. `inspect spells --query "TEXT"`, `inspect journal --query "TEXT"` and `inspect conversations --query "TEXT"` work similarly.
@@ -54,8 +54,7 @@ For unfamiliar distant objects, use refs, categories and visible geometry instea
 of a name filter. Actors use `actor_kind: "npc"` or `"creature"`; selectors accept
 this field for scene targets.
 
-Recognized names are stored automatically in `runtime/agent-memory.sqlite3` using
-the atlas's active profile. They survive controller restarts and loading earlier
+Recognized names are remembered automatically for the current playthrough. They survive controller restarts and loading earlier
 saves, just like learned routes. Starting a new game selects another profile.
 Only that particular instance is recognized; another guard or item with the same
 record is still unfamiliar. When continuity cannot be verified, inspect it again.
@@ -82,14 +81,12 @@ Every ordinary command also returns an automatically generated `request_id`. `st
 
 Use `action-result REQUEST_ID --section summary`, `--section action` or `--section feedback` to read only that part. Summary reads preserve the full-result diagnostics even when the original compact output omitted earlier steps. `--page` and `--limit` page action steps and observation lists; `--query` filters observation rows. The retained full receipt is available with `--full`.
 
-Receipts live in `runtime/action-results.sqlite3`. Status is `submitted`, `completed`, `rejected`, or `unknown`. A controller restart converts unfinished receipts to `unknown`. Reusing the same ID and arguments returns the saved receipt under `response` and **never executes the action again**; using it with different arguments is rejected. `completed` means the command returned, not necessarily that the gameplay objective succeeded: check its summary and action details. `unknown` means the mutation might have happened. Observe/stop/recover before deciding on a fresh action; do not retry consumables on assumption.
+Receipt status is `submitted`, `completed`, `rejected`, or `unknown`. A controller restart converts unfinished receipts to `unknown`. Reusing the same ID and arguments returns the saved receipt under `response` and **never executes the action again**; using it with different arguments is rejected. `completed` means the command returned, not necessarily that the gameplay objective succeeded: check its summary and action details. `unknown` means the mutation might have happened. Observe/stop/recover before deciding on a fresh action; do not retry consumables on assumption.
 
-Full responses are retained for the latest 1,000 finished requests, for up to
-30 days; periodic cleanup removes older payloads. Pending requests are preserved.
-After cleanup, `action-result` still returns the request's identity and original
+Old full responses can expire. After expiry, `action-result` still returns the request's identity and original
 status with `result_retained: false`, but no `response`. Section/view queries
-then return `action_result_expired`. The same ID remains protected against
-execution: missing old diagnostics do not authorize retrying a mutation.
+then return `action_result_expired`. The same request ID still cannot execute the action again. Missing diagnostics
+do not justify retrying a mutation.
 
 ## Choose text or an image
 
@@ -107,10 +104,7 @@ just to obtain the screenshot that is already present. For a successful `scan`,
 no need to open it twice. For an interrupted scan, `final` can be a new frame
 showing a popup or other changed state: inspect the actual paths/result.
 
-A stored image remains historical even if it looks unchanged. Only a current
-observation supplies fresh handles and pixel coordinates. Runtime cache pruning
-does not remove images an external model harness has already placed in its
-conversation. Choosing not to open unnecessary images reduces repeated visual
-input; this release does not deduplicate the model's history automatically.
+A stored image remains historical even if it looks unchanged. Use a current
+observation for live handles and pixel coordinates.
 
 For working-task recovery, durable notes and evidence, see [memory.md](memory.md).
