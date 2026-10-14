@@ -105,7 +105,7 @@ operation. These remain explicit in compact observations. `air_state` is
 `grounded`, `ascending`, `descending`, `airborne` (near the apex or without a
 reliable motion sample), `swimming`, or `levitating`. `vertical_speed_mps` is the
 observed change in the player's height per simulation second: positive up,
-negative down, zero when grounded. It can be absent just after loading or a
+negative down; ordinary grounded zero is omitted. It can also be absent just after loading or a
 position discontinuity. The last measured speed is retained while paused; it
 does not mean the player keeps moving between commands.
 
@@ -136,7 +136,7 @@ not produce an observed takeoff (for example, movement was obstructed).
 `air-move` requires the player to be airborne; `airborne_required` means it
 started on the ground. Levitation uses `fly`, and swimming uses `swim`.
 
-A short `jump --seconds S` can return `reason: airborne`, `feedback.status:
+A short `jump --seconds S` can return `reason: airborne`, `summary.status:
 partial`: the jump started but has not finished. Read its state and continue
 with `air-move` or `wait-until landed`, rather than retrying `jump`. The world
 is paused at the end of each command even when the character is in midair.
@@ -171,7 +171,7 @@ Prefer the helpers when landing is the intended stopping point.
 
 ## Local walking surface: JSON first, SVG optional
 
-`observe` returns `terrain.passages` when available; `observe --full` also returns `terrain.rays`. Rays sample nearby directions; passages are candidate short moves with `ref`, `direction`, `bearing_deg`, `distance_m`, `height_change_m`, `slope` and `status`. The usual radius is 6 m. Gaps between samples are unknown.
+`observe` returns `terrain.passages` when available; `observe --full` also returns `terrain.rays`. Rays sample nearby directions; passages are candidate short moves with `ref`, `direction`, `bearing_deg`, `distance_m`, `height_change_m`, `slope` and `status`. The usual radius is 6 m. An omitted `clear_m` equals `distance_m`; omitted `height_change_m` is zero and omitted `slope` is level. Gaps between samples are unknown.
 
 `local_map` is an SVG of those same public data. Its top is **forward relative to the character**. Blue indicates rising terrain, orange descending, green approximately level. Request it with `observe --map`; ordinary observations generate no map files.
 
@@ -232,7 +232,7 @@ astrabridge game atlas --route NODE_REF
 astrabridge game atlas --history --query "PLACE OR REASON"
 ```
 
-`--list` lists stored spaces and observed directed door transitions. `--query` searches names, landmarks and location labels across this playthrough. `--page` is zero-based; `--limit` defaults to 20 (1…1000), with `total`/`has_more`. `--level` filters an observed height band, not an inferred architectural floor. `--route` previews known walking legs and door transitions without moving. A route may contain `native_path_required` legs between known points; these remain attempts until the engine confirms a path. Names attached by `remember` are accepted when unique. `--space` reads a graph from another location without moving; its view is centred on the last recorded pose, and `archived:true` marks that historical view. Use the node ref with `revisit` from the active location; reaching another space requires learned door transitions. Old JSON/checkpoint files are imported without deleting them. Old visits lacking a trustworthy coordinate transform remain readable archives; a matching checkpoint can align them when loaded.
+Ordinary Atlas queries return nodes in the selected space; `--list` returns the global space catalog and observed directed door transitions. `--query` searches names, landmarks and location labels across this playthrough. `--page` is zero-based; `--limit` defaults to 20 (1…1000), with `total`/`has_more`. `--level` filters an observed height band, not an inferred architectural floor. `--route` previews known walking legs and door transitions without moving. A route may contain `native_path_required` legs between known points; these remain attempts until the engine confirms a path. Names attached by `remember` are accepted when unique. `--space` reads a graph from another location without moving; its view is centred on the last recorded pose, and `archived:true` marks that historical view. Use the node ref with `revisit` from the active location; reaching another space requires learned door transitions. Old JSON/checkpoint files are imported without deleting them. Old visits lacking a trustworthy coordinate transform remain readable archives; a matching checkpoint can align them when loaded.
 
 Useful fields:
 
@@ -294,7 +294,7 @@ The `actor` category is emitted only when a motor result actually reported it.
 `action.attempts` retains each route attempt's reason and reported elapsed time. If a retry raises an error without returning
 an action result, its entry has `result_available:false`; this is not proof
 that no action was submitted. `action.steps`
-retains the underlying movement/interaction results and their feedback. These
+retains compact movement/interaction results and their outcome summaries. These
 are diagnostic additions; the learned-route planner, retry budget and collision
 rules are unchanged. Earlier blockers remain in the summary even when compact
 output omits older steps; obtain the full receipt when investigating the path.

@@ -4,6 +4,7 @@ from __future__ import annotations
 import threading
 import time
 import uuid
+from copy import deepcopy
 
 from .protocol import BridgeError, atomic_json, validate
 from .observations import present_response
@@ -19,6 +20,9 @@ class Control:
         self.cancelled = threading.Event()
         self.cancel_writer = threading.Lock()
         self.active = None
+        # Compare against data returned to the gameplay owner, not private
+        # observations made by autosave, sequences or desktop telemetry.
+        self.presented_observation = None
         self.receipts = Receipts(getattr(session,'runtime',session.inbox.parent)/'action-results.sqlite3')
 
     def progress(self, result):
@@ -72,15 +76,17 @@ class Control:
         if op=='action_result':
             receipt=self.receipts.get(args.get('ref'))
             if args.keys()-{'ref'}:return receipt_details(receipt,args)
-            if 'response' in receipt:receipt['response']=present_response(receipt['response'],full)
+            if 'response' in receipt:receipt['response']=present_response(
+                receipt['response'], full, operation=receipt.get('operation'), request_id=receipt.get('request_id'))
             return receipt
         if op == 'status' and not args.get('player'):
             if args.keys() - {'player'}: raise BridgeError('invalid_arguments')
-            return {'running': s.process is not None and s.process.poll() is None,
+            result = {'running': s.process is not None and s.process.poll() is None,
                     'display': s.display.name, 'uncertain': s.uncertain,
                     'recording': s.recorder.status() if s.recorder else None,
                     'active_action': self.status(),
                     **({'autosave':s.autosave.status()} if hasattr(s,'autosave') else {})}
+            return present_response(result, full, operation=op)
         if op in {'stop', 'shutdown','finish_session'}:
             if args and (op!='finish_session' or args.keys()-{'description'}): raise BridgeError('invalid_arguments')
             self.interrupt()
@@ -109,11 +115,14 @@ class Control:
             self.cancelled.clear()
             self.active = {'operation': op, 'phase': 'starting', 'started': time.monotonic()}
             s.full_observations=full
-            before = s.latest_observation
+            before = self.presented_observation
+            if op in {'load', 'new_game', 'restart'}:
+                before = None
             request_id,previous=self.receipts.begin(op,args,request_id)
             self.active['request_id']=request_id
             if previous:
-                if 'response' in previous:previous['response']=present_response(previous['response'],full)
+                if 'response' in previous:previous['response']=present_response(
+                    previous['response'], full, operation=op, request_id=request_id)
                 return {'replayed':False,**previous}
             try:
                 result=s.call(op,args)
@@ -149,7 +158,16 @@ class Control:
                 failure=exc.response() if isinstance(exc,BridgeError) else {'error':'controller_operation_failed'}
                 self.receipts.finish(request_id,failure,'unknown' if unknown else 'rejected')
                 raise
-            presented=present_response(result, full, before, args.get('ref'))
+            presented=present_response(result, full, before, args.get('ref'), op, request_id)
+            observation = result.get('observation', result.get('final'))
+            if isinstance(result.get('observation'), int) and 'state' in result:
+                observation = result
+            if isinstance(observation, dict):
+                self.presented_observation = deepcopy(observation)
+            elif op == 'ui' and ('text' in result or 'text' in result.get('dialogue', {})):
+                snapshot = dict(self.presented_observation or {})
+                snapshot['ui'] = deepcopy(result)
+                self.presented_observation = snapshot
             if 'details' in presented:presented['details']=presented['details'].replace('REQUEST_ID',request_id)
             return {**presented,'request_id':request_id}
         finally:

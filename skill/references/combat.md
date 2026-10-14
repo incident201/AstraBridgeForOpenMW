@@ -29,7 +29,7 @@ Item refs remain valid across ordinary actions while the same instance stays own
 
 A lock rotates the **character** with finite turn speed; it is not a detached camera. It cannot authorize following an actor through walls. Inspect `target_lock.status`. If an existing lock conflicts with a command, explicitly switch with `lock NEW_ACTOR_REF` or clear it with `unlock`.
 
-`strike`/`cast` are bounded attempts, not guarantees of damage or success. Inspect messages, observed game HUD, `feedback`, resources and active effects. A visible corpse has `status:down`; `loot_ready` may remain false during its death animation.
+`strike`/`cast` are bounded attempts, not guarantees of damage or success. Inspect messages, observed game HUD, `summary`, resources and active effects. A visible corpse has `status:down`; `loot_ready` may remain false during its death animation.
 
 For a target outside attack range, either `approach ACTOR_REF --reach melee` / `--reach touch`, or use `chain` with `pursue:true`. A standalone strike is not a promise to chase a distant actor.
 
@@ -41,7 +41,7 @@ Call `chain` with one JSON object:
 astrabridge game chain '{"ref":"ACTOR_REF","pursue":true,"actions":[{"op":"strike","charge":0.8},{"op":"strike","charge":0.8}],"max_seconds":12,"stop_health_pct":35}'
 ```
 
-Replace `ACTOR_REF` inside the JSON with the actual opaque ref. The queue has **no pause between its steps**. Its final response has an observation and `action.steps`, `completed_actions`, `total_actions`, `elapsed`, resource changes and reason.
+Replace `ACTOR_REF` inside the JSON with the actual opaque ref. The queue has **no pause between its steps**. Its final response has an observation and `action.steps`, `summary.completed_actions`, `summary.total_actions`, `summary.elapsed`, resource changes and outcome.
 
 Top-level fields:
 

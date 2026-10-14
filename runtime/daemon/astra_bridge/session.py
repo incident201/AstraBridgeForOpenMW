@@ -765,7 +765,7 @@ class Session:
                     summarize(result,op)
                     self.memory.record_step(op,args,result['action'],result['observation'])
             with open(self.runtime / "actions.jsonl", "a") as log:
-                log.write(json.dumps({"op": op, "args": args, "result": present_response(result),
+                log.write(json.dumps({"op": op, "args": args, "result": present_response(result, before=before, operation=op),
                                       "wall_seconds": round(time.monotonic()-started, 3)}, ensure_ascii=False) + "\n")
             return result
 

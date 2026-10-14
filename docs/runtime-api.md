@@ -69,6 +69,61 @@ mutation; they are not a second copy of the old result. Querying an expired
 result's section/view returns `action_result_expired`. Recording timelines,
 Atlas and knowledge data have separate lifetimes and are not receipt payloads.
 
+## Compact gameplay responses
+
+Default Game API responses are a presentation of retained full results. They
+use one authoritative `summary` for the effective status, reason, elapsed time,
+sequence counts, destination outcome and aggregate obstruction diagnostics.
+`action` retains measured motion, confirmed operation-specific outcomes, checks
+and useful navigation details. Its reason remains only when it differs from the
+effective summary reason, such as a completed animation followed by a failed
+cast. Nonduplicated feedback events appear in `summary.events`; raw `feedback`
+and detailed planner telemetry remain in full results.
+
+Compact observations retain current observation identity, screenshot, location
+and UI mode. Gameplay observations also retain current heading/pitch, visible
+object handles and available local passages; menu responses focus on their UI. Support, swimming, airborne state, active mobility effects and disabled
+controls remain explicit. Health/fatigue warnings remain visible while critically
+low. Other resources, selected equipment, camera/image settings and combat
+capabilities are reported when first observed or changed. Combat capability
+changes omit unchanged fields of the same selected weapon or spell. Effect
+updates include only new or changed active sources; countdown-only updates retain
+effect identity and remaining time without repeating strength. Removals are
+reported as `effect_ended` events. Ordinary enabled controls and inactive flags are omitted. Empty event
+and warning lists and repeated appearance/disappearance handle lists are omitted.
+A passage's omitted `clear_m` equals `distance_m`; omitted height change and slope
+mean zero and level respectively.
+
+Change comparisons use the last observation returned to the connected gameplay
+owner, independently of internal observations or Desktop polling. A new agent
+connection, new game or successful load/restart starts a fresh comparison.
+Historical receipt queries do not advance this baseline. After model context
+restoration, clients should explicitly query `status --player` or the relevant
+`inspect` view rather than interpret an omitted update as an empty state.
+
+Nested action steps use the same compact presentation and preserve their
+individual outcomes, actual motion and failures. The overall summary is computed
+from all steps before the default last-eight-step preview is selected. Time
+limits remain distinct from earlier obstructions. `termination` is present when
+it differs from the specific reason; empty blockers/warnings and zero stalled
+attempts are omitted.
+
+Explicit inventory, journal, book and spell queries preserve their requested
+content. UI queries retain fresh controls while omitting previously delivered,
+unchanged text; `details ui` and full queries recover that text. Character summaries omit duplicated attribute breakdowns
+and skill progress details, which remain available through `inspect stats`.
+Recording commands omit codec build/capture telemetry; Atlas queries omit
+constant implementation headers and empty node annotations. The global space
+catalog and door links are returned by the explicit `atlas --list` query, not
+repeated in each local-node query. Host Runtime API telemetry and recording sidecars retain their diagnostic detail.
+
+Use `full: true` for the original public result. `details` reads the complete
+latest observation section, including `orientation`, `screen`, `target_lock` and
+`working_memory`. `action_result` with `full: true` or a section/view query reads
+the stored result without replaying an action. Presentation never mutates the
+stored receipt, gameplay state, planning or collision checks. CLI and native-tool
+skill exports describe the same default response contract.
+
 ## Endpoints
 
 | Method and path | Purpose |

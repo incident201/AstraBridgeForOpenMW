@@ -89,12 +89,12 @@ check, even for a zero threshold, with `actual:null` and
 
 Failure returns `expectation_failed`, includes the actual value in `steps[].checks`
 and prevents subsequent steps. Basic horizontal-input failures are detected by
-`feedback` even without an explicit expectation. Thus jumping up and falling
+`summary` even without an explicit expectation. Thus jumping up and falling
 back down against an obstacle cannot make a requested walk forward succeed.
 
-Each `steps[]` entry retains its `feedback` and available `summary`. The sequence's
-feedback preserves a failed/blocked/partial child result; it reports success only
+Each `steps[]` entry retains its available `summary` and operation-specific details. The sequence's
+summary preserves a failed/blocked/partial child result; it reports success only
 when all steps and checks complete. `summary.stopped_step` locates the failed or
-unstarted step. Summary warnings do not replace a negative feedback status.
+unstarted step. Read the summary status as well as its warnings.
 An intentional out-and-back sequence may finish with zero endpoint displacement
 and no warning if its individual movements succeeded.

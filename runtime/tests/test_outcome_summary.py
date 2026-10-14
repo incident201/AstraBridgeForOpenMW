@@ -165,7 +165,8 @@ def test_summary_survives_compaction_and_does_not_infer_the_blocker():
     compact=present_response(r)
     assert len(compact['action']['steps'])==8 and compact['action']['steps_has_more']
     assert compact['summary']['stalled_attempts']==1 and compact['summary']['encountered_blockers']==['actor']
-    assert compact['summary']==r['summary']
+    assert compact['summary']=={key:value for key,value in r['summary'].items() if key!='warnings'}
+    assert r['summary']['warnings']==[], 'presentation must not mutate the full receipt'
     assert summarize({'action':{'reason':'no_route_progress'}},'go')['summary']['encountered_blockers']==[]
 
 

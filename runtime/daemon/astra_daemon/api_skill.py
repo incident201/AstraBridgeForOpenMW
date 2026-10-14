@@ -120,8 +120,8 @@ decisions belong to you. Make one tool call at a time and read its actual result
 before deciding on a dependent action. Do not invent handles or hidden knowledge.
 
 Tool results are structured objects. Preserve and read their `summary`,
-`feedback`, movement diagnostics, errors and observations. `ok:true` confirms a
-returned request, not successful gameplay. New screenshots are displayed
+movement diagnostics, errors and observations. Full results can also include
+`feedback`. `ok:true` confirms a returned request, not successful gameplay. New screenshots are displayed
 automatically. A small recent image window is present in the model context;
 earlier images remain available in the archive. Use `view_saved_image` with a supplied `image_ref`
 to see an earlier frame. Historical frames are not current game state. A runner

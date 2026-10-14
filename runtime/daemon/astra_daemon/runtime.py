@@ -237,6 +237,8 @@ class Runtime:
                 await asyncio.to_thread(self._mode,'agent')
                 hint=await asyncio.to_thread(self.session.working_memory_hint)
                 result={**self.owner.acquire_agent(name),'profile':self.profiles.public(),'working_memory':hint}
+                if getattr(self.session, 'control', None):
+                    self.session.control.presented_observation = None
                 self.session.timeline.agent(True)
                 self._history('agent_connected',name=name)
                 return result

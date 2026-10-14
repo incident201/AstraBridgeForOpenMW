@@ -4,7 +4,8 @@ from types import SimpleNamespace
 
 from .protocol import BridgeError, number
 
-SECTIONS = ('scene','ui','effects','combat','stats','body','terrain','exploration','messages')
+SECTIONS = ('scene','ui','effects','combat','stats','body','terrain','exploration','messages',
+            'orientation','screen','target_lock','working_memory')
 
 
 def receipt_details(receipt, args):

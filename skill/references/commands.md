@@ -24,7 +24,7 @@ The CLI returns `{ "ok": true, "result": ... }` or `{ "ok": false, "error": "...
 
 **Read/query:** `observe` returns the observation directly inside `result`. `status --player` returns character data there. `inspect inventory` returns a searchable page in `result.items`, plus weight/capacity; `ui` returns a searchable page in `result.elements`. Both report total/has_more. Use `--full` when every row is needed.
 
-**Most actions:** `result` contains `action`, `feedback`, and a new `observation` object. Some lifecycle/memory commands return other shapes. Do not assume every result has a nested observation.
+**Most actions:** `result` contains `summary` (the effective outcome), `action` (movement and operation-specific details), and a new `observation` object. `feedback` is available in full responses. Some lifecycle/memory commands return other shapes. Do not assume every result has a nested observation.
 
 Illustrative subset of a movement response:
 
@@ -32,8 +32,8 @@ Illustrative subset of a movement response:
 {
   "ok": true,
   "result": {
-    "action": {"reason": "arrived", "motion": {"moved_m": 2.9}},
-    "feedback": {"status": "succeeded", "events": [], "reason": "arrived"},
+    "summary": {"status": "succeeded", "reason": "arrived", "destination_reached": true, "elapsed": 1.2},
+    "action": {"motion": {"moved_m": 2.9}},
     "observation": {
       "observation": 43,
       "ui_mode": "Gameplay",
@@ -54,15 +54,26 @@ In a real observation, use:
 | `details_visible`, `name_source` | Current tooltip-range inspection versus a remembered name. `name_source` is `observed` or `remembered` when `name` exists. |
 | `actor_kind` | `npc` or `creature`; both keep `kind: "actor"`. |
 | `memory_ref` | Persistent `object_…` handle for notes about this instance. Game actions still use the current `ref`. |
-| `body` | Stance, selected gear/magic, animation, support/swimming state, death and mobility effects. |
-| `stats`, `effects`, `combat` | Own resources, active effects, selected attack/cast capabilities. |
-| `orientation` | Heading, pitch, FOV and camera mode. |
+| `body` | Current support/swimming, animation, death, active mobility effects and control restrictions; changed gear/magic selection. |
+| `stats`, `effects`, `combat` | Changed own resources, effect sources and attack/cast capabilities. Query `status --player` or `inspect` for complete current information. |
+| `orientation` | Current heading/pitch; camera settings appear when first observed or changed. |
 | `terrain`, `local_map`, `exploration` | Local navigation data and recorded travel memory; see navigation reference. |
-| `messages` | Recent observed game messages; not necessarily all new in this response. Prefer `feedback.events` for changes. |
+| `messages`, `events`, `summary.events` | New observed messages, durable change events and confirmed action outcomes/interruptions. |
 
-`action.motion` reports what actually happened: forward/sideways/vertical movement, distance, turning, and location change. `action.navigation` can explain remaining distance, tolerances and partial paths.
+Compact observations retain current scene/terrain handles and physical state.
+Unchanged resources, equipment details, permanent effects and image settings are
+omitted. `combat` and `effects` can contain only changed fields; unchanged details are
+not repeated. `effects` identifies updated active sources; `effect_ended` events
+report removals. Missing optional fields mean no new report, not an empty inventory
+or no active effects. Ordinary enabled controls and inactive body flags are omitted;
+restrictions and newly restored controls remain explicit. After restoring context,
+use `status --player` or a relevant `inspect` query to recover current own state.
+Inventory/spell rows omit `equipped:false` and `selected:false`.
+Use `details SECTION` or `--full` to expand information without guessing.
 
-`submitted` means the request was sent, not that an item was equipped, purchased or a door opened. A spell attempt can have `action.reason=completed` (animation finished) but `feedback.status=failed`, `feedback.reason=spell_failed`, and `cast_outcome=failed`. Verify the relevant effect, inventory, menu, HUD, or message.
+`action.motion` reports what actually happened: forward/sideways/vertical movement, distance, turning, and location change. `action.navigation` reports useful remaining distance and obstruction/recovery diagnostics; detailed planning data is available with `--full`.
+
+`submitted` means the request was sent, not that an item was equipped, purchased or a door opened. A spell attempt can have `action.reason=completed` (animation finished) but `summary.status=failed`, `summary.reason=spell_failed`, and `cast_outcome=failed`. Verify the relevant effect, inventory, menu, HUD, or message.
 
 ## Handles and freshness
 
@@ -103,11 +114,32 @@ Do not pass an NPC ref to `go` or an inventory `item_…` ref to `choose`. Prefe
 | `read [--ref DOCUMENT_REF] [--offset N] [--limit N]` | Text of the currently open book/scroll. Default 4000 characters, maximum 8000 per chunk; no page turning or scrolling required. |
 | `read --all` / `read --search "TEXT"` | Assemble the opened document internally, or return matching passages with Unicode offsets. |
 
-Character summary includes identity, sign, level, health/magicka/fatigue, eight attributes, skills and progress, weight/capacity, gold, bounty, reputation, equipment/magic and active effects. Effects provide name/source, description, `harmful`, strength where applicable, affected attribute/skill, total/remaining duration or `permanent`. `from_equipment` marks an effect tied to equipped gear.
+Use `inspect stats` for skill progress, attribute damage and base/modifier details. Character summary includes identity, sign, level, health/magicka/fatigue, eight attributes and skill values, weight/capacity, gold, bounty, reputation, equipment/magic and active effects. Effects provide name/source, description, `harmful`, strength where applicable, affected attribute/skill, total/remaining duration or `permanent`. `from_equipment` marks an effect tied to equipped gear.
 
 `body.levitation`, `water_walking`, `water_breathing`, and `slow_fall` mean the effect is active. They do not prove that the character is airborne, on the water surface, or safe from drowning. Check `on_ground`, `swimming`, `submerged` and observed movement.
 
 Reading inventory does not open the inventory UI. `use-item` is for **owned** items; world pickups need `interact`. `inspect inventory` includes normal tooltip details, condition, charges/uses and known effects without opening the menu. Undiscovered ingredient/potion effects remain question marks.
+
+## Outcome summaries
+
+Read `result.summary` first for ordinary actions, `revisit` and `sequence`:
+
+| Field | Meaning |
+|---|---|
+| `status`, `reason` | The effective feedback status/reason; the summary does not apply a separate success rule. |
+| `termination` | Present when different from `reason`, notably `time_limit` for a simulation/wall/turn/condition time limit. The specific reason remains alongside it. |
+| `horizontal_displacement_m` | Measured horizontal distance between the action's start and finish. For a sequence/revisit, this is its overall endpoint displacement, not a sum of steps or travelled path length. `null` means a comparable measurement is unavailable, including a changed coordinate frame. |
+| `destination_reached` | Present for navigation to a destination (`go`, `walk`, `move-local`, `fly`, `swim`, `revisit`, `return-to`). It reflects `arrived`; a general sequence has no inferred overall destination. |
+| `encountered_blockers` | When present, distinct `blocked_by` values actually reported during the action, including earlier attempts. They describe history, not necessarily what is blocking the final position. No NPC or wall is inferred from a lack of progress alone. |
+| `stalled_attempts` | When nonzero, reported no-progress/blocked attempts. Revisit counts its stopped route attempts, independently of its motor's recovery/replan counters. Nested results are counted once. |
+| `warnings` | When present, includes `no_horizontal_progress` when an explicit horizontal movement failed to advance; zero overall displacement by itself does not imply failure. |
+| `completed_actions`, `total_actions`, `stopped_step` | When present, sequence counts and the one-based step that stopped or could not start. A completed input can still fail its expected result. |
+
+For explicitly directed `act`, `jump` and `air-move`, less than 0.05 m of horizontal
+endpoint displacement after at least 0.2 s of requested and elapsed input produces
+`no_horizontal_progress`. Falling/rising does not count as horizontal movement.
+Short inputs and stationary jumps are exempt. A confirmed activation combined
+with unsuccessful movement is partial: its confirmed side effects remain in events.
 
 ## Keep outcome diagnostics in wrappers
 
@@ -128,31 +160,12 @@ if (stderr) process.stderr.write(stderr);
 ```
 
 Do not reduce an action result to `result.action.reason`: `duration` can mean
-input finished while `feedback` reports failure. A sequence can also stop after
+input finished while `summary` reports failure. A sequence can also stop after
 an earlier step already changed the world. If parsing/transport fails, preserve
 the raw diagnostic and recover the receipt; do not assume the action did not run.
 
-Read `result.summary` first for ordinary actions, `revisit` and `sequence`:
-
-| Field | Meaning |
-|---|---|
-| `status`, `reason` | The effective feedback status/reason; the summary does not apply a separate success rule. |
-| `termination` | `time_limit` for a simulation/wall/turn/condition time limit; otherwise the effective reason. The original reason remains alongside it. |
-| `horizontal_displacement_m` | Measured horizontal distance between the action's start and finish. For a sequence/revisit, this is its overall endpoint displacement, not a sum of steps or travelled path length. `null` means a comparable measurement is unavailable, including a changed coordinate frame. |
-| `destination_reached` | Present for navigation to a destination (`go`, `walk`, `move-local`, `fly`, `swim`, `revisit`, `return-to`). It reflects `arrived`; a general sequence has no inferred overall destination. |
-| `encountered_blockers` | Distinct `blocked_by` values actually reported during the action, including earlier attempts. They describe history, not necessarily what is blocking the final position. No NPC or wall is inferred from a lack of progress alone. |
-| `stalled_attempts` | Reported no-progress/blocked attempts. Revisit counts its stopped route attempts, independently of its motor's recovery/replan counters. Nested results are counted once. |
-| `warnings` | Includes `no_horizontal_progress` when an explicit horizontal movement failed to advance; zero overall displacement by itself does not imply failure. |
-| `completed_actions`, `total_actions`, `stopped_step` | When present, sequence counts and the one-based step that stopped or could not start. A completed input can still fail its expected result. |
-
-For explicitly directed `act`, `jump` and `air-move`, less than 0.05 m of horizontal
-endpoint displacement after at least 0.2 s of requested and elapsed input produces
-`no_horizontal_progress`. Falling/rising does not count as horizontal movement.
-Short inputs and stationary jumps are exempt. A confirmed activation combined
-with unsuccessful movement is partial: its confirmed side effects remain in events.
-
 If a wrapper must filter output, retain `ok`, `error`, `message`, `request_id`,
-`summary`, the whole `feedback` and `action`, and `observation` (including its
+`summary`, `action`, any extra `feedback`, and `observation` (including its
 screenshot, messages and modal/body state). A screenshot path still needs to be
 opened for visual inspection. Retrieve omitted steps using
 `action-result REQUEST_ID --full`; a compact response keeps only the last eight

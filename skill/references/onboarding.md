@@ -29,7 +29,7 @@ handle it before issuing another wait.
 ## Modals during an action
 
 A tutorial or confirmation window interrupts movement, combat or a wait with
-`feedback.status: interrupted`, `reason: ui_input_required`, and its observation.
+`summary.status: interrupted`, `reason: ui_input_required`, and its observation.
 This can happen even while `ui_mode` says `Gameplay`: check `ui.modal`.
 
 Read the message and actual enabled controls, using `ui` if the compact response
