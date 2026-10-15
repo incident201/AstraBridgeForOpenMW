@@ -10,9 +10,11 @@
   and the patched OpenMW 0.51.0 source snapshot.
 - `runtime/container` and `runtime/graphics`: image dependencies and private display.
 - `desktop`: Application Core, Podman/WSL backends, Electron preload and Svelte UI.
-- `agent-runner`: optional host client for ChatGPT OAuth/Responses, DeepSeek and Grok,
+- `agent-runner`: optional host client for ChatGPT OAuth/Responses, DeepSeek, Grok and Gemini,
   with native provider history, checkpoint compaction and session continuation.
-  It executes game tools through the existing CLI.
+  It executes game tools through the existing CLI. See the
+  [runner technical reference](agent-runner-reference.md) for its provider adapters
+  and session formats.
 
 The runtime API and Desktop are one application generation. There is no portable
 Python installer or separate standalone gameplay CLI product. The internal

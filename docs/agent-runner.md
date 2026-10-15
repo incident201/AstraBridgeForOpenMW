@@ -1,354 +1,427 @@
-# AstraBridge Runner
+# AstraBridge Runner: user guide
 
-`astrabridge-runner` is an optional host Python application for playing through
-native AstraBridge tools. It supports OpenAI through **Sign in with ChatGPT**
-and the Responses API, DeepSeek and Grok through their Responses APIs, and Gemini
-through Google's Interactions API with an API key. It manages transport,
-history, images, context and logs. The model makes every game decision.
+The runner lets an AI model play your game through AstraBridge. You choose a
+model, type a goal, and watch it play in AstraBridge Desktop.
 
-## Install and prepare
+It runs in a terminal on your computer, outside the game container. You need
+AstraBridge installed and configured, plus **Python 3.11 or newer**. You do not
+need Codex CLI or another agent application.
 
-Use Python 3.11+, AstraBridge 0.3.5+ and the normal container/GPU prerequisites.
-Install the `astrabridge_runner-0.1.4-py3-none-any.whl` in a Python environment,
-or install the source package:
+- [Install](#1-install)
+- [Update or uninstall](#2-update-or-uninstall)
+- [Prepare AstraBridge](#3-prepare-astrabridge)
+- [Sign in or enter an API key](#4-sign-in-or-enter-an-api-key)
+- [Choose a model and start](#5-choose-a-model-and-start)
+- [Give the model a task](#6-give-the-model-a-task)
+- [Stop and resume](#7-stop-and-resume)
+- [Logs, usage and common problems](#8-logs-usage-and-common-problems)
 
-```sh
-python3 -m venv /path/to/runner-venv
-/path/to/runner-venv/bin/python -m pip install ./agent-runner
-. /path/to/runner-venv/bin/activate
-astrabridge skill export /path/to/api-skill --interface tools
+## 1. Install
+
+Download the **`astrabridge_runner-…-py3-none-any.whl`** file from
+[GitHub Releases](https://github.com/incident201/AstraBridgeForOpenMW/releases/latest).
+The same wheel works on Linux and Windows.
+
+**A `.whl` is a Python installation package, not a program to double-click or
+unpack.** Installing it creates the `astrabridge-runner` command.
+You do not need the source archive or a copy of this repository.
+
+Create a folder named, for example, `AstraBridgeRunner`. Put the downloaded
+wheel there and **open a terminal in that folder**. Use this folder for all
+examples below.
+
+The examples use `astrabridge_runner-0.1.4-py3-none-any.whl`.
+**Substitute the exact filename you downloaded.**
+
+### Linux — Bash
+
+```bash
+python3 --version
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install ./astrabridge_runner-0.1.4-py3-none-any.whl
+astrabridge-runner --help
 ```
 
-On Windows, use the environment's `Scripts/python.exe` and
-`Scripts/astrabridge-runner.exe`. Installation also installs HTTP, JSON Schema
-and JWT/cryptography dependencies. They do not become container dependencies.
+If Python or `venv` is missing, install it through your distribution's package
+manager. On Debian/Ubuntu, install `python3-venv` and `python3-pip`. Do not use
+`sudo pip`.
 
-The exported skill contains the host application's executable and configuration
-in `installation.json`. These bindings are host data and are not given to the
-model. Start the game in the intended profile and release manual/agent control
-before connecting. Each session stays associated with one installation and
-game profile; another profile cannot resume its conversation.
+### Windows — PowerShell
 
-## Sign in with ChatGPT
+Install Python 3.11 or newer first, then run:
+
+```powershell
+py -3 --version
+py -3 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install .\astrabridge_runner-0.1.4-py3-none-any.whl
+$env:Path = "$(Resolve-Path .\.venv\Scripts);$env:Path"
+astrabridge-runner --help
+```
+
+If your Python installation has `python` but not `py`, replace `py -3` with
+`python`. The PATH line makes the command available in this PowerShell window
+without changing script execution policy.
+
+### Each time you open a new terminal
+
+Return to your `AstraBridgeRunner` folder and run:
+
+Linux:
+
+```bash
+source .venv/bin/activate
+```
+
+Windows PowerShell:
+
+```powershell
+$env:Path = "$(Resolve-Path .\.venv\Scripts);$env:Path"
+```
+
+You only install once. This step makes the installed command available again.
+The `.venv` folder contains the runner and its Python dependencies.
+
+## 2. Update or uninstall
+
+### Update
+
+Stop the runner. Download the new wheel into the same folder and install it
+in the same environment. Replace `VERSION` below with the downloaded version.
+
+Linux, after activating the environment:
+
+```bash
+python -m pip install --upgrade ./astrabridge_runner-VERSION-py3-none-any.whl
+```
+
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install --upgrade .\astrabridge_runner-VERSION-py3-none-any.whl
+```
+
+This updates the runner. Update AstraBridge Desktop and its runtime separately
+through the application's normal update process.
+
+### Uninstall
+
+Stop the runner first. If you signed in with ChatGPT and want to disconnect that
+account, run `astrabridge-runner auth logout` before uninstalling.
+
+Linux, with the environment activated:
+
+```bash
+python -m pip uninstall astrabridge-runner
+```
+
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip uninstall astrabridge-runner
+```
+
+Alternatively, deleting the `.venv` folder removes this dedicated Python
+environment and everything installed in it. You can also delete the downloaded
+wheel and exported `api-skill` folder if no longer needed.
+
+**Keep `sessions` if you want to retain conversation logs and screenshots.**
+Deleting runner files does not remove the AstraBridge application, game profiles,
+game saves or MP4 recordings. ChatGPT credential storage is separate; see the
+[technical reference](agent-runner-reference.md#chatgpt-accounts-and-credentials)
+if you also want to remove its saved registration files.
+
+## 3. Prepare AstraBridge
+
+1. Open AstraBridge Desktop and complete game/runtime setup.
+2. In **Setup → Storage and skill**, choose **Enable CLI command**. Follow any
+   PATH instructions, then reopen your terminal if needed. Repeat the runner's
+   activation/PATH step in the new terminal.
+3. Check the game's command:
+
+   ```sh
+   astrabridge version
+   ```
+
+4. Export the runner's gameplay instructions:
+
+   ```sh
+   astrabridge skill export ./api-skill --interface tools
+   ```
+
+This creates the `api-skill` folder. The runner reads it automatically; you do
+not install it into Codex or any other agent application.
+
+`astrabridge` is the **game application's** command.
+`astrabridge-runner` is the **model runner's** command.
+
+The export destination must not already exist. Keep `--interface tools`:
+ordinary CLI skill exports are not the runner edition.
+
+If you do not enable the short `astrabridge` command, export by running the
+AppImage/EXE directly instead. Use your actual path:
+
+```bash
+"/path/to/AstraBridge.AppImage" skill export ./api-skill --interface tools
+```
+
+```powershell
+& "C:\path\to\astrabridge.exe" skill export ./api-skill --interface tools
+```
+
+You can reuse this export when switching game profiles. After a game application
+update that changes the skill, export to a new folder and use that folder for
+new runner sessions.
+
+## 4. Sign in or enter an API key
+
+Choose **one** provider:
+
+| Provider | How to connect | API-key variable |
+| --- | --- | --- |
+| OpenAI | Sign in with ChatGPT (OAuth) | Not needed |
+| Google Gemini | Gemini API key | `GEMINI_API_KEY` |
+| xAI Grok | xAI API key | `XAI_API_KEY` |
+| DeepSeek | DeepSeek API key | `DEEPSEEK_API_KEY` |
+
+### OpenAI — Sign in with ChatGPT
 
 ```sh
 astrabridge-runner auth login
 astrabridge-runner auth status
-astrabridge-runner auth accounts
-astrabridge-runner auth use ACCOUNT_ID
-astrabridge-runner auth logout
 ```
 
-Normal login opens the system browser. Add `--new-account` to register another
-account/workspace, or `--account ACCOUNT_ID` to reauthorize a saved registration.
-Multiple registrations may have the same email; their IDs and credentials stay
-separate. A running session pins its selected registration.
+The first command opens a browser. Sign in and grant access. The runner saves
+and refreshes your credentials; you do not log in before every session.
 
-For a headless host:
+This uses the selected ChatGPT account's available plan limits, subject to
+account/workspace access. It does not require an OpenAI API key and does not
+fall back to API-balance billing if plan access is unavailable.
+
+**No browser on the runner computer?** Use:
 
 ```sh
-astrabridge-runner auth login --no-browser --callback-port 1455
+astrabridge-runner auth login --no-browser
 ```
 
-Open the printed URL on the browser computer. If its final loopback page cannot
-connect, copy that page's full address from the browser address bar and paste it
-into the runner terminal. Input is hidden; the callback URL is not logged.
-PKCE, state and ID-token validation still apply.
+Open the printed link on another computer. After sign-in, the browser may show
+an error loading a `127.0.0.1` address. Copy that complete address and paste it
+into the waiting runner terminal. Keep the login command running while you do
+this; the terminal hides the pasted address.
 
-Alternatively, use `ssh -L 1455:127.0.0.1:1455 USER@HOST` to deliver the callback
-automatically. The listener binds to `127.0.0.1`, with fixed path
-`/auth/callback`; choose another port if needed. A declined or expired attempt
-does not replace a previously signed-in account.
+### Gemini, Grok or DeepSeek — API key
 
-The client uses Authorization Code with PKCE and dynamic OSS registration.
-ID-token signature, issuer, audience, expiry and nonce are verified. The issued
-client ID and stable host ID are reused on later sign-ins. Credentials refresh
-automatically, with refresh rotation serialized across processes.
+Get a key from your provider's developer account. API access and billing are
+separate from simply signing into its consumer chat application.
 
-Credentials default to `$XDG_CONFIG_HOME/astrabridge-runner`, or
-`~/.config/astrabridge-runner` when unset. Windows uses
-`%LOCALAPPDATA%/AstraBridgeRunner` and DPAPI credential protection. Unix files
-are owner-only. Global `--auth-dir DIRECTORY` selects another protected store.
-OAuth tokens are excluded from gameplay prompts, CLI children and session logs.
+The following example uses Gemini. **For Grok or DeepSeek, replace
+`GEMINI_API_KEY` with the variable from the table.**
 
-Sign-in and permission to use a plan are distinct. Inference requires the
-granted `chatgpt.tokens.use.direct` scope and availability under the selected
-account/workspace policy. Usage may be subject to app and plan limits. A denied
-grant, exhausted limit or unavailable model stops inference; there is no API-key
-billing fallback. Review app usage in ChatGPT Settings. Logout clears tokens
-and attempts remote revocation while retaining the registration and host ID.
+Linux — Bash:
 
-See the official [OSS sign-in guide](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)
-and [Responses route restrictions](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations).
+```bash
+read -r -s -p "API key: " GEMINI_API_KEY
+printf '\n'
+export GEMINI_API_KEY
+```
 
-## Choose a model and run
+Windows PowerShell:
+
+```powershell
+$key = Read-Host "API key" -AsSecureString
+$env:GEMINI_API_KEY = [System.Net.NetworkCredential]::new("", $key).Password
+Remove-Variable key
+```
+
+Paste the key at the prompt. These commands hide it and keep its literal value
+out of command history. The key is available to the runner in **this terminal**;
+set it again after opening another terminal. Do not put it in the task prompt.
+
+## 5. Choose a model and start
+
+List the models available to your account:
 
 ```sh
 astrabridge-runner models --provider openai
-astrabridge-runner run --provider openai --model MODEL --reasoning EFFORT \
-  --skill /path/to/api-skill --log-dir /path/to/private-sessions \
-  --task "Start a new game, complete the tutorial and save."
 ```
 
-Choose a model advertised to your account. Reasoning effort uses the provider's
-vocabulary; it is not silently translated or replaced. If the catalog does not
-advertise a context window, supply `--context-window TOKENS` from the model's
-documented limits. The selected settings and catalog snapshot are recorded.
-`models --json` returns the catalog as JSON.
+Replace `openai` with `gemini`, `grok` or `deepseek` for another provider.
+The list shows model IDs and reasoning levels. Use the exact model ID, not
+its display name.
 
-For DeepSeek, provide `DEEPSEEK_API_KEY` in the environment, then use:
+In AstraBridge Desktop, **select the intended profile and click Start game**.
+Leave the main menu open for a new game, or load the save you want to continue.
+Release manual control and disconnect any other agent. You can leave the viewer
+open to watch.
+
+Run **one** of these examples from your runner folder. They work in Bash and
+PowerShell after setup:
+
+**OpenAI — GPT-6 Luna:**
 
 ```sh
-astrabridge-runner models --provider deepseek
-astrabridge-runner run --provider deepseek --model deepseek-flash --reasoning max \
-  --skill /path/to/api-skill --log-dir /path/to/private-sessions
+astrabridge-runner run --provider openai --model gpt-6-luna --reasoning low --skill ./api-skill --log-dir ./sessions
 ```
 
-DeepSeek uses `https://api.deepseek.com/responses` with client-owned history,
-`store:false`, streaming and sequential function calls. The model catalog
-advertises the supported reasoning levels; DeepSeek 4.1 Flash uses the
-`deepseek-flash` model ID. `--base-url` can select a compatible DeepSeek deployment.
-See the [DeepSeek Responses reference](https://api-docs.deepseek.com/api/create-response/).
-
-Runner sessions created with the previous DeepSeek Chat Completions adapter
-cannot be resumed with this adapter. Start a new runner session in the same
-game profile to continue playing; existing saves and archived logs are preserved.
-
-For Grok, provide `XAI_API_KEY` in the environment, then use:
+**Gemini 3.8 Flash:**
 
 ```sh
-astrabridge-runner models --provider grok --json
-astrabridge-runner run --provider grok --model grok-4.7 --reasoning xhigh \
-  --skill /path/to/api-skill --log-dir /path/to/private-sessions \
-  --task "Start a new game, complete the tutorial and save."
+astrabridge-runner run --provider gemini --model gemini-3.8-flash --reasoning low --skill ./api-skill --log-dir ./sessions
 ```
 
-Grok uses `https://api.x.ai/v1/responses` with Bearer API-key authorization.
-Grok 4.7 supports `low`, `medium`, `high` and `xhigh`; the runner requires an
-explicit choice. `--base-url` remains a DeepSeek option. Grok model discovery
-uses the account's `/language-models` catalog and accepts aliases advertised
-there. When that catalog omits context or effort metadata for an available
-Grok 4.7, the runner uses its documented 500,000-token context and effort
-levels. Explicit API metadata takes precedence. See the official
-[Grok 4.7 guide](https://docs.x.ai/developers/grok-4-7) and
-[model discovery reference](https://docs.x.ai/developers/rest-api-reference/inference/models).
-
-Grok requests use `store:false`, flat function tools and
-`parallel_tool_calls:false`. Its encrypted reasoning items are retained and
-passed back unchanged. A stable prompt cache key belongs to the session and
-survives resume. The HTTP read timeout is one hour for Grok reasoning; connection
-and request-write timeouts remain bounded separately. See
-[xAI reasoning](https://docs.x.ai/developers/model-capabilities/text/reasoning).
-
-The Grok adapter expresses argument alternatives below an object schema root,
-because xAI rejects tool schemas with root `anyOf`/`oneOf` alternatives. This is
-an equivalent transformation of the exported schemas; the runner still validates
-arguments against the original AstraBridge definitions before executing a tool.
-
-For Gemini, provide `GEMINI_API_KEY` in the environment, then use:
+**Grok 4.7:**
 
 ```sh
-astrabridge-runner models --provider gemini --json
-astrabridge-runner run --provider gemini --model gemini-3.8-flash --reasoning high \
-  --skill /path/to/api-skill --log-dir /path/to/private-sessions \
-  --task "Start a new game, complete the tutorial and save."
+astrabridge-runner run --provider grok --model grok-4.7 --reasoning low --skill ./api-skill --log-dir ./sessions
 ```
 
-Gemini uses the Google Gemini Developer API at
-`https://generativelanguage.googleapis.com/v1beta/interactions`, authenticated
-with the `x-goog-api-key` header. It does not use Vertex AI, an external proxy or
-ChatGPT authorization. Gemini 3.8 Flash supports `low`, `medium` and `high`;
-`max`/`xhigh` are not aliases. Model discovery reads all pages of the API catalog
-and uses its reported context limit. Thinking levels and image/tool support
-are checked against the adapter's documented general-purpose model list;
-unsupported variants fail before connecting to the game.
-
-Requests use `store:false` and explicit client-owned history. All model steps,
-including opaque thought signatures, are retained unchanged for following
-requests and resume. Function definitions come directly from AstraBridge's
-exported schemas; responses return the full structured tool result. Google requires
-property declarations inside required-only conditional schema branches. The
-adapter adds unconstrained declarations there without changing validation; the
-original AstraBridge schemas still validate every call locally. Only game
-and runner resource tools are enabled. Built-in Google Search, code execution
-and managed agents are not enabled.
-
-Gemini currently returns complete responses rather than streaming text. Tool
-calls execute only after a successful completed or requires-action response;
-truncated, failed and malformed responses cannot trigger a game action. The
-HTTP read timeout is one hour, with separate connection/write timeouts. Existing
-screenshot limits, checkpoint compaction and session recovery apply unchanged.
-No Google SDK or additional package dependency is required.
-
-See Google's [Interactions API](https://ai.google.dev/gemini-api/docs/interactions-overview),
-[stateless function calling](https://ai.google.dev/gemini-api/docs/function-calling#stateless-function-calling),
-[thinking levels](https://ai.google.dev/gemini-api/docs/thinking) and
-[model catalog](https://ai.google.dev/api/models).
-
-Do not put keys in arguments, source files or gameplay prompts. OpenAI uses
-the public Responses endpoint with
-OAuth, `store:false` and `stream:true`, not Codex or ChatGPT backend endpoints.
-API keys are redacted from logs and removed from the environment passed to
-AstraBridge CLI processes. Grok uses only the exported game and runner resource
-tools; xAI search and code-execution tools are not enabled.
-
-Enter goals at `Task>`. A text response without tools ends a turn; another goal
-continues the same session. One tool call per model response is allowed. Batches
-perform no game actions. Arguments use the exported schemas and fixed argv
-bindings; models have no shell or Python scripting tools. Full returned JSON,
-including movement diagnostics and errors, is retained.
-
-OpenAI, DeepSeek and Grok tools run only after `response.completed`.
-Incomplete/failed/interrupted streams cannot execute partial calls. Responses output items, assistant phases and
-encrypted reasoning are retained from completed stream items, including when
-the terminal event has an empty output array. DeepSeek retains its native
-`reasoning_text` items unchanged.
-
-## Images and context
-
-The default active image window contains two recent selected frames;
-`--image-context 1` selects one. New game screenshots/maps are archived before
-the game's rolling cache can remove them. `view_saved_image` selects an older
-registered frame and marks it historical. `read_skill_reference` reads a full
-reference from the exported package. Neither tool accepts arbitrary files.
-
-Checkpoint compaction is enabled for all providers. It triggers around 75% of
-the configured context window, between completed tool cycles. The budget uses
-actual API usage plus estimates for new items; estimates are not exact billing
-counts. Ciphertext is not treated as plain reasoning text.
-The budget includes reasoning tokens when xAI or Gemini reports them separately
-from visible completion tokens; the original API usage remains in the logs.
-
-A separate request to the same model, without tools, creates a compact JSON
-checkpoint: goal, existing plan, verified facts, uncertainty, failed attempts,
-pending actions and references. It must not invent a new plan or copy inventory,
-journal or stats that can be queried again. After validation, active context
-keeps the rules, verbatim current request, checkpoint and eight complete recent
-model cycles. The full journal remains intact. A failed checkpoint is retried
-once; a failed or insufficient reduction stops the runner without discarding
-the previous context. The checkpoint is runner memory, not an automatic write
-to AstraBridge's knowledge database.
-
-Checkpoint requests use one shared schema through each provider's native output
-format: `text.format` with `json_schema` for OpenAI, Grok and DeepSeek;
-`response_format` with `application/json` and a schema for Gemini. OpenAI and
-Grok also receive `strict:true`. Local validation still checks the complete
-schema, field limits and total byte size. Structured output constrains the
-format, not the truth of model-written memories. OpenAI commentary is archived
-but only the `final_answer`, when present, is parsed as checkpoint JSON.
-
-Use `--compaction off` for experiments with full active text history.
-`--compact-at FRACTION` changes the trigger for testing or tuning.
-
-## Token and cache statistics
-
-After each inference or checkpoint request, the terminal shows the last request
-and cumulative session counters: input, cached input, uncached input, output,
-reasoning and total tokens. Reasoning is included in output; cached tokens are
-included in input. Neither subset is added again to the total. Context-window
-estimates are shown separately from these provider-reported usage counters.
-
-`usage.json` contains the same totals, a separate breakdown for inference and
-checkpoint requests, failed attempts, and the number of requests reporting each
-counter. Checkpoint retries are counted too. Resume restores totals from the
-journal, so compaction and process restarts do not reset them.
+**DeepSeek 4.1 Flash:**
 
 ```sh
-astrabridge-runner logs stats /path/to/private-sessions/SESSION
-astrabridge-runner logs stats /path/to/private-sessions/SESSION --json
+astrabridge-runner run --provider deepseek --model deepseek-flash --reasoning low --skill ./api-skill --log-dir ./sessions
 ```
 
-Missing counters are `null` in JSON and `?` in terminal output, not invented
-zeros. A partial total sums only available values; `reported_requests` gives its
-coverage. The cache ratio is weighted by input tokens from requests that report
-both input and cached input. Failed/interrupted requests may have no usage;
-these cannot be treated as free requests or reconciled with provider billing.
-Earlier archives without request classification appear as `unclassified`.
-No API call is made by `logs stats`, and no token prices are hard-coded.
+To choose another model, replace `--model` and `--reasoning` with supported values
+from the model list. Reasoning effort controls the amount of reasoning, **not a
+spending limit**. See [model observations](Models.md) for gameplay results.
 
-Caching is managed by each provider. Gemini uses automatic implicit caching;
-its `store:false` mode does not disable it. Stable instructions, tools and
-conversation prefixes can be reused. Removing old images, changing the task
-or compacting history can reduce prefix reuse; cache hits are not guaranteed.
-See [Google context caching](https://ai.google.dev/gemini-api/docs/caching).
+`--skill` points to the exported folder. `--log-dir` selects where conversations
+are stored. The runner prints the connected profile and a **Session directory**
+when it starts; keep that path for resuming later.
 
-## Stop and resume
+## 6. Give the model a task
 
-`/quit`, EOF or Ctrl+C releases this runner's connection and leaves the game
-paused. It does not automatically save the game, finalize recording, or remove
-the container. Explicit game saving remains a model/player operation.
+When you see **`Task>` in the terminal**, type your prompt and press Enter.
+For example:
+
+```text
+Start a new game, complete the tutorial, then find Caius Cosades in Balmora. Save your progress when you reach him.
+```
+
+For a game you have already loaded:
+
+```text
+Continue from the current game. Read the journal to understand the active quest, then work toward its objective. Save when you have made useful progress.
+```
+
+The runner does not automatically start a new game or load a save. Do that in
+Desktop first, or explicitly ask the model to do it.
+
+Tools and screenshots are passed to the model automatically. When it returns
+a final text answer without a tool call, `Task>` appears again. Type another
+instruction to continue the same conversation.
+
+To provide the first prompt directly in the launch command, append:
+
+```text
+--task "Your goal here"
+```
+
+Watch the game in Desktop. To record, start recording there before connecting
+the runner, or ask the model to manage recording. Videos go to Desktop's
+configured recordings folder; runner conversations go to `./sessions`.
+
+## 7. Stop and resume
+
+| What you want | What to do |
+| --- | --- |
+| Stop the model while it is working | Press **Ctrl+C** in its terminal. |
+| Exit at `Task>` | Type `/quit`. |
+| Save before leaving | Ask the model to save and wait for the result before stopping it. |
+| Save, finish recording and stop the game | Use **Stop session** in Desktop. It asks before stopping without a save if saving is unavailable. |
+
+Stopping the runner releases its control and normally leaves the game paused.
+It **does not automatically save the game or finish recording**.
+
+To continue later, select the same profile, start the game and restore the game
+state you want to continue from. Activate the runner in your terminal and set
+your API key again if using one. Then:
 
 ```sh
-astrabridge-runner resume /path/to/private-sessions/SESSION
-astrabridge-runner resume /path/to/private-sessions/SESSION --task "Reach the next town."
+astrabridge-runner resume "./sessions/SESSION_DIRECTORY"
 ```
 
-Resume restores native active context, settings, checkpoint and image archive.
-It checks the installation, game profile, provider and ChatGPT registration;
-it does not load a save or take over another controller. Older observations
-and interaction handles become historical. Unfinished tool calls recover a
-recorded result or an explicit unknown/not-executed result, including a receipt
-request ID when available. They are not automatically executed again.
-Resuming a Grok session requires `XAI_API_KEY` in the environment again. Keys
-are not saved in the session archive.
-
-## Private session files
-
-- `manifest.json`: provider/model/configuration, registration ID, installation,
-  game profile, skill hash and model catalog.
-- `active-state.json`: the current provider-native context and budget state.
-- `usage.json`: cumulative reported token/cache usage and per-purpose totals.
-- `events.jsonl`: complete model items, tool results, CLI output, lifecycle and errors.
-- `api/*.json.gz`: reconstructable full requests/responses, stream events, usage
-  and diagnostics. Requests reference archived image bytes instead of storing
-  repeated base64 copies of the same screenshot. The `image_archive` field maps
-  each reference to its image file, SHA256 and exact positions in the request.
-- `images.json` and `images/`: registered frames, original paths, hashes and image bytes.
-- `checkpoint-*.json`: validated historical checkpoints.
-
-Logs contain private playthrough data; they are for the host operator and are
-not general model-readable files. OAuth/API credentials are not log data.
-This package replaces the experimental DeepSeek-only runner and uses its own
-session format.
-
-### Storage and archive cleanup
-
-The active session's complete text history and image archive are retained;
-compaction only changes model context. Logs therefore still grow during a long
-session. Repeated API screenshots share the files in `images/`.
-`astrabridge_runner.journal.read_api_record(session_directory, relative_path)`
-restores the original JSON request, including image data URLs and Gemini inline
-base64 image fields, and verifies image
-hashes. It also reads older records with inline images without modifying them.
-
-Preview cleanup of old inactive sessions:
+Replace `SESSION_DIRECTORY` with the actual directory printed by the earlier
+run, not the parent `sessions` folder. This resumes model work immediately.
+To supply a new instruction:
 
 ```sh
-astrabridge-runner logs prune --log-dir /path/to/private-sessions
+astrabridge-runner resume "./sessions/SESSION_DIRECTORY" --task "Continue toward the objective, then save."
 ```
 
-This keeps the five most recent sessions and selects older sessions only after
-30 days without activity. `--older-than-days DAYS` and `--keep-last COUNT`
-change those limits. Add `--delete` to remove the selected archives:
+**Resume restores the conversation, not a game save.** If you loaded an older
+save or played manually in between, explain what changed in `--task`.
+
+An existing conversation stays tied to its model, settings, installation,
+profile and skill. To switch models/profiles or use changed skill text, start a
+new `run`. Game saves, atlas and knowledge remain part of the game profile.
+
+DeepSeek conversations created with the old Chat Completions adapter cannot
+resume in runner 0.1.4 or later. Start a new runner conversation in the same
+game profile to continue playing.
+
+## 8. Logs, usage and common problems
+
+The terminal shows token usage after API requests. To inspect a saved session:
 
 ```sh
-astrabridge-runner logs prune --log-dir /path/to/private-sessions \
-  --older-than-days 30 --keep-last 5 --delete
+astrabridge-runner logs stats "./sessions/SESSION_DIRECTORY"
 ```
 
-Cleanup removes entire selected session directories, including their API logs,
-screenshots and resume state. Active sessions, unrelated directories and
-symlinked session directories are skipped. There is no automatic removal of
-playthrough history; archive anything you want to keep before deletion.
-Model discovery uses separate archives under
-`$XDG_STATE_HOME/astrabridge-runner/discovery` (or
-`~/.local/state/astrabridge-runner/discovery` when unset). Pass that directory as
-`--log-dir` to apply the same cleanup policy to discovery logs.
+Add `--json` for machine-readable statistics. No model request is made.
 
-### API retries
+| Counter | Meaning |
+| --- | --- |
+| `in` | Input tokens, including history and image tokens reported by the API. |
+| `cache` / `uncached` | Input reused from the provider cache / input not served from cache. |
+| `out` | Generated tokens, including reasoning. |
+| `reasoning` | The reasoning portion of output; do not add it again. |
+| `total` | Input plus output. |
+| `cache hit` | Cached share of input where counters are available. |
+| `Context: ~…` | Estimated current context size, not cumulative session usage. |
 
-Transient HTTP errors (429, 500, 502, 503 and 504) and network failures get at
-most three attempts. Exponential backoff respects `Retry-After` seconds or an
-HTTP date for all providers. If the server requests a wait longer than 60
-seconds, the runner stops retrying and retains the session for later resume.
-Permanent errors and ChatGPT subscription usage limits are not retried.
+`?` means the provider did not report a counter. Cache hits are automatic and
+not guaranteed. Check your provider account for actual charges or plan limits.
+
+Long conversations are summarized automatically into **checkpoints**. These
+are model memories, not game saves. Recent images stay in active context;
+older images and the complete conversation remain in the session archive.
+Token totals survive both summarization and resume.
+
+### Remove old logs
+
+Preview deletion of inactive archives older than 30 days, keeping the five
+newest sessions:
+
+```sh
+astrabridge-runner logs prune --log-dir ./sessions
+```
+
+Add `--delete` to apply it:
+
+```sh
+astrabridge-runner logs prune --log-dir ./sessions --delete
+```
+
+This deletes the selected conversations, their screenshots and resume state.
+It does not delete game saves or MP4 recordings. Active sessions are skipped.
+
+### Common problems
+
+| Problem | What to do |
+| --- | --- |
+| `astrabridge-runner` is not found | Return to your runner folder and repeat the activation/PATH step. |
+| `astrabridge` is not found | Enable the application's CLI command in Setup, or export using the AppImage/EXE directly. |
+| `pip` cannot find the wheel | Check the filename and working folder, or use the wheel's full quoted path. |
+| Skill destination already exists | Export to a new directory and use it in `--skill`. |
+| Wrong skill interface | Export with `--interface tools`. |
+| Application/runtime mismatch | Complete the runtime update in Desktop, then export again. |
+| Controller is busy | Release manual control or disconnect the other agent in Desktop. |
+| Game is not running | Start it in Desktop. |
+| Missing or unauthorized API key | Set the right environment variable in the launching terminal and check the key in your provider account. |
+| ChatGPT login succeeds but model access is denied | Check `auth status`, model availability and the selected account/workspace's limits. |
+| Unsupported model or reasoning level | Check `models --provider …` and use supported values. |
+| Resume reports a different profile or changed skill | Select the original profile/skill, or start a new conversation. |
+
+For optional settings, multiple accounts and technical details, see the
+[runner reference](agent-runner-reference.md).
