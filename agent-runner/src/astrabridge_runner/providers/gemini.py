@@ -6,6 +6,7 @@ import httpx
 
 from .http import Transport
 from ..journal import json_text
+from ..checkpoint_schema import output_schema
 from ..types import ProviderError, Reply, ToolCall
 
 
@@ -163,13 +164,17 @@ class Gemini:
                    'input': copy.deepcopy(items), 'store': False, 'stream': False,
                    'generation_config': {'thinking_level': self.effort,
                                          'tool_choice': 'none' if checkpoint else 'auto'}}
+        if checkpoint:
+            payload['response_format'] = {'type': 'text', 'mime_type': 'application/json',
+                                          'schema': output_schema()}
         if tools and not checkpoint:
             payload['tools'] = self.definitions(tools)
         return payload
 
     def complete(self, instructions, items, tools, *, checkpoint=False, on_text=None):
         response = self.request('POST', 'interactions',
-                                payload=self.payload(instructions, items, tools, checkpoint=checkpoint))
+                                payload=self.payload(instructions, items, tools, checkpoint=checkpoint),
+                                purpose='checkpoint' if checkpoint else 'inference')
         return self.parse(response)
 
     def parse(self, response):

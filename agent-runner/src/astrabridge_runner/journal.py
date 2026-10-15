@@ -7,6 +7,8 @@ import time
 import uuid
 from pathlib import Path
 
+from .usage import Usage
+
 
 def json_text(value):
     return json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(',', ':'))
@@ -34,6 +36,8 @@ class Journal:
         self.add_secret(secret)
         for name in ('api', 'images'):
             (self.root / name).mkdir(mode=0o700, exist_ok=bool(resume))
+        self.usage = Usage()
+        self.on_usage = None
         self.sequence = 0
         self.api_sequence = max([int(p.name.split('-')[0]) for p in (self.root / 'api').glob('*.json.gz')] or [0])
         events = self.root / 'events.jsonl'
@@ -50,8 +54,12 @@ class Journal:
                     stream.write(data)
             rows = [json.loads(line) for line in data.splitlines()]
             self.sequence = rows[-1]['sequence'] if rows else 0
+            for row in rows:
+                self.usage.accept(row)
         fd = os.open(events, os.O_WRONLY | os.O_CREAT | (os.O_APPEND if resume else os.O_EXCL), 0o600)
         self.events = os.fdopen(fd, 'a', encoding='utf-8')
+        if resume:
+            self.write('usage.json', self.usage.snapshot())
 
     def add_secret(self, value):
         if isinstance(value, str) and value:
@@ -71,9 +79,15 @@ class Journal:
 
     def event(self, kind, **data):
         self.sequence += 1
-        self.events.write(json_text(self.clean({'sequence': self.sequence, 'time': time.time(), 'kind': kind, **data})) + '\n')
+        event = self.clean({'sequence': self.sequence, 'time': time.time(), 'kind': kind, **data})
+        self.events.write(json_text(event) + '\n')
         self.events.flush()
         os.fsync(self.events.fileno())
+        if self.usage.accept(event):
+            snapshot = self.usage.snapshot()
+            self.write('usage.json', snapshot)
+            if self.on_usage:
+                self.on_usage(snapshot)
 
     def write(self, name, value):
         atomic_json(self.root / name, self.clean(value))

@@ -24,21 +24,22 @@ class Provider(DeepSeek):
         self.requests.append({'instructions': instructions, 'items': items, 'tools': tools, **options})
         if options.get('checkpoint'):
             value = self.checkpoints.pop(0) if self.checkpoints else json.dumps(CHECKPOINT)
-            return Reply([{'role': 'assistant', 'content': value, 'reasoning_content': 'Summary reasoning'}], value)
+            return Reply([{'type':'message','role':'assistant','content':[{'type':'output_text','text':value}]}], value)
         return self.replies.pop(0)
 
 
 def reply(n, *, large=False, usage=25000, name='astra_observe'):
     call = ToolCall(f'call_{n}', name, '{}')
-    message = {'role': 'assistant', 'content': ('old_observation ' * 10000) if large else f'Step {n}',
-               'reasoning_content': f'Full reasoning {n}',
-               'tool_calls': [{'id': call.id, 'type': 'function', 'function': {'name': name, 'arguments': '{}'}}]}
-    return Reply([message], message['content'], [call], {'prompt_tokens': usage, 'completion_tokens': 200})
+    text = ('old_observation ' * 10000) if large else f'Step {n}'
+    native = [{'type':'reasoning','content':[{'type':'reasoning_text','text':f'Full reasoning {n}'}]},
+              {'type':'message','role':'assistant','content':[{'type':'output_text','text':text}]},
+              {'type':'function_call','call_id':call.id,'name':name,'arguments':'{}'}]
+    return Reply(native, text, [call], {'input_tokens': usage, 'output_tokens': 200})
 
 
 def test_checkpoint_compaction_keeps_goal_pairs_and_full_journal(fixture):
     f = fixture; api = Provider(f['journal'], [reply(0, large=True), *[reply(n) for n in range(1, 12)],
-        reply(12, usage=160000), Reply([{'role': 'assistant', 'content': 'Done', 'reasoning_content': 'Final reasoning'}], 'Done', usage={'prompt_tokens': 30000, 'completion_tokens': 50})])
+        reply(12, usage=160000), Reply([{'type':'message','role':'assistant','content':[{'type':'output_text','text':'Done'}]}], 'Done', usage={'prompt_tokens': 30000, 'completion_tokens': 50})])
     runner = Runner(f['skill'], f['journal'], api, output=lambda _: None)
     try:
         runner.prepare(); runner.turn('Find the captain')
@@ -49,8 +50,8 @@ def test_checkpoint_compaction_keeps_goal_pairs_and_full_journal(fixture):
         assert 'old_observation' not in json.dumps(active)
         assert 'old_observation' in (f['journal'].root/'events.jsonl').read_text()
         for cycle in active['cycles']:
-            call_ids = [call['id'] for item in cycle['items'] for call in item.get('tool_calls', [])]
-            outputs = [item['tool_call_id'] for item in cycle['items'] if item.get('role') == 'tool']
+            call_ids = [item['call_id'] for item in cycle['items'] if item.get('type')=='function_call']
+            outputs = [item['call_id'] for item in cycle['items'] if item.get('type') == 'function_call_output']
             assert call_ids == outputs
         summary = [request for request in api.requests if request.get('checkpoint')]
         assert len(summary) == 1 and not summary[0]['tools']
@@ -89,7 +90,7 @@ def test_resume_resolves_pending_calls_without_reexecuting_mutations(fixture, st
         calls = [json.loads(line) for line in (f['root']/'calls.jsonl').read_text().splitlines()]
         assert sum(row['args'][:2] == ['game', 'act'] for row in calls) == (1 if stage == 'executed' else 0)
         payload = second.history.payload()
-        results = [json.loads(item['content']) for item in payload if item.get('role') == 'tool']
+        results = [json.loads(item['output']) for item in payload if item.get('type') == 'function_call_output']
         assert len(results) == 1
         if stage == 'executed': assert results[0]['ok'] and 'motion' in results[0]['result']['action']
         elif stage == 'unknown': assert results[0]['result_unknown'] and results[0]['request_id'] == 'receipt-id'

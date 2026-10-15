@@ -2,14 +2,14 @@
 
 `astrabridge-runner` is an optional host Python application for playing through
 native AstraBridge tools. It supports OpenAI through **Sign in with ChatGPT**
-and the Responses API, DeepSeek through its API, Grok through the xAI
-Responses API, and Gemini through Google's Interactions API with an API key. It manages transport,
+and the Responses API, DeepSeek and Grok through their Responses APIs, and Gemini
+through Google's Interactions API with an API key. It manages transport,
 history, images, context and logs. The model makes every game decision.
 
 ## Install and prepare
 
 Use Python 3.11+, AstraBridge 0.3.5+ and the normal container/GPU prerequisites.
-Install the `astrabridge_runner-0.1.3-py3-none-any.whl` in a Python environment,
+Install the `astrabridge_runner-0.1.4-py3-none-any.whl` in a Python environment,
 or install the source package:
 
 ```sh
@@ -104,6 +104,16 @@ astrabridge-runner run --provider deepseek --model deepseek-flash --reasoning ma
   --skill /path/to/api-skill --log-dir /path/to/private-sessions
 ```
 
+DeepSeek uses `https://api.deepseek.com/responses` with client-owned history,
+`store:false`, streaming and sequential function calls. The model catalog
+advertises the supported reasoning levels; DeepSeek 4.1 Flash uses the
+`deepseek-flash` model ID. `--base-url` can select a compatible DeepSeek deployment.
+See the [DeepSeek Responses reference](https://api-docs.deepseek.com/api/create-response/).
+
+Runner sessions created with the previous DeepSeek Chat Completions adapter
+cannot be resumed with this adapter. Start a new runner session in the same
+game profile to continue playing; existing saves and archived logs are preserved.
+
 For Grok, provide `XAI_API_KEY` in the environment, then use:
 
 ```sh
@@ -175,8 +185,8 @@ See Google's [Interactions API](https://ai.google.dev/gemini-api/docs/interactio
 [thinking levels](https://ai.google.dev/gemini-api/docs/thinking) and
 [model catalog](https://ai.google.dev/api/models).
 
-Do not put keys in arguments, source files or gameplay prompts. DeepSeek uses
-its Chat Completions transport; OpenAI uses the public Responses endpoint with
+Do not put keys in arguments, source files or gameplay prompts. OpenAI uses
+the public Responses endpoint with
 OAuth, `store:false` and `stream:true`, not Codex or ChatGPT backend endpoints.
 API keys are redacted from logs and removed from the environment passed to
 AstraBridge CLI processes. Grok uses only the exported game and runner resource
@@ -188,11 +198,11 @@ perform no game actions. Arguments use the exported schemas and fixed argv
 bindings; models have no shell or Python scripting tools. Full returned JSON,
 including movement diagnostics and errors, is retained.
 
-OpenAI and Grok tools run only after `response.completed`. Incomplete/failed/interrupted
-streams cannot execute partial calls. Responses output items, assistant phases and
+OpenAI, DeepSeek and Grok tools run only after `response.completed`.
+Incomplete/failed/interrupted streams cannot execute partial calls. Responses output items, assistant phases and
 encrypted reasoning are retained from completed stream items, including when
-the terminal event has an empty output array. DeepSeek retains its reasoning
-content.
+the terminal event has an empty output array. DeepSeek retains its native
+`reasoning_text` items unchanged.
 
 ## Images and context
 
@@ -219,8 +229,48 @@ once; a failed or insufficient reduction stops the runner without discarding
 the previous context. The checkpoint is runner memory, not an automatic write
 to AstraBridge's knowledge database.
 
+Checkpoint requests use one shared schema through each provider's native output
+format: `text.format` with `json_schema` for OpenAI, Grok and DeepSeek;
+`response_format` with `application/json` and a schema for Gemini. OpenAI and
+Grok also receive `strict:true`. Local validation still checks the complete
+schema, field limits and total byte size. Structured output constrains the
+format, not the truth of model-written memories. OpenAI commentary is archived
+but only the `final_answer`, when present, is parsed as checkpoint JSON.
+
 Use `--compaction off` for experiments with full active text history.
 `--compact-at FRACTION` changes the trigger for testing or tuning.
+
+## Token and cache statistics
+
+After each inference or checkpoint request, the terminal shows the last request
+and cumulative session counters: input, cached input, uncached input, output,
+reasoning and total tokens. Reasoning is included in output; cached tokens are
+included in input. Neither subset is added again to the total. Context-window
+estimates are shown separately from these provider-reported usage counters.
+
+`usage.json` contains the same totals, a separate breakdown for inference and
+checkpoint requests, failed attempts, and the number of requests reporting each
+counter. Checkpoint retries are counted too. Resume restores totals from the
+journal, so compaction and process restarts do not reset them.
+
+```sh
+astrabridge-runner logs stats /path/to/private-sessions/SESSION
+astrabridge-runner logs stats /path/to/private-sessions/SESSION --json
+```
+
+Missing counters are `null` in JSON and `?` in terminal output, not invented
+zeros. A partial total sums only available values; `reported_requests` gives its
+coverage. The cache ratio is weighted by input tokens from requests that report
+both input and cached input. Failed/interrupted requests may have no usage;
+these cannot be treated as free requests or reconciled with provider billing.
+Earlier archives without request classification appear as `unclassified`.
+No API call is made by `logs stats`, and no token prices are hard-coded.
+
+Caching is managed by each provider. Gemini uses automatic implicit caching;
+its `store:false` mode does not disable it. Stable instructions, tools and
+conversation prefixes can be reused. Removing old images, changing the task
+or compacting history can reduce prefix reuse; cache hits are not guaranteed.
+See [Google context caching](https://ai.google.dev/gemini-api/docs/caching).
 
 ## Stop and resume
 
@@ -247,6 +297,7 @@ are not saved in the session archive.
 - `manifest.json`: provider/model/configuration, registration ID, installation,
   game profile, skill hash and model catalog.
 - `active-state.json`: the current provider-native context and budget state.
+- `usage.json`: cumulative reported token/cache usage and per-purpose totals.
 - `events.jsonl`: complete model items, tool results, CLI output, lifecycle and errors.
 - `api/*.json.gz`: reconstructable full requests/responses, stream events, usage
   and diagnostics. Requests reference archived image bytes instead of storing

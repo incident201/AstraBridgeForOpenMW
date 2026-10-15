@@ -13,6 +13,7 @@ from .providers.grok import Grok
 from .providers.gemini import Gemini
 from .providers.openai import OpenAI
 from .runner import Runner
+from .usage import read_usage, format_usage
 
 
 def parser():
@@ -44,6 +45,9 @@ def parser():
     prune.add_argument('--older-than-days', type=float, default=30)
     prune.add_argument('--keep-last', type=int, default=5)
     prune.add_argument('--delete', action='store_true', help='Delete selected sessions; omitted means dry run')
+    stats = log_actions.add_parser('stats', help='Show recorded API token and cache usage')
+    stats.add_argument('session', type=Path)
+    stats.add_argument('--json', action='store_true')
     return root
 
 
@@ -74,6 +78,10 @@ def main(argv=None):
     arguments = parser(); args = arguments.parse_args(argv)
     if args.command == 'logs':
         try:
+            if args.logs_action == 'stats':
+                result = read_usage(args.session)
+                print(json.dumps(result, ensure_ascii=False, indent=2) if args.json else format_usage(result))
+                return 0
             result = prune_sessions(
                 args.log_dir, older_than_days=args.older_than_days,
                 keep_last=args.keep_last, delete=args.delete,
@@ -180,6 +188,7 @@ def main(argv=None):
                     runner = Runner(args.skill, journal, api, args.astra, context_window=args.context_window,
                                     compaction=args.compaction != 'off', image_limit=args.image_context, compact_at=args.compact_at,
                                     on_text=lambda text: print(text, end='', flush=True))
+                journal.on_usage = lambda summary: print('\n' + format_usage(summary), file=sys.stderr, flush=True)
                 def status(value):
                     usage=value['last_api_usage'];actual=usage.get('input_tokens',usage.get('prompt_tokens'))
                     print(f"Context: ~{value['estimated_tokens']:,}/{value['window']:,} tokens; last API input: {actual if actual is not None else 'unknown'}",file=sys.stderr)

@@ -38,25 +38,39 @@ def retry_delay(attempt, headers):
 class Transport:
     def __init__(self, journal, base_url, client=None):
         self.journal = journal
+        self.purposes = {}
         self.client = client or httpx.Client(
             base_url=base_url.rstrip('/') + '/',
             timeout=httpx.Timeout(600, connect=10, write=60, pool=30),
         )
 
-    def begin(self, method, path, payload, attempt):
+    def begin(self, method, path, payload, attempt, *, purpose=None):
         if payload is not None and len(json_text(payload).encode()) > 48 * 1024 * 1024:
             raise ProviderError('API body exceeds 48 MiB. History was retained.')
         index = self.journal.next_api()
+        purpose = purpose or ('inference' if method == 'POST' and path in ('responses', 'interactions') else 'other')
+        self.purposes[index] = purpose
         start = time.monotonic()
         record = self.journal.api_record(index, 'request', {'method': method, 'path': path, 'body': payload})
-        self.journal.event('api_request', index=index, attempt=attempt + 1, record=record)
+        self.journal.event('api_request', index=index, attempt=attempt + 1, record=record, purpose=purpose)
         return index, start
 
     def finish(self, index, start, status, headers, body):
         diagnostic = {k: v for k, v in headers.items() if k in ('x-request-id', 'request-id', 'retry-after') or k.startswith('x-ratelimit')}
         record = self.journal.api_record(index, 'response', {'status': status, 'headers': diagnostic, 'body': body, 'elapsed': time.monotonic() - start})
-        usage = body.get('usage') if isinstance(body, dict) else None
-        self.journal.event('api_response', index=index, status=status, record=record, usage=usage)
+        terminal = body if isinstance(body, dict) else {}
+        if 'usage' not in terminal:
+            for event in reversed(terminal.get('events', [])):
+                if event.get('type') in ('response.completed', 'response.failed', 'response.incomplete'):
+                    terminal = event.get('response', {})
+                    break
+        usage = terminal.get('usage')
+        success = status is not None and 200 <= status < 300
+        outcome = 'completed' if success and not (isinstance(body, dict) and body.get('error')) else 'failed'
+        if terminal.get('status') in ('failed', 'incomplete'):
+            outcome = terminal['status']
+        self.journal.event('api_response', index=index, status=status, record=record, usage=usage,
+                           purpose=self.purposes.pop(index, 'other'), outcome=outcome)
 
     def wait_to_retry(self, attempt, headers):
         delay = retry_delay(attempt, headers)
@@ -66,9 +80,9 @@ class Transport:
         time.sleep(delay)
         return True
 
-    def request(self, method, path, *, payload=None, headers=None):
+    def request(self, method, path, *, payload=None, headers=None, purpose=None):
         for attempt in range(3):
-            index, start = self.begin(method, path, payload, attempt)
+            index, start = self.begin(method, path, payload, attempt, purpose=purpose)
             try:
                 response = self.client.request(method, path, json=payload, headers=headers)
             except httpx.TransportError as exc:

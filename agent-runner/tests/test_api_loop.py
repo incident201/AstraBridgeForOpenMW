@@ -12,14 +12,15 @@ from astrabridge_runner.runner import Runner
 
 
 def call(name,args,identifier='call'):
-    return {'id':identifier,'type':'function','function':{'name':name,'arguments':json.dumps(args)}}
+    return {'type':'function_call','call_id':identifier,'name':name,'arguments':json.dumps(args),'status':'completed'}
 
 
 def reply(number,calls=None,content=None):
-    message={'role':'assistant','content':content,'reasoning_content':f'Full reasoning {number}'}
-    if calls is not None:message['tool_calls']=calls
-    return {'model':'deepseek-flash','choices':[{'message':message,'finish_reason':'tool_calls' if calls else 'stop'}],
-        'usage':{'prompt_tokens':100+number,'completion_tokens':20,'prompt_cache_hit_tokens':50},
+    output=[{'type':'reasoning','content':[{'type':'reasoning_text','text':f'Full reasoning {number}'}],'summary':[]}]
+    if content:output.append({'type':'message','role':'assistant','content':[{'type':'output_text','text':content}]})
+    output.extend(calls or [])
+    return {'model':'deepseek-flash','id':f'response_{number}','status':'completed','output':output,
+        'usage':{'input_tokens':100+number,'output_tokens':20,'input_tokens_details':{'cached_tokens':50}},
         'debug_echo':'secret-test-key'}
 
 
@@ -34,10 +35,12 @@ class FakeDeepSeek:
                 self.send({'data':[{'id':'deepseek-flash','name':'DeepSeek-V4.1-Flash',
                     'context_window':1048576,'input_modalities':['text','image'],'effort':{'supported_levels':['low','high','max']}}]})
             def do_POST(self):
-                assert self.path=='/chat/completions'
+                assert self.path=='/responses'
                 payload=json.loads(self.rfile.read(int(self.headers['Content-Length'])))
                 owner.requests.append(payload);owner.headers.append(dict(self.headers))
-                self.send(owner.replies.pop(0))
+                value=owner.replies.pop(0)
+                data=('data: '+json.dumps({'type':'response.completed','response':value})+'\n\n').encode()
+                self.send_response(200);self.send_header('Content-Type','text/event-stream');self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data)
             def send(self,value):
                 data=json.dumps(value).encode();self.send_response(200);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(data)));self.send_header('x-request-id','available-request-id');self.end_headers();self.wfile.write(data)
         self.server=ThreadingHTTPServer(('127.0.0.1',0),Handler)
@@ -47,7 +50,7 @@ class FakeDeepSeek:
 
 
 def image_parts(request):
-    return [part for m in request['messages'] if isinstance(m['content'],list) for part in m['content'] if part['type']=='image_url']
+    return [part for m in request['input'] if isinstance(m.get('content'),list) for part in m['content'] if part['type']=='input_image']
 
 
 def test_complete_native_loop_preserves_text_reasoning_and_only_one_image(fixture):
@@ -69,17 +72,17 @@ def test_complete_native_loop_preserves_text_reasoning_and_only_one_image(fixtur
         assert output==['First goal done.','Second goal done.']
         assert len(server.requests)==9
         for i,request in enumerate(server.requests):
-            assert request['model']=='deepseek-flash' and request['reasoning_effort']=='max'
-            assert request['thinking']=={'type':'enabled'} and request['tool_choice']=='auto'
-            assert not request['stream'] and len(image_parts(request))<=1
-            previous=[m['reasoning_content'] for m in request['messages'] if m['role']=='assistant']
+            assert request['model']=='deepseek-flash' and request['reasoning']['effort']=='max'
+            assert request['store'] is False and request['tool_choice']=='auto'
+            assert request['stream'] and len(image_parts(request))<=1
+            previous=[m['content'][0]['text'] for m in request['input'] if m.get('type')=='reasoning']
             assert previous==[f'Full reasoning {j}' for j in range(i)]
-            assert all('invocation' not in t['function'] for t in request['tools'])
+            assert all('invocation' not in t for t in request['tools'])
         assert image_parts(server.requests[3])[0]==image_parts(server.requests[2])[0]
         assert image_parts(server.requests[5])[0]!=image_parts(server.requests[2])[0]
         assert image_parts(server.requests[6])[0]==image_parts(server.requests[2])[0]
-        assert any('Second goal' in m['content'] for m in server.requests[-1]['messages'] if isinstance(m['content'],str))
-        text=json.dumps(server.requests[-1]['messages'])
+        assert 'Second goal' in json.dumps(server.requests[-1]['input'])
+        text=json.dumps(server.requests[-1]['input'])
         assert 'do not cut' in text and 'summary' in text and 'motion' in text and 'feedback' in text
         assert 'multiple_tool_calls_not_supported' in text and 'Historical' in text
         executed=[json.loads(x) for x in (f['root']/'calls.jsonl').read_text().splitlines()]
@@ -93,7 +96,7 @@ def test_complete_native_loop_preserves_text_reasoning_and_only_one_image(fixtur
         else:continue
         assert 'secret-test-key' not in content
     records=[json.loads(gzip.open(p,'rt').read()) for p in sorted((f['journal'].root/'api').glob('*response*'))]
-    assert records[-1]['body']['usage']['prompt_tokens']==108
+    assert records[-1]['body']['usage']['input_tokens']==108
 
 
 def test_unknown_tools_and_invalid_arguments_are_returned_as_native_results(fixture):
@@ -102,7 +105,7 @@ def test_unknown_tools_and_invalid_arguments_are_returned_as_native_results(fixt
     runner=Runner(f['skill'],f['journal'],DeepSeek('secret-test-key',f['journal'],server.url))
     try:
         runner.prepare();runner.turn('test')
-        results=[json.loads(m['content']) for m in server.requests[-1]['messages'] if m['role']=='tool']
+        results=[json.loads(m['output']) for m in server.requests[-1]['input'] if m.get('type')=='function_call_output']
         assert [r['error'] for r in results]==['unknown_tool','invalid_tool_arguments']
         assert not any(json.loads(x)['args'][0]=='game' for x in (f['root']/'calls.jsonl').read_text().splitlines())
     finally:runner.close();server.close()
@@ -118,7 +121,7 @@ def test_context_error_keeps_history_without_compaction(fixture):
         with pytest.raises(APIError,match='HTTP 400'):api.complete('Rules',history,[])
         assert history==[{'role':'user','content':'The full goal and observations.'}]
         data=json.loads(gzip.open(next((f['journal'].root/'api').glob('*request*')),'rt').read())
-        assert data['body']['messages'][1:]==history
+        assert data['body']['input']==history
     finally:api.close()
 
 

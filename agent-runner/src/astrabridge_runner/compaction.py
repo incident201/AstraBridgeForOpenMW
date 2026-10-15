@@ -5,10 +5,8 @@ from .bridge import load_json
 from .journal import json_text
 from .types import ProviderError
 
-FIELDS = ('plan', 'facts', 'uncertainties', 'failed_attempts', 'pending_actions', 'references')
-SCHEMA = {'type': 'object', 'properties': {'goal': {'type': 'string', 'minLength': 1},
-          **{key: {'type': 'array', 'items': {'type': 'string'}, 'maxItems': 40} for key in FIELDS}},
-          'required': ['goal', *FIELDS], 'additionalProperties': False}
+from .checkpoint_schema import SCHEMA
+
 INSTRUCTION = '''Create a compact historical checkpoint of this conversation. Return only a JSON object with these fields:
 goal (string), plan, facts, uncertainties, failed_attempts, pending_actions, references (arrays of strings).
 Record the current goal and plans already proposed by the agent. Do not invent plans, solutions, facts or references.

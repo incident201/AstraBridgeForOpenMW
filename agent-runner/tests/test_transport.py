@@ -72,7 +72,7 @@ def test_time_budgets_come_from_bridge_not_a_short_global_timeout(fixture):
 def test_images_are_archived_before_source_cleanup_and_only_latest_is_sent(fixture):
     f=fixture;b=f['bridge'];b.load_tools();b.connect();r=Resources(f['skill'],f['journal'])
     history=History(DeepSeek('secret-test-key',f['journal']),'rules',f['journal'],r,image_limit=1)
-    history.assistant(Reply([{'role':'assistant','content':None,'reasoning_content':'reasoning retained','tool_calls':[]}],''),[])
+    history.assistant(Reply([{'type':'reasoning','content':[{'type':'reasoning_text','text':'reasoning retained'}]}],''),[])
     refs=[]
     for i in range(2):
         result=b.call('astra_observe','{}',f'call{i}')
@@ -80,13 +80,13 @@ def test_images_are_archived_before_source_cleanup_and_only_latest_is_sent(fixtu
         history.tool(ToolCall(f'call{i}','astra_observe','{}'),result,ref)
     assert len(refs)==2 and refs[0]!=refs[1]
     for p in (f['storage']/'exports/default').glob('*.png'):p.unlink()
-    payload=history.payload();images=[part for m in payload if isinstance(m['content'],list) for part in m['content'] if part['type']=='image_url']
-    assert len(images)==1 and len([m for m in payload if m['role']=='tool'])==2
-    assert payload[0]['reasoning_content']=='reasoning retained'
+    payload=history.payload();images=[part for m in payload if isinstance(m.get('content'),list) for part in m['content'] if part['type']=='input_image']
+    assert len(images)==1 and len([m for m in payload if m.get('type')=='function_call_output'])==2
+    assert payload[0]['content'][0]['text']=='reasoning retained'
     old,_=r.saved_image(refs[0]);history.tool(ToolCall('old','view_saved_image','{}'),old,refs[0],True)
-    selected=[part for m in history.payload() if isinstance(m['content'],list) for part in m['content'] if part['type']=='image_url']
+    selected=[part for m in history.payload() if isinstance(m.get('content'),list) for part in m['content'] if part['type']=='input_image']
     assert len(selected)==1
-    data=base64.b64decode(selected[0]['image_url']['url'].split(',',1)[1])
+    data=base64.b64decode(selected[0]['image_url'].split(',',1)[1])
     assert data==(f['journal'].root/'images'/r.images[refs[0]]['sha256']).with_suffix('.png').read_bytes()
     assert 'Historical' in history.messages[-1]['content'][0]['text']
 

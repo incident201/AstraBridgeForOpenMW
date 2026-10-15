@@ -6,6 +6,7 @@ import httpx
 
 from .http import RETRY_STATUSES, Transport
 from ..journal import json_text
+from ..checkpoint_schema import output_schema
 from ..types import ProviderError, Reply, ToolCall
 
 
@@ -46,8 +47,15 @@ class Responses:
     def payload(self, instructions, items, tools, *, checkpoint=False):
         payload = {'model': self.model, 'instructions': instructions, 'input': items, 'store': False, 'stream': True,
                    'reasoning': {'effort': self.effort}, 'parallel_tool_calls': False}
-        if tools: payload.update(tools=self.definitions(tools), tool_choice='none' if checkpoint else 'auto')
+        if checkpoint:
+            payload['text'] = {'format': self.checkpoint_format()}
+        elif tools:
+            payload.update(tools=self.definitions(tools), tool_choice='auto')
         return payload
+
+    def checkpoint_format(self):
+        return {'type': 'json_schema', 'name': 'astrabridge_checkpoint',
+                'schema': output_schema(), 'strict': True}
 
     def user_item(self, text): return {'role': 'user', 'content': [{'type': 'input_text', 'text': text}]}
     def tool_item(self, call, result): return {'type': 'function_call_output', 'call_id': call.id, 'output': json_text(result)}
@@ -60,7 +68,7 @@ class Responses:
         payload = self.payload(instructions, items, tools, checkpoint=checkpoint)
         refreshed = False
         for attempt in range(3):
-            index, start = self.http.begin('POST', 'responses', payload, attempt)
+            index, start = self.http.begin('POST', 'responses', payload, attempt, purpose='checkpoint' if checkpoint else 'inference')
             events = []; status = None; headers = {}; completed = None
             done_items = {}; added_indices = set()
             try:
@@ -125,7 +133,17 @@ class Responses:
                 if isinstance(exc,(KeyboardInterrupt,SystemExit)):raise
                 raise ProviderError(self.journal.clean(str(exc)), code=getattr(exc, 'code', None), status=status) from exc
             self.http.finish(index, start, status, headers, {'events': events, **completed})
-            return self.parse(completed)
+            reply = self.parse(completed)
+            if checkpoint:
+                # ChatGPT may emit commentary before the schema-constrained
+                # final answer. Keep all native items in the journal/history,
+                # but validate only the final answer as the checkpoint JSON.
+                final = [part['text'] for item in reply.native
+                         if item.get('type') == 'message' and item.get('phase') == 'final_answer'
+                         for part in item.get('content', []) if part.get('type') == 'output_text']
+                if final:
+                    reply.text = ''.join(final)
+            return reply
         raise ProviderError('Responses API retries exhausted.')
 
     def parse(self, response):
