@@ -82,15 +82,31 @@ class History:
                 if part.get('type') == 'saved_image' and part['image_ref'] not in seen:
                     seen.add(part['image_ref'])
                     if len(selected) < self.image_limit: selected.append((i, j))
+        selected = set(selected)
+        attachments = []
         for i, item in enumerate(items):
             if not isinstance(item.get('content'), list): continue
             parts = []
+            attachment_parts = []
             for j, part in enumerate(item['content']):
                 if part.get('type') == 'saved_image':
-                    if (i, j) in selected: parts.append(self.provider.image_content(self.resources, part['image_ref']))
-                else: parts.append(part)
+                    if (i, j) in selected:
+                        attachment_parts.append(self.provider.image_content(self.resources, part['image_ref']))
+                else:
+                    parts.append(part)
+                    attachment_parts.append(copy.deepcopy(part))
+            if any((i, j) in selected for j in range(len(item['content']))):
+                # Keep the original source caption (image_ref, call ID and
+                # historical label) with each image. Never persist these tail
+                # messages: replacing frames must not rewrite earlier history.
+                attachment = self.provider.user_item('Screenshot attachment from the labelled tool result; not a new observation.')
+                attachment['content'].extend(attachment_parts)
+                attachments.append(attachment)
             item['content'] = parts
-        return items
+        # Model output, signatures and tool results keep their original order.
+        # Only runner-owned image bytes move to a bounded transient suffix.
+        # Source captions remain in the text prefix even after image eviction.
+        return items + attachments
 
     def estimate(self, tools):
         """Usage anchors include encrypted reasoning; never tokenize its ciphertext."""

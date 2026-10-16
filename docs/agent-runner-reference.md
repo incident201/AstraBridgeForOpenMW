@@ -133,6 +133,19 @@ AstraBridge's knowledge database. Invalid checkpoints are retried once. Failed
 or insufficient compaction leaves the previous context intact and stops the
 runner.
 
+All providers receive a stable chronological text history followed by a transient
+suffix containing the selected one or two screenshots. Source captions stay at
+the original tool-result positions; attachments repeat their image reference,
+call ID and historical label. Replacing a selected image therefore does not
+rewrite earlier text messages. Native model outputs and reasoning signatures
+retain their original order and contents. The suffix is rebuilt for each request
+and is not added to saved conversation history.
+
+This layout supports prefix caching without retaining every old image in the
+active context. Provider cache hits are still not guaranteed. A changed task,
+checkpoint compaction or provider cache expiry can reduce reuse. Existing runner
+sessions keep their saved format and use the new layout when resumed.
+
 Images are archived before AstraBridge's rolling screenshot cache removes them.
 `view_saved_image` can select a previously registered frame and labels it as
 historical. `read_skill_reference` reads full references from the exported skill.

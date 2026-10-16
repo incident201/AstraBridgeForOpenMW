@@ -9,6 +9,7 @@ from astra_bridge.control import Control
 from astra_bridge.information import details, receipt_details
 from astra_bridge.observations import compact, present_response
 from astra_bridge.outcomes import summarize
+from astra_bridge.responses import compact_action
 
 
 def observation(number=1):
@@ -89,6 +90,58 @@ def test_repeated_projection_is_significantly_smaller_without_mutating_receipt()
         assert key not in small['action']
     assert small['action']['motion']['vertical_m'] == .46
     assert small['summary']['horizontal_displacement_m'] == 0
+
+
+def test_sequence_location_transition_returns_success_and_preserves_receipt():
+    step = movement()
+    step['action'].update(operation='move_local', changes={
+        'location_changed': True, 'from_location': 'Camp', 'to_location': 'Ashlands'})
+    step['action']['motion'].update(forward_m=29.94, moved_m=30.67, vertical_m=-6.65)
+    step['summary']['horizontal_displacement_m'] = 29.94
+    step['feedback']['events'] = [{'kind': 'location_changed', 'name': 'Ashlands'}]
+    raw = {
+        'action': {'reason': 'completed', 'completed_actions': 1, 'total_actions': 1,
+                   'steps': [{**step['action'], 'feedback': step['feedback'], 'summary': step['summary']}]},
+        'summary': {'status': 'succeeded', 'reason': 'completed', 'completed_actions': 1,
+                    'total_actions': 1, 'horizontal_displacement_m': 29.94},
+        'observation': {**observation(2), 'location': 'Ashlands'},
+    }
+    saved = copy.deepcopy(raw)
+    result = present_response(raw, before=observation(), operation='sequence')
+    assert result['summary']['status'] == 'succeeded'
+    assert result['summary']['completed_actions'] == 1
+    assert result['observation']['location'] == 'Ashlands'
+    nested = result['action']['steps'][0]
+    assert nested['motion']['forward_m'] == 29.94
+    assert nested['changes'] == step['action']['changes']
+    assert {'kind': 'location_changed', 'name': 'Ashlands'} in nested['summary']['events']
+    assert raw == saved and present_response(raw, full=True) == saved
+
+
+@pytest.mark.parametrize('changes', [
+    {}, {'gold_change': 10}, {'ui_from': 'Dialogue'},
+    {'ui_from': 'Gameplay', 'ui_to': 'Dialogue'},
+])
+def test_nested_changes_without_an_observation_remain_available(changes):
+    result = compact_action({'action': {'changes': changes}}, nested=True)
+    assert result['action'].get('changes', {}) == changes
+
+
+@pytest.mark.parametrize('mode,expected', [('Dialogue', {}), ('Gameplay', {'ui_from': 'Gameplay', 'ui_to': 'Dialogue'})])
+def test_ui_transition_is_omitted_only_when_observation_reports_it(mode, expected):
+    result = compact_action({'action': {'changes': {'ui_from': 'Gameplay', 'ui_to': 'Dialogue'}},
+                             'observation': {'ui_mode': mode}})
+    assert result['action'].get('changes', {}) == expected
+
+
+def test_active_navigation_status_without_a_termination_reason():
+    raw = {'active_action': {'operation': 'approach', 'navigation': {
+        'status': 'planned', 'remaining_m': 10, 'recovery_count': 1}}}
+    saved = copy.deepcopy(raw)
+    result = present_response(raw, operation='status')
+    assert result['active_action']['navigation'] == {
+        'status': 'planned', 'remaining_m': 10, 'recovery_count': 1}
+    assert raw == saved
 
 
 @pytest.mark.parametrize('flag', ['controls_enabled', 'looking_enabled', 'jumping_enabled', 'can_move'])

@@ -58,7 +58,7 @@ def compact_navigation(navigation, reason=None):
     elif result.get('path_endpoint_gap_m', 0) <= navigation.get('arrival_tolerance_m', 0):
         result.pop('path_endpoint_gap_m', None)
     if result.get('reason') == reason:
-        result.pop('reason')
+        result.pop('reason', None)
     return result
 
 
@@ -242,7 +242,9 @@ def compact_action(result, request_id=None, *, nested=False):
         changes = action['changes']
         if changes.get('location_changed') and observation.get('location'):
             changes.pop('location_changed')
-        if changes.get('ui_to') == observation.get('ui_mode'):
+        # Nested steps have no observation. Two absent fields are not an
+        # already-reported UI transition (and there may be no ui_to to pop).
+        if 'ui_to' in changes and 'ui_mode' in observation and changes['ui_to'] == observation['ui_mode']:
             changes.pop('ui_to')
             changes.pop('ui_from', None)
         if 'gold_change' in changes and any(
