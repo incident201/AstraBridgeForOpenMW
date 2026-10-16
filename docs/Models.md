@@ -11,6 +11,7 @@ than a general ranking of model capabilities.
 | GPT-6 Astra (high / xhigh) | Sustained autonomous play, efficient navigation, practical resource planning, and effective recovery from mistakes. | Codex CLI |
 | GPT-6.1 Sol (high / xhigh) | Sustained autonomous play, efficient navigation, and reliable recovery from unsuccessful approaches. | Codex CLI; AstraBridge Runner |
 | GPT-6 Luna (max) | Completed none of its assigned tasks. Once reached Balmora, but could not find Caius Cosades. | Codex CLI; AstraBridge Runner |
+| Gemini 4 Argon (medium / high) | Efficient navigation and effective local recovery, with high response latency even for routine actions. | AstraBridge Runner |
 | Gemini 3.8 Flash (high) | Inconsistent navigation; successful runs alternate with prolonged wandering and repeated reinterpretation of landmarks. | agy CLI |
 | DeepSeek 4.1 Flash (max) | Completed the tutorial and saved; reached Balmora in one test, but then wandered in circles. | Codex CLI; AstraBridge Runner |
 | Claude Opus 5.5 (high) | Can navigate autonomously and recover from mistakes, but route planning is uneven and can involve substantial detours. | Claude Code CLI |
@@ -84,7 +85,7 @@ Sol also incorporates available equipment and consumables into movement plans.
 It checks resources early and uses them to overcome difficult terrain. In a
 comparison from the same starting state, it reached the destination with
 substantially less active gameplay time and fewer AstraBridge operations than
-Sonnet or Gemini.
+Sonnet or Gemini 3.8 Flash.
 
 Recovery is a particular strength. Failed movement commands and incorrect
 initial route choices do not usually prevent it from continuing toward the goal.
@@ -110,9 +111,43 @@ This behavior was similarly poor through Codex CLI and the custom runner.
 Retaining the goal through compaction did not translate into effective planning
 or navigation.
 
-## Gemini 3.8 Flash (high)
+## Gemini models
 
-Gemini was tested through agy CLI on Linux. It generally understands AstraBridge
+### Gemini 4 Argon (medium / high)
+
+Argon was tested on Linux through AstraBridge Runner, connected directly to the
+Gemini API, with `medium` and `high` reasoning efforts.
+
+Navigation has been efficient in the observed tasks. Argon connects verbal
+directions with screenshots and recognizable landmarks, follows a coherent
+route, and retains its intended direction after going around obstacles. It can
+use substantial movements where appropriate instead of relying entirely on
+small exploratory steps.
+
+Recovery from local difficulties is a strength. When movement is blocked or a
+target is lost, Argon changes direction or switches control methods and continues
+toward the objective. It also continued after an AstraBridge tool error by
+checking the resulting view and adjusting its actions.
+
+Tool and UI use is generally reliable. Argon handled character creation and
+tutorial prompts autonomously, responding to interruptions without abandoning
+the task. It considers the overall objective when choosing character abilities
+and checks available resources before travel. Occasional incomplete tool calls,
+extra camera adjustments and retracing still occur.
+
+High response latency is a significant practical weakness. Long waits occur
+even before routine menu selections and other simple actions. Efficient use of
+active gameplay time therefore does not necessarily translate into fast progress
+in real time. These delays measure the full API response in the tested setup,
+including processing and transport.
+
+The observations support promising navigation and local recovery, but do not yet
+establish sustained success across long, varied quest sequences. The different
+tasks do not provide a controlled comparison of `medium` and `high` effort.
+
+### Gemini 3.8 Flash (high)
+
+Flash was tested through agy CLI on Linux. It generally understands AstraBridge
 command syntax, regularly inspects screenshots, and shows signs of understanding
 its surroundings. It remembers the overall objective and continues trying to
 achieve it.
@@ -122,7 +157,7 @@ involving prolonged wandering, repeated routes, and much larger numbers of
 actions than Sol. The model has difficulty combining separate observations into
 a stable understanding of the area and its remaining unexplored directions.
 
-A recurring weakness is landmark interpretation. Gemini can treat a plausible
+A recurring weakness is landmark interpretation. Flash can treat a plausible
 landmark as confirmed, later reconsider it, and then repeat the same pattern
 elsewhere. Frequent screenshot reads, Atlas queries, and returns to recorded
 points do not consistently resolve this uncertainty or produce a coherent route.
