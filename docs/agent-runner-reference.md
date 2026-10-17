@@ -82,7 +82,7 @@ and [route limitations](https://developers.openai.com/siwc/token-sharing-open-so
 | DeepSeek | `https://api.deepseek.com/responses` | Streamed Responses items, including native `reasoning_text`. |
 | Grok | `https://api.x.ai/v1/responses` | Streamed Responses items, including encrypted reasoning. |
 | Gemini | `https://generativelanguage.googleapis.com/v1beta/interactions` | Complete native steps, including thought signatures. |
-| MiMo | `https://api.xiaomimimo.com/v1/responses` | Streamed Responses items, including native reasoning text. Authenticated with `MIMO_API_KEY`. |
+| MiMo | `https://api.xiaomimimo.com/v1/chat/completions` | Streamed assistant messages, tool calls and `reasoning_content`. Authenticated with `MIMO_API_KEY`. |
 
 All adapters use client-owned history. All except MiMo send `store:false`;
 MiMo omits the undocumented `store` parameter. Grok requests encrypted
@@ -103,6 +103,8 @@ There are no shell, arbitrary-file, search or code-execution tools. One tool
 call per response is allowed; batches receive errors without executing actions.
 Responses tools run only after `response.completed`; Gemini tools require a
 successful completed or requires-action response. Partial calls are not executed.
+MiMo requires a successful `stop` or `tool_calls` finish reason before any
+call can execute; truncated streams and output-limit failures do not execute tools.
 
 Model discovery uses the provider catalog. Grok accepts advertised aliases and
 uses documented defaults for Grok 4.7 when its catalog omits context/effort
@@ -112,15 +114,22 @@ list. Unknown capabilities fail rather than silently substituting a model.
 MiMo checks the account's model catalog and supplies the documented 1M-token
 context window and image support for V2.6 Pro, Flash and Pro Ultraspeed when
 the catalog omits capabilities. `none` disables thinking; all other accepted
-reasoning levels currently enable the same mode. Native reasoning text is
-retained across tool turns. MiMo omits undocumented `parallel_tool_calls` and
-image `detail` fields; the runner still enforces one tool call per response.
+reasoning levels currently enable the same mode. MiMo uses Chat Completions
+with `thinking.type` and retains the complete `reasoning_content`, assistant
+text and tool calls together in each assistant turn. The runner translates its
+saved history to this wire format without changing historical text, tool results
+or diagnostics. Existing MiMo session archives can therefore be resumed through
+the updated adapter. Raw API chunks and usage remain in the session log.
+MiMo omits undocumented `parallel_tool_calls` and image `detail` fields;
+the runner still enforces one tool call per response. If MiMo requests a batch,
+all calls in that batch receive errors without executing; the model must retry
+one call at a time. XML-like text is never interpreted as an executable call.
 
 Provider references: [OpenAI Responses](https://developers.openai.com/api/reference/resources/responses/methods/create),
 [DeepSeek Responses](https://api-docs.deepseek.com/api/create-response/),
 [xAI reasoning](https://docs.x.ai/developers/model-capabilities/text/reasoning),
 [Gemini Interactions](https://ai.google.dev/gemini-api/docs/interactions-overview),
-[MiMo Responses](https://mimo.mi.com/docs/en-US/api/chat/responses) and
+[MiMo Chat Completions](https://mimo.mi.com/docs/en-US/api/chat/openai-api) and
 [MiMo model capabilities](https://mimo.mi.com/docs/en-US/quick-start/summary/model).
 
 ## Context and checkpoints
@@ -137,7 +146,7 @@ schema. Local validation additionally enforces field limits and a 12,000-byte
 UTF-8 budget. OpenAI commentary stays in the log; its `final_answer`, when
 present, supplies the checkpoint JSON.
 
-MiMo uses `text.format: {"type":"json_object"}` rather than unsupported strict
+MiMo uses `response_format: {"type":"json_object"}` rather than unsupported strict
 JSON Schema output. The shared checkpoint instruction defines the fields and
 the same local schema and size validation applies before replacing history.
 
