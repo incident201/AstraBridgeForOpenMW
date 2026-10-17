@@ -1,8 +1,11 @@
 import json
 
+import pytest
+
 from astrabridge_runner.main import main
 from astrabridge_runner.locking import FileLock
 from test_api_loop import FakeDeepSeek, reply, call
+from test_context_resume import CHECKPOINT
 
 
 def test_cli_new_session_and_resume_restore_native_history(fixture, monkeypatch):
@@ -33,6 +36,42 @@ def test_session_lock_blocks_concurrent_resume(tmp_path):
         import pytest
         with pytest.raises(RuntimeError, match='already active'):
             with FileLock(path, blocking=False): pass
+
+
+@pytest.mark.parametrize('new_task', [False, True])
+def test_resume_compact_runs_checkpoint_before_continuing_even_when_auto_is_off(fixture, monkeypatch, new_task):
+    server = FakeDeepSeek([
+        reply(0, content='old_observation ' * 4000),
+        reply(1, content=json.dumps(CHECKPOINT)),
+        reply(2, content='Continued.'),
+    ])
+    monkeypatch.setenv('DEEPSEEK_API_KEY', 'secret-test-key')
+    monkeypatch.setattr('builtins.input', lambda _: '/quit')
+    sessions = fixture['root'] / 'forced-compact'
+    try:
+        assert main(['run', '--provider', 'deepseek', '--model', 'deepseek-flash',
+                     '--reasoning', 'max', '--skill', str(fixture['skill']),
+                     '--base-url', server.url, '--log-dir', str(sessions),
+                     '--compaction', 'off', '--task', 'Find the captain']) == 0
+        folder = next(path for path in sessions.iterdir() if path.is_dir())
+        extra = ['--task', 'Continue safely.'] if new_task else []
+        assert main(['resume', str(folder), '--compact', *extra]) == 0
+        assert len(server.requests) == 3
+        assert 'tools' not in server.requests[1]
+        assert server.requests[1]['text']['format']['type'] == 'json_schema'
+        continued = json.dumps(server.requests[2]['input'])
+        assert 'old_observation' not in continued
+        assert 'Find the captain' in continued
+        if new_task:
+            assert 'Continue safely.' in continued
+        assert 'historical' in continued
+        assert 'The previous door is locked' in continued
+        state = json.loads((folder / 'active-state.json').read_text())
+        assert state['checkpoint'] == CHECKPOINT
+        assert 'old_observation' in (folder / 'events.jsonl').read_text()
+        assert json.loads((folder / 'manifest.json').read_text())['compaction'] is False
+    finally:
+        server.close()
 
 
 def test_auth_status_does_not_create_a_registration(tmp_path, capsys):

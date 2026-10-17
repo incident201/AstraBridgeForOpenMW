@@ -71,6 +71,25 @@ def test_bad_checkpoints_leave_active_context_untouched(fixture):
     finally: runner.close()
 
 
+def test_forced_compaction_failure_keeps_history_and_does_not_continue(fixture):
+    api = Provider(fixture['journal'])
+    runner = Runner(fixture['skill'], fixture['journal'], api, output=lambda _: None)
+    try:
+        runner.prepare()
+        runner.history.cycles = []
+        runner.history.user('Find the captain')
+        runner.history.assistant(Reply([], 'Done.'), [], 100)
+        before = runner.history.snapshot()
+        persisted = (fixture['journal'].root / 'active-state.json').read_bytes()
+        with pytest.raises(ProviderError, match='did not reduce context'):
+            runner.compact_if_needed(force=True)
+        assert runner.history.snapshot() == before
+        assert (fixture['journal'].root / 'active-state.json').read_bytes() == persisted
+        assert len(api.requests) == 1 and api.requests[0]['checkpoint']
+    finally:
+        runner.close()
+
+
 @pytest.mark.parametrize('stage', ['executed', 'unknown', 'not_started'])
 def test_resume_resolves_pending_calls_without_reexecuting_mutations(fixture, stage):
     f = fixture; api = Provider(f['journal']); runner = Runner(f['skill'], f['journal'], api, output=lambda _: None)

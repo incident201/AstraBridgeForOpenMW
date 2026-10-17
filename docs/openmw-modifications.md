@@ -215,6 +215,19 @@ by the global Lua script and updates the engine's paused state immediately.
 This lets the action controller stop the world within the synchronized frame,
 before the engine samples pause state for world/mechanics updates.
 
+`apps/openmw/engine.cpp` also suspends legacy local and global MWScript updates
+while the `AstraBridge` tag is held in gameplay. Upstream normally keeps those
+scripts running during pauses outside the main menu. That would let scripted
+gates, platforms and their timers advance while the agent is thinking, despite
+physics and the world simulation clock being paused.
+
+Real game menus and interactive message boxes can still process scripted UI
+state transitions. During that MWScript update the frame duration is zero, so
+`GetSecondsPassed` and duration-based `Move`/`Rotate` commands do not advance.
+The normal frame duration is restored before mechanics, physics, rendering
+and Lua updates. This behavior applies specifically to the `AstraBridge` pause
+tag; ordinary OpenMW menu behavior without that tag is preserved.
+
 The Lua action state machine releases held input, waits for the pause/settling
 boundary and returns a stable result. The runtime also forces synchronous
 physics in its private profile. That setting avoids committing a previous

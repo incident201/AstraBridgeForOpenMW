@@ -13,6 +13,7 @@ and implementation details.
 | `--image-context 1` | `run` | Keep one recent selected screenshot in active context instead of two. |
 | `--compaction off` | `run` | Retain active text history until the model context limit is reached. |
 | `--compact-at FRACTION` | `run` | Change the checkpoint trigger; default `0.75`, accepted range `0.01`–`0.95`. |
+| `--compact` | `resume` | Create a checkpoint before continuing, regardless of the saved automatic compaction setting or threshold. |
 | `--context-window TOKENS` | `run` | Supply the documented model context size when discovery does not report one. Values must exceed 1024. |
 | `--astra EXECUTABLE` | `run` | Override the executable from the exported installation metadata. |
 | `--base-url URL` | `run`, DeepSeek only | Use a compatible DeepSeek deployment. HTTPS is required except for loopback addresses. |
@@ -20,6 +21,11 @@ and implementation details.
 
 `resume` restores the saved model, effort, context settings, executable and
 installation. It accepts a new `--task`, not a new provider or model.
+`--compact` runs once after recovering interrupted tool results and before
+new gameplay requests. It does not enable automatic compaction if it was off.
+It retains up to eight complete recent response cycles, reducing that number
+when necessary to shrink the active context. The original task and resume
+warning are preserved. If no model history exists, it skips the checkpoint.
 
 For full syntax, run `astrabridge-runner --help` or add `--help` after a
 subcommand. To develop the runner from source, see [development](development.md).

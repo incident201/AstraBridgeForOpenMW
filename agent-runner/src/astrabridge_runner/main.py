@@ -39,6 +39,8 @@ def parser():
     run.add_argument('--compact-at', type=float, default=.75, help='Context fraction triggering compaction (default .75)')
     run.add_argument('--astra'); run.add_argument('--base-url', help='DeepSeek deployment override; other providers use their official API routes')
     resume = sub.add_parser('resume'); resume.add_argument('session', type=Path); resume.add_argument('--task')
+    resume.add_argument('--compact', action='store_true',
+                        help='Create a checkpoint before continuing, regardless of the automatic compaction threshold')
     logs = sub.add_parser('logs', help='Manage private runner session archives')
     log_actions = logs.add_subparsers(dest='logs_action', required=True)
     prune = log_actions.add_parser('prune', help='Preview deletion of old inactive sessions')
@@ -202,6 +204,10 @@ def main(argv=None):
                 context = runner.prepare(resume=resume)
                 print('Session:', journal.root); print('Connected profile:', context['profile']['name'])
                 print('Provider:', api.name, '| model:', api.model, '| reasoning:', api.effort)
+                if resume and args.compact:
+                    print('Compacting saved conversation before continuing...', file=sys.stderr, flush=True)
+                    compacted = runner.compact_if_needed(force=True)
+                    print('Compaction complete.' if compacted else 'No model history to compact yet.', file=sys.stderr)
                 print('Enter a goal. /quit, EOF or Ctrl+C releases control and leaves the game paused.')
                 text = args.task
                 if resume and text is None:

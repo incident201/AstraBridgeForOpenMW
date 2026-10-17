@@ -240,13 +240,16 @@ bool OMW::Engine::frame(unsigned frameNumber, float frametime)
         bool paused = mWorld->getTimeManager()->isPaused();
         AstraMedia::stream().begin(frametime, !paused
             && mStateManager->getState() != MWBase::StateManager::State_NoGame);
+        const bool astraPaused = mWorld->getTimeManager()->getPausedTags().contains("AstraBridge");
 
         {
             ScopedProfile<UserStatsType::Script> profile(frameStart, frameNumber, *timer, *stats);
+            mEnvironment.setFrameDuration(astraPaused ? 0.f : frametime);
 
             if (mStateManager->getState() != MWBase::StateManager::State_NoGame)
             {
-                if (!mWindowManager->containsMode(MWGui::GM_MainMenu) || !paused)
+                if ((!mWindowManager->containsMode(MWGui::GM_MainMenu) || !paused)
+                    && (!astraPaused || mWindowManager->isGuiMode()))
                 {
                     if (mWorld->getScriptsEnabled())
                     {
@@ -268,6 +271,8 @@ bool OMW::Engine::frame(unsigned frameNumber, float frametime)
                 }
             }
         }
+
+        mEnvironment.setFrameDuration(frametime);
 
         // update mechanics
         {

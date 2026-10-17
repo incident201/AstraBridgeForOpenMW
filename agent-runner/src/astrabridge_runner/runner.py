@@ -121,30 +121,42 @@ class Runner:
                 self.journal.event('tool_recovered', execution_id=execution, result=result, image_ref=image)
         self.history.persist()
 
-    def compact_if_needed(self):
+    def compact_if_needed(self, *, force=False):
         estimate = self.history.estimate(self.definitions)
         self.journal.event('context_budget', estimated_tokens=estimate, window=self.window, last_api_usage=self.history.meter)
         if self.on_status:
             usage=(self.history.meter or {}).get('usage',{})
             self.on_status({'estimated_tokens':estimate,'window':self.window,'last_api_usage':usage})
-        if not self.compaction or estimate < self.window * self.compact_at: return
+        if not force and (not self.compaction or estimate < self.window * self.compact_at): return False
         if not any(cycle['kind'] == 'response' for cycle in self.history.cycles):
             # Bootstrap estimates can be conservative for schema-heavy requests;
             # the first completed API response provides the actual usage anchor.
-            return
+            return False
         if any(cycle['pending'] for cycle in self.history.cycles): raise BridgeFailure('Cannot compact an unfinished tool cycle.')
         checkpoint = Compactor(self.api, self.journal).create(self.history)
         original = self.history.snapshot(); self.history.checkpoint = checkpoint
-        # Keep eight complete model cycles, and any intervening user messages.
+        # Keep complete call/result cycles. A forced checkpoint may retain
+        # fewer recent cycles when eight would prevent any reduction.
         responses = [i for i, cycle in enumerate(self.history.cycles) if cycle['kind'] == 'response']
-        start = responses[-8] if len(responses) >= 8 else 0
-        self.history.cycles = copy.deepcopy(self.history.cycles[start:]); self.history.meter = None
-        reduced = self.history.estimate(self.definitions)
-        if reduced >= estimate or reduced >= self.window * self.compact_at:
+        # A forced checkpoint must summarize at least one model response,
+        # including sessions shorter than the ordinary eight-cycle tail.
+        retained = min(8, len(responses) - 1 if force else len(responses))
+        choices = range(retained, -1, -1) if force else [retained]
+        for keep in choices:
+            if force:
+                start = responses[-keep] if keep else responses[-1] + 1
+            else:
+                start = responses[-8] if len(responses) >= 8 else 0
+            self.history.cycles = copy.deepcopy(original['cycles'][start:]); self.history.meter = None
+            reduced = self.history.estimate(self.definitions)
+            if reduced < estimate and (force or reduced < self.window * self.compact_at):
+                break
+        else:
             self.history.checkpoint = original['checkpoint']; self.history.cycles = original['cycles']; self.history.meter = original['meter']
             raise ProviderError('Checkpoint did not reduce context enough. Previous context was retained.')
         name = f'checkpoint-{self.journal.sequence:06}.json'; self.journal.write(name, checkpoint)
         self.history.persist(); self.journal.event('context_compacted', checkpoint=name, before=estimate, after=reduced, retained_cycles=len(self.history.cycles))
+        return True
 
     def turn(self, text):
         self.history.user(text); self.journal.event('user', text=text)

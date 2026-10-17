@@ -30,7 +30,7 @@ Create a folder named, for example, `AstraBridgeRunner`. Put the downloaded
 wheel there and **open a terminal in that folder**. Use this folder for all
 examples below.
 
-The examples use `astrabridge_runner-0.1.7-py3-none-any.whl`.
+The examples use `astrabridge_runner-0.1.8-py3-none-any.whl`.
 **Substitute the exact filename you downloaded.**
 
 ### Linux — Bash
@@ -39,7 +39,7 @@ The examples use `astrabridge_runner-0.1.7-py3-none-any.whl`.
 python3 --version
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install ./astrabridge_runner-0.1.7-py3-none-any.whl
+python -m pip install ./astrabridge_runner-0.1.8-py3-none-any.whl
 astrabridge-runner --help
 ```
 
@@ -54,7 +54,7 @@ Install Python 3.11 or newer first, then run:
 ```powershell
 py -3 --version
 py -3 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install .\astrabridge_runner-0.1.7-py3-none-any.whl
+.\.venv\Scripts\python.exe -m pip install .\astrabridge_runner-0.1.8-py3-none-any.whl
 $env:Path = "$(Resolve-Path .\.venv\Scripts);$env:Path"
 astrabridge-runner --help
 ```
@@ -360,6 +360,18 @@ To supply a new instruction:
 ```sh
 astrabridge-runner resume "./sessions/SESSION_DIRECTORY" --task "Continue toward the objective, then save."
 ```
+
+To summarize the saved conversation before continuing:
+
+```sh
+astrabridge-runner resume "./sessions/SESSION_DIRECTORY" --compact
+```
+
+This creates a checkpoint even below the automatic context threshold or when
+automatic compaction was disabled. You can combine it with `--task`.
+The full session log and archived screenshots are kept. Compaction makes a
+separate model request, which consumes tokens. If it fails, the runner keeps
+the previous context and stops without continuing gameplay.
 
 **Resume restores the conversation, not a game save.** If you loaded an older
 save or played manually in between, explain what changed in `--task`.

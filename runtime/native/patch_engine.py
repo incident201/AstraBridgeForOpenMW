@@ -512,6 +512,27 @@ replace('apps/openmw/engine.cpp', '        bool paused = mWorld->getTimeManager(
 '''        bool paused = mWorld->getTimeManager()->isPaused();
         AstraMedia::stream().begin(frametime, !paused
             && mStateManager->getState() != MWBase::StateManager::State_NoGame);''')
+# MWScript normally continues during non-main-menu pauses. Freeze its gameplay
+# updates for our reasoning pause, while allowing menu/button state machines
+# to process real UI input without advancing timers or scripted transforms.
+replace('apps/openmw/engine.cpp',
+'''        AstraMedia::stream().begin(frametime, !paused
+            && mStateManager->getState() != MWBase::StateManager::State_NoGame);''',
+'''        AstraMedia::stream().begin(frametime, !paused
+            && mStateManager->getState() != MWBase::StateManager::State_NoGame);
+        const bool astraPaused = mWorld->getTimeManager()->getPausedTags().contains("AstraBridge");''')
+replace('apps/openmw/engine.cpp',
+        '            ScopedProfile<UserStatsType::Script> profile(frameStart, frameNumber, *timer, *stats);',
+'''            ScopedProfile<UserStatsType::Script> profile(frameStart, frameNumber, *timer, *stats);
+            mEnvironment.setFrameDuration(astraPaused ? 0.f : frametime);''')
+replace('apps/openmw/engine.cpp',
+        '                if (!mWindowManager->containsMode(MWGui::GM_MainMenu) || !paused)',
+'''                if ((!mWindowManager->containsMode(MWGui::GM_MainMenu) || !paused)
+                    && (!astraPaused || mWindowManager->isGuiMode()))''')
+replace('apps/openmw/engine.cpp', '        // update mechanics',
+'''        mEnvironment.setFrameDuration(frametime);
+
+        // update mechanics''')
 if '            AstraMedia::stream().render();' in (root/'apps/openmw/engine.cpp').read_text():
     replace('apps/openmw/engine.cpp','            AstraMedia::stream().render();',
         '            AstraMedia::stream().render(mViewer->getFrameStamp()->getFrameNumber());')
