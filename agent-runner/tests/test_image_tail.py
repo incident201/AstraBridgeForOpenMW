@@ -11,6 +11,7 @@ from astrabridge_runner.providers.deepseek import DeepSeek
 from astrabridge_runner.providers.gemini import Gemini
 from astrabridge_runner.providers.grok import Grok
 from astrabridge_runner.providers.openai import OpenAI
+from astrabridge_runner.providers.mimo import MiMo
 from astrabridge_runner.types import Reply, ToolCall
 
 
@@ -20,7 +21,7 @@ class Images:
         return {'type': 'image_url', 'image_url': {'url': 'data:image/png;base64,' + data}}
 
 
-@pytest.fixture(params=[OpenAI, DeepSeek, Grok, Gemini])
+@pytest.fixture(params=[OpenAI, DeepSeek, Grok, Gemini, MiMo])
 def api(request, tmp_path):
     journal = Journal(tmp_path)
     cls = request.param
@@ -45,7 +46,7 @@ def cycle(history, number, image=None, historical=False):
     else:
         native = [{'type': 'reasoning', 'encrypted_content': f'opaque-{number}', 'summary': []},
                   {'type': 'function_call', 'call_id': call.id, 'name': call.name, 'arguments': '{}'}]
-        if provider.name == 'deepseek':
+        if provider.name in ('deepseek', 'mimo'):
             native[0] = {'type': 'reasoning', 'content': [{'type': 'reasoning_text', 'text': f'Reasoning {number}'}]}
     history.assistant(Reply(native, ''), [{'call': call.dump()}])
     result = {'ok': True, 'result': {'observation': number, 'diagnostics': 'Keep all of this.',

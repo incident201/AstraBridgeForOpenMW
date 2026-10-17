@@ -30,7 +30,7 @@ Create a folder named, for example, `AstraBridgeRunner`. Put the downloaded
 wheel there and **open a terminal in that folder**. Use this folder for all
 examples below.
 
-The examples use `astrabridge_runner-0.1.5-py3-none-any.whl`.
+The examples use `astrabridge_runner-0.1.6-py3-none-any.whl`.
 **Substitute the exact filename you downloaded.**
 
 ### Linux — Bash
@@ -39,7 +39,7 @@ The examples use `astrabridge_runner-0.1.5-py3-none-any.whl`.
 python3 --version
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install ./astrabridge_runner-0.1.5-py3-none-any.whl
+python -m pip install ./astrabridge_runner-0.1.6-py3-none-any.whl
 astrabridge-runner --help
 ```
 
@@ -54,7 +54,7 @@ Install Python 3.11 or newer first, then run:
 ```powershell
 py -3 --version
 py -3 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install .\astrabridge_runner-0.1.5-py3-none-any.whl
+.\.venv\Scripts\python.exe -m pip install .\astrabridge_runner-0.1.6-py3-none-any.whl
 $env:Path = "$(Resolve-Path .\.venv\Scripts);$env:Path"
 astrabridge-runner --help
 ```
@@ -183,6 +183,7 @@ Choose **one** provider:
 | Google Gemini | Gemini API key | `GEMINI_API_KEY` |
 | xAI Grok | xAI API key | `XAI_API_KEY` |
 | DeepSeek | DeepSeek API key | `DEEPSEEK_API_KEY` |
+| Xiaomi MiMo | MiMo API key | `MIMO_API_KEY` |
 
 ### OpenAI — Sign in with ChatGPT
 
@@ -209,12 +210,12 @@ an error loading a `127.0.0.1` address. Copy that complete address and paste it
 into the waiting runner terminal. Keep the login command running while you do
 this; the terminal hides the pasted address.
 
-### Gemini, Grok or DeepSeek — API key
+### Gemini, Grok, DeepSeek or MiMo — API key
 
 Get a key from your provider's developer account. API access and billing are
 separate from simply signing into its consumer chat application.
 
-The following example uses Gemini. **For Grok or DeepSeek, replace
+The following example uses Gemini. **For Grok, DeepSeek or MiMo, replace
 `GEMINI_API_KEY` with the variable from the table.**
 
 Linux — Bash:
@@ -245,7 +246,7 @@ List the models available to your account:
 astrabridge-runner models --provider openai
 ```
 
-Replace `openai` with `gemini`, `grok` or `deepseek` for another provider.
+Replace `openai` with `gemini`, `grok`, `deepseek` or `mimo` for another provider.
 The list shows model IDs and reasoning levels. Use the exact model ID, not
 its display name.
 
@@ -281,9 +282,20 @@ astrabridge-runner run --provider grok --model grok-4.7 --reasoning low --skill 
 astrabridge-runner run --provider deepseek --model deepseek-flash --reasoning low --skill ./api-skill --log-dir ./sessions
 ```
 
+**MiMo V2.6 Pro:**
+
+```sh
+astrabridge-runner run --provider mimo --model mimo-v2.6-pro --reasoning high --skill ./api-skill --log-dir ./sessions
+```
+
+Set `MIMO_API_KEY` first, as described above. MiMo currently treats every
+reasoning level except `none` as the same enabled thinking mode. Use
+`--reasoning none` to disable thinking; `low` does not reduce its intensity.
+
 To choose another model, replace `--model` and `--reasoning` with supported values
-from the model list. Reasoning effort controls the amount of reasoning, **not a
-spending limit**. See [model observations](Models.md) for gameplay results.
+from the model list. Reasoning effort controls reasoning according to the
+provider's supported modes; it is **not a spending limit**. See
+[model observations](Models.md) for gameplay results.
 
 `--skill` points to the exported folder. `--log-dir` selects where conversations
 are stored. The runner prints the connected profile and a **Session directory**

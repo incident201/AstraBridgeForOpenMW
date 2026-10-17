@@ -82,8 +82,10 @@ and [route limitations](https://developers.openai.com/siwc/token-sharing-open-so
 | DeepSeek | `https://api.deepseek.com/responses` | Streamed Responses items, including native `reasoning_text`. |
 | Grok | `https://api.x.ai/v1/responses` | Streamed Responses items, including encrypted reasoning. |
 | Gemini | `https://generativelanguage.googleapis.com/v1beta/interactions` | Complete native steps, including thought signatures. |
+| MiMo | `https://api.xiaomimimo.com/v1/responses` | Streamed Responses items, including native reasoning text. Authenticated with `MIMO_API_KEY`. |
 
-All adapters use `store:false` and client-owned history. Grok requests encrypted
+All adapters use client-owned history. All except MiMo send `store:false`;
+MiMo omits the undocumented `store` parameter. Grok requests encrypted
 reasoning and uses a session-specific prompt cache key that survives resume.
 Gemini uses implicit caching and returns non-streamed responses. Connection and
 write timeouts are separate from read timeouts; Gemini and Grok permit an hour
@@ -107,10 +109,19 @@ uses documented defaults for Grok 4.7 when its catalog omits context/effort
 metadata. Gemini combines the catalog with its adapter's supported model/effort
 list. Unknown capabilities fail rather than silently substituting a model.
 
+MiMo checks the account's model catalog and supplies the documented 1M-token
+context window and image support for V2.6 Pro, Flash and Pro Ultraspeed when
+the catalog omits capabilities. `none` disables thinking; all other accepted
+reasoning levels currently enable the same mode. Native reasoning text is
+retained across tool turns. MiMo omits undocumented `parallel_tool_calls` and
+image `detail` fields; the runner still enforces one tool call per response.
+
 Provider references: [OpenAI Responses](https://developers.openai.com/api/reference/resources/responses/methods/create),
 [DeepSeek Responses](https://api-docs.deepseek.com/api/create-response/),
 [xAI reasoning](https://docs.x.ai/developers/model-capabilities/text/reasoning),
-[Gemini Interactions](https://ai.google.dev/gemini-api/docs/interactions-overview).
+[Gemini Interactions](https://ai.google.dev/gemini-api/docs/interactions-overview),
+[MiMo Responses](https://mimo.mi.com/docs/en-US/api/chat/responses) and
+[MiMo model capabilities](https://mimo.mi.com/docs/en-US/quick-start/summary/model).
 
 ## Context and checkpoints
 
@@ -125,6 +136,10 @@ Grok also receive `strict:true`. Gemini receives a JSON `response_format` and
 schema. Local validation additionally enforces field limits and a 12,000-byte
 UTF-8 budget. OpenAI commentary stays in the log; its `final_answer`, when
 present, supplies the checkpoint JSON.
+
+MiMo uses `text.format: {"type":"json_object"}` rather than unsupported strict
+JSON Schema output. The shared checkpoint instruction defines the fields and
+the same local schema and size validation applies before replacing history.
 
 A valid checkpoint replaces older active history, retaining the instructions,
 verbatim current request and eight complete recent model cycles. A checkpoint

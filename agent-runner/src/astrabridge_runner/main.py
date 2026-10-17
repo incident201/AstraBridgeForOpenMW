@@ -12,12 +12,13 @@ from .providers.deepseek import DeepSeek
 from .providers.grok import Grok
 from .providers.gemini import Gemini
 from .providers.openai import OpenAI
+from .providers.mimo import MiMo
 from .runner import Runner
 from .usage import read_usage, format_usage
 
 
 def parser():
-    root = argparse.ArgumentParser(description='AstraBridge native-tool runner: ChatGPT OAuth, DeepSeek, Grok or Gemini API.')
+    root = argparse.ArgumentParser(description='AstraBridge native-tool runner: ChatGPT OAuth, DeepSeek, Grok, Gemini or MiMo API.')
     root.add_argument('--auth-dir', type=Path, help='Protected ChatGPT credential directory')
     sub = root.add_subparsers(dest='command', required=True)
     auth = sub.add_parser('auth'); actions = auth.add_subparsers(dest='auth_action', required=True)
@@ -26,11 +27,11 @@ def parser():
     actions.add_parser('status'); actions.add_parser('accounts')
     use = actions.add_parser('use'); use.add_argument('account')
     logout = actions.add_parser('logout'); logout.add_argument('--account')
-    models = sub.add_parser('models'); models.add_argument('--provider', choices=('openai', 'deepseek', 'grok', 'gemini'), required=True)
+    models = sub.add_parser('models'); models.add_argument('--provider', choices=('openai', 'deepseek', 'grok', 'gemini', 'mimo'), required=True)
     models.add_argument('--account'); models.add_argument('--json', action='store_true')
-    run = sub.add_parser('run'); run.add_argument('--provider', choices=('openai', 'deepseek', 'grok', 'gemini'), required=True)
+    run = sub.add_parser('run'); run.add_argument('--provider', choices=('openai', 'deepseek', 'grok', 'gemini', 'mimo'), required=True)
     run.add_argument('--model', required=True); run.add_argument('--reasoning', required=True,
-        help='Provider reasoning effort; Gemini 3.8 Flash supports low, medium and high; Grok 4.7 also supports xhigh')
+        help='Provider reasoning effort; Gemini 3.8 Flash supports low, medium and high; Grok 4.7 also supports xhigh; MiMo uses none for thinking off and other levels for on')
     run.add_argument('--skill', type=Path, required=True); run.add_argument('--account')
     run.add_argument('--task'); run.add_argument('--log-dir', type=Path, default=Path('astrabridge-sessions'))
     run.add_argument('--context-window', type=int); run.add_argument('--image-context', type=int, choices=(1, 2), default=2)
@@ -71,6 +72,11 @@ def provider(name, journal, args, model, effort, account=None):
         if not key:
             raise ValueError('Set DEEPSEEK_API_KEY in the environment; do not put keys in arguments or prompts.')
         return DeepSeek(key, journal, getattr(args, 'base_url', None) or 'https://api.deepseek.com', model, effort)
+    if name == 'mimo':
+        key = os.environ.get('MIMO_API_KEY')
+        if not key:
+            raise ValueError('Set MIMO_API_KEY in the environment; do not put keys in arguments or prompts.')
+        return MiMo(key, journal, model, effort)
     raise ValueError('Unknown model provider: ' + str(name))
 
 
