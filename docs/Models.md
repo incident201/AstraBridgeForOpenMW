@@ -13,6 +13,7 @@ than a general ranking of model capabilities.
 | GPT-6 Luna (max) | Completed none of its assigned tasks. Once reached Balmora, but could not find Caius Cosades. | Codex CLI; AstraBridge Runner |
 | Gemini 4 Argon (medium / high) | Efficient navigation and effective local recovery, with high response latency even for routine actions. | AstraBridge Runner |
 | Gemini 3.8 Flash (high) | Inconsistent navigation; successful runs alternate with prolonged wandering and repeated reinterpretation of landmarks. | agy CLI |
+| MiMo V2.6 Pro (high) | Follows quest directions and recovers from local blocks, but navigation is uneven and API responses are slow. | AstraBridge Runner |
 | DeepSeek 4.1 Flash (max) | Completed the tutorial and saved; reached Balmora in one test, but then wandered in circles. | Codex CLI; AstraBridge Runner |
 | Claude Opus 5.5 (high) | Can navigate autonomously and recover from mistakes, but route planning is uneven and can involve substantial detours. | Claude Code CLI |
 | Claude Sonnet 5.5 (high) | Recovers from local obstacles, but longer route planning remains inefficient. | Claude Code CLI |
@@ -166,6 +167,37 @@ Recovery is often slow and inconsistent, requiring many intermediate
 observations, detours, and attempts. The model may remain attached to an incorrect
 assumption or repeatedly revise its interpretation without making useful
 progress. Navigation instability persists despite generally competent tool use.
+
+## MiMo V2.6 Pro (high)
+
+MiMo was tested on Linux through AstraBridge Runner, connected directly to the
+MiMo API using Chat Completions with thinking enabled.
+
+It reads journal entries and dialogue directions, retains the objective, and
+uses signpost labels, screenshots and maps to make progress. It followed the
+directions as far as the destination's entrance and handled an intervening fight
+using the returned health and target-state information.
+
+Longer route planning is uneven. MiMo can lose a useful road, spend many actions
+among obstacles, and repeatedly reinterpret the same distant landmarks without
+establishing a better route. Detailed visual descriptions do not consistently
+produce reliable spatial understanding. Some interpretations are plainly wrong,
+including mistaking a HUD element for a possible landmark in the game world.
+
+Recovery is possible, but often slow. MiMo recognizes lack of progress, changes
+movement methods, consults the Atlas and returns to known landmarks. It can
+eventually abandon an unproductive approach and resume useful travel. However,
+it may repeatedly reconsider alternatives before committing to an action, and
+its explanations for failed movement are not always verified.
+
+High response latency is a significant practical weakness. API responses often
+take **30–60 seconds**, sometimes longer, including before small movement or
+other routine actions. Repeated deliberation adds substantial delay without
+necessarily improving the decision. These are full API response times in the
+tested setup, not isolated measurements of reasoning time.
+
+The observations show useful autonomous navigation and recovery, but do not yet
+establish reliable completion of longer quests.
 
 ## DeepSeek 4.1 Flash (max)
 
