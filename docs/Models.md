@@ -15,6 +15,7 @@ than a general ranking of model capabilities.
 | Gemini 3.8 Flash (high) | Inconsistent navigation; successful runs alternate with prolonged wandering and repeated reinterpretation of landmarks. | agy CLI |
 | MiMo V2.6 Pro (high) | Follows quest directions and recovers from local blocks, but navigation is uneven and API responses are slow. | AstraBridge Runner |
 | DeepSeek 4.1 Flash (max) | Completed the tutorial and saved; reached Balmora in one test, but then wandered in circles. | Codex CLI; AstraBridge Runner |
+| DeepSeek 4.1 Flash 1017 (high) | Completed and verified an item-retrieval objective, but required extensive repeated exploration and tool use. | AstraBridge Runner |
 | Claude Opus 5.5 (high) | Can navigate autonomously and recover from mistakes, but route planning is uneven and can involve substantial detours. | Claude Code CLI |
 | Claude Sonnet 5.5 (high) | Recovers from local obstacles, but longer route planning remains inefficient. | Claude Code CLI |
 | Claude Haiku 5.5 (xhigh) | Poor recovery from blocked progress; tends to wait or ask for help instead of revising its plan. | Claude Code CLI |
@@ -199,7 +200,9 @@ tested setup, not isolated measurements of reasoning time.
 The observations show useful autonomous navigation and recovery, but do not yet
 establish reliable completion of longer quests.
 
-## DeepSeek 4.1 Flash (max)
+## DeepSeek models
+
+### DeepSeek 4.1 Flash (max)
 
 With AstraBridge Runner connected directly to the DeepSeek API on Linux,
 DeepSeek independently started a new game, completed character creation and the
@@ -229,6 +232,39 @@ reliably, but still struggled to revise its understanding and make progress.
 The custom-runner test retained the full text history, including reasoning,
 without context compaction. The failures in that run therefore cannot be
 attributed to information being removed during compaction.
+
+### DeepSeek 4.1 Flash 1017 (high)
+
+Version 1017 was tested on Linux through AstraBridge Runner with reasoning
+effort `high`. It completed an item-retrieval objective, verified the item in
+its inventory, saved, and stopped taking gameplay actions as instructed.
+
+Tool use is functional and varied. It reads structured results, uses maps and
+the Atlas, manages consumables, handles combat, and can change game settings
+through the UI. Querying remembered objects helped it connect an earlier
+sighting with the target item and return to collect it.
+
+The main weakness is organizing exploration into a reliable search. Repeated
+scans, map checks and camera adjustments do not consistently establish which
+areas have been searched or what should happen next. It can describe a sensible
+plan but spend many more actions revisiting familiar places instead of carrying
+it out. Successful completion therefore required substantial extra exploration
+and tool use.
+
+Unsupported explanations remain a problem. It repeatedly interpreted ordinary
+darkness as a rendering failure and later speculated that the dungeon had been
+modified for the benchmark. Correcting such an assumption did not reliably
+prevent it from returning: the model repeatedly announced that it could finally
+see clearly and restarted its search.
+
+Persistence and local recovery are useful strengths. It tries alternative
+movement methods, uses available resources, and continues after failed actions.
+It retained the objective through context compaction. However, repeated
+searches and mistaken interpretations occurred both before and after compaction,
+so they cannot be explained solely by context summarization.
+
+This version demonstrated a verified successful outcome, while navigation,
+search efficiency and the stability of corrected assumptions remain weaknesses.
 
 ## Claude models
 
