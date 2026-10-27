@@ -10,6 +10,7 @@ than a general ranking of model capabilities.
 | --- | --- | --- |
 | GPT-6 Astra (high / xhigh) | Sustained autonomous play, efficient navigation, practical resource planning, and effective recovery from mistakes. | Codex CLI |
 | GPT-6.1 Sol (high / xhigh) | Sustained autonomous play, efficient navigation, and reliable recovery from unsuccessful approaches. | Codex CLI; AstraBridge Runner |
+| GPT-6.1 Terra | Autonomous goal completion and effective local recovery, with navigation detours and occasional tool-output truncation. | Codex CLI |
 | GPT-6 Luna (max) | Completed none of its assigned tasks. Once reached Balmora, but could not find Caius Cosades. | Codex CLI; AstraBridge Runner |
 | Gemini 4 Argon (medium / high) | Efficient navigation and effective local recovery, with high response latency even for routine actions. | AstraBridge Runner |
 | Gemini 3.8 Flash (high) | Inconsistent navigation; successful runs alternate with prolonged wandering and repeated reinterpretation of landmarks. | agy CLI |
@@ -95,6 +96,30 @@ Both Sol and Astra also continued working when AstraBridge tools malfunctioned.
 For example, an earlier faulty `revisit` could take the player to the wrong floor.
 They distinguished incorrect tool behavior from normal gameplay and found other
 ways to pursue the same objective.
+
+### GPT-6.1 Terra
+
+Terra was tested through Codex CLI on Linux. It independently started a new
+game, completed the tutorial, followed NPC directions to find the requested
+character, confirmed the character's identity through dialogue, saved, and
+ended the session. It retained its objective through context compaction.
+
+Recovery from local difficulties was a strength. When assisted movement failed,
+Terra changed targets or control methods, tried another direction, or returned
+to a known Atlas point. It used screenshots and structured observations to
+continue after mistakes instead of abandoning the objective or remaining in
+a prolonged loop of speculation.
+
+Navigation was functional but imperfect. It made unnecessary detours, approached
+incorrect doors, and repeatedly returned to one location before finding a useful
+route. It could recover and complete the task, but these observations do not yet
+establish sustained success across longer, more varied quests.
+
+Tool use also had a weakness: Terra progressively lowered Codex's output limits,
+sometimes to 300–600 tokens, causing some AstraBridge responses to be truncated.
+It did not write custom parsers, but still discarded potentially useful scene
+information and diagnostics through those limits. This did not prevent task
+completion in the observed session.
 
 ### GPT-6 Luna (max)
 
