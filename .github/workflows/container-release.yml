@@ -130,6 +130,10 @@ jobs:
             -v "$GITHUB_WORKSPACE/packaging:/checks:ro" -v "$WORK/tests:/results" \
             --entrypoint /opt/astrabridge/python/bin/python "$IMAGE" \
             /checks/cpu_recording_smoke.py --directory /results/cpu-recording
+          podman --root "$WORK/containers" --runroot "$WORK/run/podman" run --rm --network=none \
+            -v "$GITHUB_WORKSPACE/packaging:/checks:ro" -v "$WORK/tests:/results" \
+            --entrypoint /opt/astrabridge/python/bin/python "$IMAGE" \
+            /checks/cpu_recording_smoke.py --directory /results/cpu-recording-backpressure --backpressure
       - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         if: steps.native-cache.outputs.cache-hit != 'true'
         with:

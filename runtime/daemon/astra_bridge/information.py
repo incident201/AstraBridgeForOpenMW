@@ -1,5 +1,6 @@
 """Search and page public snapshots without discarding their contents."""
 import json
+from copy import deepcopy
 from types import SimpleNamespace
 
 from .protocol import BridgeError, number
@@ -79,6 +80,9 @@ def details(session, args):
 def query_ui(session, args):
     if args.keys()-{'query','page','limit','panel','role','control'}: raise BridgeError('invalid_arguments')
     value = session.command('ui')
+    # Keep the sensor's complete history separate from the requested UI page
+    # and recent-text preview, for subsequent automatic answer comparisons.
+    session._queried_ui = deepcopy(value)
     if getattr(session,'full_observations',False) and not any(args.get(k) for k in ('query','page','panel','role','control')):return value
     rows = value.get('elements', [])
     for key in ('panel','role','control'):
@@ -94,7 +98,7 @@ def query_ui(session, args):
     else:
         text=value.get('dialogue',{}).get('text',value.get('text',''))
         value.pop('text',None)
-        if 'dialogue' in value:value['dialogue']={**value['dialogue'],'text':text[:1600]}
+        if 'dialogue' in value:value['dialogue']={**value['dialogue'],'text':text[-1600:]}
         else:value['text']=text[:1600]
         if len(text)>1600:value.update(text_characters=len(text),text_has_more=True,text_details='details ui')
     return value

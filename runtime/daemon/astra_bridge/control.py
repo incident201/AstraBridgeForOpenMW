@@ -7,7 +7,7 @@ import uuid
 from copy import deepcopy
 
 from .protocol import BridgeError, atomic_json, validate
-from .observations import present_response
+from .observations import present_response, remember_observation
 from .receipts import Receipts
 from .autosave import finish_session
 from .information import receipt_details
@@ -95,18 +95,21 @@ class Control:
                     if op=='finish_session':
                         self.cancelled.clear()
                         request_id,previous=self.receipts.begin(op,args,request_id)
-                        if previous:return {'replayed':False,**previous}
+                        if previous:
+                            if 'response' in previous:
+                                previous['response'] = present_response(previous['response'], full, operation=op)
+                            return {'replayed':False,**previous}
                         try:
                             result=finish_session(s,args)
                             self.receipts.finish(request_id,result)
-                            return {**result,'request_id':request_id}
+                            return {**present_response(result, full, operation=op),'request_id':request_id}
                         except Exception:
                             self.receipts.finish(request_id,{'error':'finish_session_result_unknown'},'unknown')
                             raise
                     if op == 'shutdown':
                         s.close()
                         return {'stopped': True}
-                    return present_response(s.call('stop', args), full)
+                    return present_response(s.call('stop', args), full, self.presented_observation, operation=op)
                 finally:
                     self.cancelled.clear()
         if not self.owner.acquire(blocking=False):
@@ -122,7 +125,8 @@ class Control:
             self.active['request_id']=request_id
             if previous:
                 if 'response' in previous:previous['response']=present_response(
-                    previous['response'], full, operation=op, request_id=request_id)
+                    previous['response'], full, target_ref=args.get('ref') or args.get('target'),
+                    operation=op, request_id=request_id, arguments=args)
                 return {'replayed':False,**previous}
             try:
                 result=s.call(op,args)
@@ -158,16 +162,21 @@ class Control:
                 failure=exc.response() if isinstance(exc,BridgeError) else {'error':'controller_operation_failed'}
                 self.receipts.finish(request_id,failure,'unknown' if unknown else 'rejected')
                 raise
-            presented=present_response(result, full, before, args.get('ref'), op, request_id)
+            presented=present_response(result, full, before, args.get('ref') or args.get('target'), op, request_id, arguments=args)
             observation = result.get('observation', result.get('final'))
             if isinstance(result.get('observation'), int) and 'state' in result:
                 observation = result
             if isinstance(observation, dict):
-                self.presented_observation = deepcopy(observation)
+                delivered = presented.get('observation', presented.get('final', presented))
+                if not isinstance(delivered, dict):
+                    delivered = presented
+                self.presented_observation = remember_observation(observation, delivered, before, full=full)
             elif op == 'ui' and ('text' in result or 'text' in result.get('dialogue', {})):
                 snapshot = dict(self.presented_observation or {})
-                snapshot['ui'] = deepcopy(result)
+                snapshot['ui'] = deepcopy(getattr(s, '_queried_ui', result))
                 self.presented_observation = snapshot
+            elif op in {'inspect', 'status'} and any(key in result for key in ('stats', 'body', 'combat', 'effects')):
+                self.presented_observation = remember_observation(result, presented, before)
             if 'details' in presented:presented['details']=presented['details'].replace('REQUEST_ID',request_id)
             return {**presented,'request_id':request_id}
         finally:

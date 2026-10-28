@@ -18,9 +18,12 @@ from astra_bridge.recording import Recorder
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--directory',type=Path,required=True)
+    parser.add_argument('--backpressure',action='store_true',help='Exercise slow video delivery with a small PCM ring')
     args=parser.parse_args();root=args.directory;root.mkdir(parents=True,exist_ok=True)
     video=FrameStream(root/'frames.bin',capacity=320*180*4)
-    audio=MediaStream(root/'audio.bin')
+    class SmallAudioRing(MediaStream):
+        slots=16
+    audio=(SmallAudioRing if args.backpressure else MediaStream)(root/'audio.bin')
     done=threading.Event();active=threading.Event();active.set()
     errors=[]
     def producer():
@@ -66,9 +69,18 @@ def main():
             while not video.supported and time.monotonic()<deadline:time.sleep(.01)
             display=SimpleNamespace(frame_stream=video,media_stream=audio,sound=True)
             recorder=Recorder(display,root/'cpu.mp4',encoding_options={'mode':'cpu'})
-            time.sleep(.35);active.clear();time.sleep(.1)
+            if args.backpressure:
+                pipe=recorder.process.stdin
+                class SlowVideoPipe:
+                    def write(self,data):
+                        time.sleep(.08)
+                        return pipe.write(data)
+                    def close(self):
+                        return pipe.close()
+                recorder.process.stdin=SlowVideoPipe()
+            time.sleep(4 if args.backpressure else .35);active.clear();time.sleep(.1)
             before=audio.samples;time.sleep(.25);assert audio.samples==before
-            active.set();time.sleep(.35)
+            active.set();time.sleep(2 if args.backpressure else .35)
             result=recorder.stop();recorder=None
             assert result['error'] is None,result
             assert result['upload_ready'] and result['encoder']=='libx264' and result['frames']>10,result
@@ -80,7 +92,8 @@ def main():
             assert (video_stream['width'],video_stream['height'],video_stream['r_frame_rate'])==(1920,1080,'60/1')
             assert video_stream['codec_name']=='h264' and sound['codec_name']=='aac' and sound['sample_rate']=='48000'
             subprocess.run([binary,'-v','error','-i',str(root/'cpu.mp4'),'-f','null','-'],check=True)
-            (root/'verification.json').write_text(json.dumps({'fixture':'synthetic transport producer','recording':result,'ffprobe':data},indent=2)+'\n')
+            (root/'verification.json').write_text(json.dumps({'fixture':'synthetic transport producer',
+                'backpressure':args.backpressure,'recording':result,'ffprobe':data},indent=2)+'\n')
             print(json.dumps({'encoder':result['encoder'],'frames':result['frames'],'av_difference_ms':result['av_difference_ms'],'decoded':True}))
     finally:
         if recorder:recorder.stop()

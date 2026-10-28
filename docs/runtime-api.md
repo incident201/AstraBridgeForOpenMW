@@ -80,22 +80,58 @@ effective summary reason, such as a completed animation followed by a failed
 cast. Nonduplicated feedback events appear in `summary.events`; raw `feedback`
 and detailed planner telemetry remain in full results.
 
-Compact observations retain current observation identity, screenshot, location
-and UI mode. Gameplay observations also retain current heading/pitch, visible
-object handles and available local passages; menu responses focus on their UI. Support, swimming, airborne state, active mobility effects and disabled
-controls remain explicit. Health/fatigue warnings remain visible while critically
-low. Other resources, selected equipment, camera/image settings and combat
-capabilities are reported when first observed or changed. Combat capability
-changes omit unchanged fields of the same selected weapon or spell. Effect
-updates include only new or changed active sources; countdown-only updates retain
-effect identity and remaining time without repeating strength. Removals are
-reported as `effect_ended` events. Ordinary enabled controls and inactive flags are omitted. Empty event
-and warning lists and repeated appearance/disappearance handle lists are omitted.
-A passage's omitted `clear_m` equals `distance_m`; omitted height change and slope
-mean zero and level respectively.
+Compact observations retain the observation identity, screenshot and current UI
+mode. Other context depends on the requested operation:
 
-Change comparisons use the last observation returned to the connected gameplay
-owner, independently of internal observations or Desktop polling. A new agent
+| Operation | Automatic context |
+| --- | --- |
+| `observe`, `survey`, `scan`, load/new game | World snapshot, physical state, local passages and relevant own-state updates. |
+| Turning, `focus`, FOV changes | Orientation and visible targets. Passage lists are explicit queries. |
+| Movement and attempted/blocked navigation | Motion, blockers, physical state, targets and local passage refs. |
+| UI choices/edits, closing popups, journal/inventory UI, maps | Outcome and current UI, plus meaningful state changes. No unrelated scene, terrain or character snapshot. |
+| Item use/rest and magic selection | Relevant resource, effect or selection changes, without automatic surroundings. |
+
+Actual movement or a location transition can add spatial context even when
+triggered by a UI action. Sequence context follows the steps that actually ran.
+Menu and stationary responses do not repeat ordinary grounded state; restored
+or restricted controls, death and dangerous state changes remain visible.
+World/navigation responses keep support, swimming, airborne state and mobility
+restrictions explicit. Health/fatigue warnings remain visible during navigation;
+new critical health changes also remain visible in UI-only results. World
+snapshots and navigation report relevant health/magicka/fatigue updates, not
+attributes, skills or other unrequested character statistics. Use `status
+--player`, `inspect` or `details` for complete requested own-state data.
+
+World action previews contain at most four scene objects, with the action's
+target first. Explicit snapshots and combat keep an eight-object preview. A
+bounded preview reports `total`, `has_more` and an expansion hint. Background
+preview rows omit persistent `memory_ref` links; selected targets and explicit
+snapshots retain them. `details scene`, `target-info` and full responses provide
+those links when needed for notes. Noncombat rows omit the default actor status
+`active`; `down` remains explicit.
+
+Passage bearings identical to the standard named direction are omitted: front
+0, front_right 45, right 90, back_right 135, back 180, back_left -135, left -90,
+front_left -45 degrees. Nonstandard angles and collision/support diagnostics
+remain explicit. An omitted `clear_m` equals `distance_m`; omitted height change
+and slope mean zero and level. Unchanged Atlas node identifiers are omitted from
+action observations; explicit observations still report the current node.
+
+An omitted section means it was not reported, rather than that it is empty or
+unchanged. `details` expands the complete latest snapshot without a new capture,
+including after UI-only actions. Fresh geometry refs can be obtained that way
+before the next movement decision.
+
+Messages omit engine frame numbers and duplicate UI text already delivered in
+the same response. Other notifications, new dialogue and required UI controls
+remain available. Motion omits zero-valued components only when the summary
+already reports measured horizontal displacement; unknown displacement is never
+converted to zero. Redundant retry reason/timing lists can be omitted when the
+summary covers their outcomes. Full receipts preserve all attempts and motion.
+
+Change comparisons use the fields actually delivered to the connected gameplay
+owner, independently of internal observations or Desktop polling. Suppressed
+character, equipment and effect data do not silently advance their baseline. A new agent
 connection, new game or successful load/restart starts a fresh comparison.
 Historical receipt queries do not advance this baseline. After model context
 restoration, clients should explicitly query `status --player` or the relevant
@@ -109,10 +145,16 @@ it differs from the specific reason; empty blockers/warnings and zero stalled
 attempts are omitted.
 
 Explicit inventory, journal, book and spell queries preserve their requested
-content. UI queries retain fresh controls while omitting previously delivered,
-unchanged text; `details ui` and full queries recover that text. Character summaries omit duplicated attribute breakdowns
+content. Explicit UI queries return their requested text and controls even when previously
+read. Their bounded dialogue preview shows the most recent portion of conversation.
+Automatic topic-selection observations report appended dialogue rather than
+repeat an accumulated greeting/history, and may omit unchanged text. `details ui`
+expands the complete current text. Character summaries omit duplicated attribute breakdowns
 and skill progress details, which remain available through `inspect stats`.
-Recording commands omit codec build/capture telemetry; Atlas queries omit
+Recording commands, including the recording stage of `finish_session`, omit
+codec build/capture telemetry. Object-memory catalogs keep their shared historical
+source header instead of repeating it and `name_source: remembered` on every
+row; zero note counts are omitted. Atlas queries omit
 constant implementation headers and empty node annotations. The global space
 catalog and door links are returned by the explicit `atlas --list` query, not
 repeated in each local-node query. Host Runtime API telemetry and recording sidecars retain their diagnostic detail.

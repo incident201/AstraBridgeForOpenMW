@@ -1,7 +1,7 @@
 """Presentation of public action results; raw receipts remain unchanged."""
 from copy import deepcopy
 
-from .outcomes import summarize
+from .outcomes import STALLED, summarize
 
 
 SUCCESS_REASONS = {'arrived', 'within_reach', 'focused', 'completed', 'duration', 'condition_met'}
@@ -125,7 +125,8 @@ def compact_recording(value):
         return value
     keys = {'recording', 'capturing', 'path', 'duration', 'frames', 'fps',
             'width', 'height', 'audio', 'error', 'upload_ready', 'encoder',
-            'hardware_accelerated', 'encoder_fallback'}
+            'hardware_accelerated', 'encoder_fallback', 'ok', 'reason', 'message',
+            'next_command', 'retryable', 'result_unknown'}
     return {key: item for key, item in value.items()
             if key in keys and item is not None and item != ''}
 
@@ -162,13 +163,21 @@ def _summary(value, action):
     return result
 
 
+def text_is_visible(text, visible):
+    if not isinstance(text, str) or not text.strip():
+        return False
+    return all(line.strip() in visible for line in text.splitlines() if line.strip())
+
+
 def _event_is_visible(event, observation):
+    if event.get('kind') == 'menu_changed' and not (event.keys() - {'kind', 'name'}):
+        return event.get('name') == observation.get('ui_mode')
     if event.get('kind') == 'game_message':
         return any(row.get('text') == event.get('text') for row in observation.get('messages', []))
     if event.get('kind') == 'ui_text_added':
         ui = observation.get('ui', {})
         text = ui.get('dialogue', {}).get('text', ui.get('text', ''))
-        return bool(event.get('text')) and event['text'] in text
+        return text_is_visible(event.get('text'), text)
     return any(all(row.get(key) == value for key, value in event.items())
                for row in observation.get('events', []))
 
@@ -187,12 +196,14 @@ def compact_action(result, request_id=None, *, nested=False):
     observation = result.get('observation', {})
     if isinstance(summary, dict):
         summary = result['summary'] = _summary(summary, action)
-        events = list(summary.get('events', []))
+        events = [event for event in summary.get('events', []) if not _event_is_visible(event, observation)]
         for event in feedback.get('events', []):
             if not _event_is_visible(event, observation) and event not in events:
                 events.append(event)
         if events:
             summary['events'] = events
+        else:
+            summary.pop('events', None)
         # Unknown future feedback fields remain visible instead of being discarded.
         extra = {key: value for key, value in feedback.items()
                  if key not in {'status', 'reason', 'events', 'navigation'}}
@@ -236,6 +247,14 @@ def compact_action(result, request_id=None, *, nested=False):
                 motion.pop(key)
         if motion.get('location_changed') is False:
             motion.pop('location_changed')
+        if isinstance(summary, dict) and summary.get('horizontal_displacement_m') is not None:
+            # The summary already proves whether translation occurred. Preserve
+            # nonzero components; don't imply zero when displacement is unknown.
+            for key in ('forward_m', 'sideways_m', 'vertical_m', 'moved_m'):
+                if motion.get(key) == 0:
+                    motion.pop(key)
+            if not motion:
+                action.pop('motion')
     if isinstance(action.get('movement'), dict):
         action['movement'] = compact_action({'action': action['movement']}, nested=True)['action']
     if isinstance(action.get('changes'), dict):
@@ -268,4 +287,13 @@ def compact_action(result, request_id=None, *, nested=False):
             }, request_id, nested=True)
             steps.append({**value['action'], **{key: value[key] for key in ('summary', 'feedback') if key in value}})
         action['steps'] = steps
+    if isinstance(summary, dict) and isinstance(action.get('attempts'), list) and all(
+        isinstance(attempt, dict) and not (attempt.keys() - {'reason', 'elapsed'})
+        and (attempt.get('reason') in SUCCESS_REASONS or attempt.get('reason') == reason
+             or attempt.get('reason') in STALLED and summary.get('stalled_attempts', 0) > 0)
+        for attempt in action['attempts']
+    ):
+        # Aggregate blockers/stalls were calculated from the complete attempts.
+        # Per-attempt timing remains available in the retained receipt.
+        action.pop('attempts')
     return result

@@ -60,19 +60,32 @@ In a real observation, use:
 | `terrain`, `local_map`, `exploration` | Local navigation data and recorded travel memory; see navigation reference. |
 | `messages`, `events`, `summary.events` | New observed messages, durable change events and confirmed action outcomes/interruptions. |
 
-Compact gameplay observations retain current scene/terrain handles and physical state.
-Menu observations focus on the open UI.
-Unchanged resources, equipment details, permanent effects and image settings are
-omitted. `combat` and `effects` can contain only changed fields; unchanged details are
-not repeated. `effects` identifies updated active sources; `effect_ended` events
-report removals. Missing optional fields mean no new report, not an empty inventory
-or no active effects. Ordinary enabled controls and inactive body flags are omitted;
-restrictions and newly restored controls remain explicit. After restoring context,
-use `status --player` or a relevant `inspect` query to recover current own state.
-Inventory/spell rows omit `equipped:false` and `selected:false`.
-Use `details SECTION` or `--full` to expand information without guessing.
+Responses focus on the requested operation:
 
-`action.motion` reports what actually happened: forward/sideways/vertical movement, distance, turning, and location change. `action.navigation` reports useful remaining distance and obstruction/recovery diagnostics; detailed planning data is available with `--full`.
+| Operation | Context returned automatically |
+| --- | --- |
+| `observe`, `survey`, `scan` | Current surroundings, physical state and local passages. |
+| Turning / `focus` | New orientation and visible targets; no automatic passage list. |
+| Movement or a blocked movement attempt | Actual movement, obstacles, physical state, current targets and escape directions. |
+| Menus, journal, dialogue and inventory UI | Outcome, current UI and meaningful changes; no automatic world or character dump. |
+| Using an item, resting, selecting magic | Relevant resource/effect/selection changes; no automatic surroundings. |
+
+World previews contain up to four objects (eight for explicit observations and
+combat), with the selected target first. `has_more` means expand with `details scene`.
+Background previews may omit `memory_ref`; get it with `details scene` for notes.
+An omitted section was not reported by this command; it does not mean empty or
+unchanged. Use `details SECTION`, `inspect VIEW`, `status --player` or `--full`
+when needed. After UI-only commands, get current scene/passage refs with `details`
+before using them. Unchanged Atlas identifiers and ordinary inactive flags are
+omitted. Movement restrictions, dangerous state changes and required input remain
+visible. `combat` and `effects` updates can contain changed fields only;
+`effect_ended` reports removals. Inventory/spell rows omit `equipped:false` and
+`selected:false`.
+
+`action.motion` reports measured movement and turning. Zero components can be
+omitted when `summary.horizontal_displacement_m` supplies the measured result;
+`null` displacement remains unknown, not zero. `action.navigation` retains
+remaining distance and obstruction/recovery diagnostics; use `--full` for details.
 
 `submitted` means the request was sent, not that an item was equipped, purchased or a door opened. A spell attempt can have `action.reason=completed` (animation finished) but `summary.status=failed`, `summary.reason=spell_failed`, and `action.cast_outcome=failed`. Verify the relevant effect, inventory, menu, HUD, or message.
 
@@ -80,7 +93,7 @@ Use `details SECTION` or `--full` to expand information without guessing.
 
 | Value | Obtain from | Use with | Refresh rule |
 |---|---|---|---|
-| `visible_…` | `observe` → `scene.objects[].ref` | `focus`, `approach`, `interact`; actor refs also `lock`, `strike`, `cast`, `chain` | Use refs from the latest action observation; request `observe` if the target is absent or lost. A remembered actor is not permission to track it through walls. |
+| `visible_…` | `observe` / `details scene` → `scene.objects[].ref` | `focus`, `approach`, `interact`; actor refs also `lock`, `strike`, `cast`, `chain` | Use current scene refs; expand an omitted scene with `details scene`. Observe again if the target is lost. A remembered actor is not permission to track it through walls. |
 | `object_…` | `scene.objects[].memory_ref` or `knowledge objects` → `objects[].ref` | `knowledge add --object-ref OBJECT_REF` / `knowledge list --object-ref OBJECT_REF`; never movement or interaction | Persistent within the atlas profile. A catalog entry is historical and does not prove that the object is currently visible. |
 | `item_…` | `inspect inventory` → `items[].ref` | `use-item`, `select-enchanted` | Stable while that instance remains owned in the same game epoch. Refresh after load/restart, removal or a changed stack. |
 | `spell_…` | `inspect spells` → `spells[].ref` | `select-spell` | Spell queries/actions can invalidate spell refs. Selection remains after its handle expires; refresh before a new selection. |
@@ -144,8 +157,9 @@ with unsuccessful movement is partial: its confirmed side effects remain in even
 ## Keep outcome diagnostics in wrappers
 
 AstraBridge already returns compact JSON. Forward that envelope as-is when
-calling it from an agent tool. For example, with the command's output strings in
-`stdout` and `stderr`:
+calling it from an agent tool. Keep the tool's output limit large enough for
+complete JSON; use AstraBridge queries to request less data rather than cutting
+the middle of a response. For example, with output strings in `stdout` and `stderr`:
 
 ```js
 try {

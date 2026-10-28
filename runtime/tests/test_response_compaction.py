@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from astra_bridge.control import Control
-from astra_bridge.information import details, receipt_details
+from astra_bridge.information import details, query_ui, receipt_details
 from astra_bridge.observations import compact, present_response
 from astra_bridge.outcomes import summarize
 from astra_bridge.responses import compact_action
@@ -71,7 +71,7 @@ def test_repeated_observation_keeps_handles_and_omits_unchanged_bulk():
     assert result['scene']['objects'][0]['ref'] == 'visible_person'
     assert 'touch_margin_m' not in result['scene']['objects'][0]
     assert result['terrain']['passages'] == [{'ref': 'passage_current', 'direction': 'front',
-        'bearing_deg': 0, 'distance_m': 6, 'status': 'range_limit'}]
+        'distance_m': 6, 'status': 'range_limit'}]
     assert result['exploration'] == {'segment': 'space_room', 'current_node': 'node_current'}
     assert compact(new)['screen'] == {'width': 1280, 'height': 720}
 
@@ -344,13 +344,13 @@ def test_atlas_keeps_route_selection_data_and_removes_repeated_headers():
     assert present_response(catalog, operation='atlas') == catalog
 
 
-def test_repeated_ui_queries_keep_controls_without_repeating_already_read_text():
+def test_explicit_ui_queries_return_requested_text_even_if_already_read():
     old = observation()
     old['ui'] = {'revision': 'dialogue', 'dialogue': {'text': 'An important answer'}}
     query = {'revision': 'dialogue', 'dialogue': {'text': 'An important answer'},
              'elements': [{'ref': 'ui_topic', 'text': 'Topic', 'enabled': True, 'role': 'button'}]}
     small = present_response(query, before=old, operation='ui')
-    assert 'text' not in small['dialogue'] and small['unchanged']
+    assert small['dialogue']['text'] == 'An important answer'
     assert small['elements'][0]['ref'] == 'ui_topic'
     assert present_response(query, full=True, before=old, operation='ui') == query
     # An unchanged action revision must not hide a newly visible tooltip/text.
@@ -367,7 +367,7 @@ def test_repeated_ui_only_queries_have_a_delivery_baseline(tmp_path):
                               call=lambda *args: ui)
     control = Control(session)
     assert control.execute('ui', {})['dialogue']['text'] == text
-    assert 'text' not in control.execute('ui', {})['dialogue']
+    assert control.execute('ui', {})['dialogue']['text'] == text
     # Filtered rows did not deliver conversation text and must not advance it.
     control.presented_observation = None
     session.call = lambda *args: {'revision': 'dialogue', 'elements': [], 'text_details': 'details ui'}
@@ -400,3 +400,345 @@ def test_effect_countdown_updates_keep_identity_without_repeating_strength():
         {'name': 'Fortify Attribute', 'affected_attribute': 'Strength', 'remaining_seconds': 19}]}]
     new['effects'][1]['effects'][0]['magnitude_min'] = 10
     assert compact(new, old)['effects'][0]['effects'][0]['magnitude_min'] == 10
+
+
+def crowded_observation():
+    value = observation(2)
+    value['scene']['objects'] = [{
+        'ref': f'visible_target_{n}', 'memory_ref': f'object_memory_{n}',
+        'kind': 'door' if n % 2 else 'actor', **({'actor_kind': 'npc', 'status': 'active'} if n % 2 == 0 else {}),
+        'name': f'Target {n}', 'name_source': 'observed', 'details_visible': True,
+        'distance_m': n + 1, 'bearing_deg': n * 5, 'in_reach': n < 2,
+    } for n in range(10)]
+    return value
+
+
+@pytest.mark.parametrize('operation', ['look', 'walk', 'go', 'act', 'approach', 'interact',
+                                       'choose', 'key', 'revisit', 'sequence', 'wait_until'])
+def test_actions_keep_current_target_in_bounded_preview_with_full_expansion(operation):
+    current = crowded_observation()
+    target = 'visible_target_9'
+    raw = movement(current)
+    result = present_response(raw, before=observation(), target_ref=target, operation=operation)
+    scene = result['observation']['scene']
+    assert len(scene['objects']) == 4 and scene['total'] == 10 and scene['has_more']
+    assert scene['objects'][0]['ref'] == target
+    assert scene['objects'][0]['memory_ref'] == 'object_memory_9'
+    assert all('memory_ref' not in row for row in scene['objects'][1:])
+    assert result['summary']['destination_reached'] is True
+    assert result['observation']['body']['air_state'] == 'grounded'
+    assert len(present_response(raw, full=True)['observation']['scene']['objects']) == 10
+    expanded = details(SimpleNamespace(latest_observation=current), {'section': 'scene'})
+    assert len(expanded['data']['objects']) == 10
+    assert expanded['data']['objects'][-1]['memory_ref'] == 'object_memory_9'
+    assert raw['observation']['scene'] == current['scene']
+
+
+def test_explicit_observation_and_combat_keep_wider_scene_and_memory_links():
+    current = crowded_observation()
+    explicit = present_response(current, operation='observe')
+    assert len(explicit['scene']['objects']) == 8
+    assert all('memory_ref' in row for row in explicit['scene']['objects'])
+    combat = present_response(movement(current), operation='chain', target_ref='visible_target_9')
+    assert len(combat['observation']['scene']['objects']) == 8
+    assert combat['observation']['scene']['objects'][0]['ref'] == 'visible_target_9'
+    assert any(row.get('status') == 'active' for row in combat['observation']['scene']['objects'])
+
+
+def test_turn_reports_view_and_movement_reports_passages_without_repeating_atlas_node():
+    old = observation()
+    new = observation(2)
+    new['orientation']['heading_deg'] = 90
+    new['terrain']['passages'] = [
+        {'ref': 'fresh_front', 'direction': 'front', 'bearing_deg': 0, 'distance_m': 6, 'status': 'range_limit'},
+        {'ref': 'fresh_back', 'direction': 'back', 'bearing_deg': 180, 'distance_m': 6, 'status': 'range_limit'},
+        {'ref': 'fresh_diagonal', 'direction': 'front_left', 'bearing_deg': -30,
+         'distance_m': 2, 'clear_m': 2.3, 'height_change_m': 1, 'status': 'nav_boundary'},
+    ]
+    turn = {'action': {'motion': {'turned_deg': 90}}, 'observation': new}
+    turned = present_response(turn, before=old, operation='look')['observation']
+    assert turned['orientation']['heading_deg'] == 90 and 'scene' in turned
+    assert 'terrain' not in turned
+    result = present_response(movement(new), before=old, operation='walk')['observation']
+    assert result['orientation']['heading_deg'] == 90
+    passages = result['terrain']['passages']
+    assert [row['ref'] for row in passages] == ['fresh_front', 'fresh_back', 'fresh_diagonal']
+    assert 'bearing_deg' not in passages[0] and 'bearing_deg' not in passages[1]
+    assert passages[2]['bearing_deg'] == -30 and passages[2]['clear_m'] == 2.3
+    assert 'exploration' not in result
+    new['exploration']['current_node'] = 'new_node'
+    assert present_response(movement(new), before=old, operation='walk')['observation']['exploration']['current_node'] == 'new_node'
+    assert present_response(new, before=old, operation='observe')['exploration']['current_node'] == 'new_node'
+
+
+@pytest.mark.parametrize('operation', ['use_item', 'select_spell', 'select_enchanted'])
+def test_own_state_actions_omit_unrequested_surroundings_but_keep_effects_and_teleports(operation):
+    old = observation()
+    new = copy.deepcopy(old)
+    new['body']['levitation'] = True
+    raw = {'action': {'submitted': True}, 'observation': new}
+    result = present_response(raw, before=old, operation=operation)['observation']
+    assert 'scene' not in result and 'terrain' not in result
+    assert result['body']['levitation'] is True
+    assert result['screenshot'] == new['screenshot']
+    new['scene']['objects'].append({'ref': 'new_object', 'kind': 'door'})
+    assert 'scene' not in present_response(raw, before=old, operation=operation)['observation']
+    new['scene'] = old['scene']
+    new['location'] = 'Another room'
+    assert 'scene' in present_response(raw, before=old, operation=operation)['observation']
+
+
+def test_measured_zero_motion_is_not_repeated_and_unknown_motion_is_not_zero():
+    raw = movement()
+    raw['action']['motion'].update(vertical_m=0, moved_m=0, turned_deg=90)
+    raw['summary']['horizontal_displacement_m'] = 0
+    result = present_response(raw, operation='look')
+    assert result['action']['motion'] == {'turned_deg': 90}
+    assert result['summary']['horizontal_displacement_m'] == 0
+    raw['summary']['horizontal_displacement_m'] = None
+    assert present_response(raw, operation='look')['action']['motion']['forward_m'] == 0
+    assert present_response(raw, operation='look')['summary']['horizontal_displacement_m'] is None
+
+
+def test_ui_text_is_read_once_and_unrelated_messages_remain_visible():
+    new = observation()
+    new.update(ui_mode='Dialogue', ui={'dialogue': {'text': 'Greeting.\nTopic\nThe owner will know.'},
+        'elements': [{'ref': 'goodbye', 'role': 'button', 'text': 'Goodbye', 'enabled': True}]})
+    new['messages'] = [
+        {'source': 'ui_text', 'frame': 1, 'text': 'Topic\nThe owner will know.'},
+        {'source': 'notification', 'frame': 2, 'text': 'Your journal has been updated.'},
+    ]
+    result = present_response(movement(new), operation='choose')['observation']
+    assert result['ui']['dialogue']['text'] == new['ui']['dialogue']['text']
+    assert result['ui']['elements'][0]['ref'] == 'goodbye'
+    assert result['messages'] == [{'source': 'notification', 'text': 'Your journal has been updated.'}]
+    assert 'scene' not in result and 'terrain' not in result
+
+
+def test_object_memory_catalog_avoids_per_row_headers_without_losing_names_or_notes():
+    raw = {'source': 'observed_object_memory', 'historical': True, 'total': 2, 'objects': [
+        {'ref': 'object_one', 'kind': 'item', 'name': 'Cube', 'name_source': 'remembered',
+         'source': 'observed_object_memory', 'notes_total': 0},
+        {'ref': 'object_two', 'kind': 'actor', 'actor_kind': 'npc',
+         'source': 'observed_object_memory', 'notes_total': 2},
+    ]}
+    result = present_response(raw, operation='knowledge')
+    assert result['historical'] is True and result['source'] == raw['source']
+    assert result['objects'] == [{'ref': 'object_one', 'kind': 'item', 'name': 'Cube'},
+                                 {'ref': 'object_two', 'kind': 'actor', 'actor_kind': 'npc', 'notes_total': 2}]
+    assert present_response(raw, full=True, operation='knowledge') == raw
+
+
+def test_attempt_details_are_removed_only_when_the_summary_covers_their_reasons():
+    raw = movement(reason='blocked')
+    raw['action']['attempts'] = [{'reason': 'blocked', 'elapsed': 1}, {'reason': 'blocked', 'elapsed': 2}]
+    raw['summary']['stalled_attempts'] = 2
+    assert 'attempts' not in present_response(raw)['action']
+    raw['action']['attempts'][0]['reason'] = 'unexplained_failure'
+    assert present_response(raw)['action']['attempts'] == raw['action']['attempts']
+    raw['action']['attempts'][0]['reason'] = 'blocked'
+    raw['action']['attempts'][0]['custom_diagnostic'] = 'Keep this'
+    assert present_response(raw)['action']['attempts'][0]['custom_diagnostic'] == 'Keep this'
+
+
+def test_finish_session_uses_compact_recording_and_keeps_full_receipt_on_replay(tmp_path, monkeypatch):
+    raw = {'closed': True, 'stages': {'save': {'ok': True, 'saved': {'ref': 'save_1'}},
+        'recording': {'path': 'record.mp4', 'recording': False, 'upload_ready': True,
+                      'ffmpeg_sha256': 'codec_hash', 'frame_interval_ms': {'p95': 20}}}}
+    calls = []
+    session = SimpleNamespace(inbox=tmp_path/'inbox.json', session_id='session')
+    control = Control(session)
+    monkeypatch.setattr('astra_bridge.control.finish_session', lambda *args: calls.append(True) or raw)
+    try:
+        compacted = control.execute('finish_session', {'request_id': 'finish-test'})
+        assert compacted['stages']['recording'] == {'path': 'record.mp4', 'recording': False, 'upload_ready': True}
+        assert compacted['stages']['save']['saved']['ref'] == 'save_1'
+        full = control.execute('action_result', {'ref': 'finish-test', 'full': True})
+        assert full['response'] == raw
+        replay = control.execute('finish_session', {'request_id': 'finish-test'})
+        assert replay['response']['stages']['recording'] == compacted['stages']['recording']
+        assert control.execute('finish_session', {'request_id': 'finish-test', 'full': True})['response'] == raw
+        assert len(calls) == 1
+    finally:
+        control.receipts.db.close()
+
+
+@pytest.mark.parametrize('operation', ['choose', 'edit', 'adjust', 'key', 'click', 'scroll', 'text', 'map', 'trigger'])
+def test_ui_operations_do_not_append_unrequested_world_or_character_information(operation):
+    old = crowded_observation()
+    old.update(ui_mode='Gameplay', ui={'modal': True, 'revision': 'tutorial', 'text': 'Tutorial',
+                                      'elements': [{'ref': 'ok', 'role': 'button', 'text': 'OK', 'enabled': True}]})
+    new = crowded_observation()
+    new['ui'] = {}
+    new['stats']['fatigue']['current'] = 90
+    new['combat']['weapon_info']['condition_current'] = 30
+    raw = {'action': {'submitted': True}, 'observation': new}
+    result = present_response(raw, before=old, operation=operation)['observation']
+    assert result == {'observation': 2, 'ui_mode': 'Gameplay', 'screenshot': 'frame-2.png'}
+    assert present_response(raw, full=True, operation=operation) == raw
+    for section in ('stats', 'body', 'terrain', 'scene', 'combat'):
+        expanded = details(SimpleNamespace(latest_observation=new), {'section': section})
+        assert expanded['data'] == new[section]
+
+
+def test_consecutive_tutorial_closes_do_not_consume_undelivered_character_updates(tmp_path):
+    old = observation()
+    old['body']['controls_enabled'] = False
+    old['ui'] = {'modal': True, 'revision': 'tutorial', 'text': 'First popup', 'elements': []}
+    current = copy.deepcopy(old)
+    session = SimpleNamespace(inbox=tmp_path/'inbox.json', uncertain=False, latest_observation=current)
+    def call(op, args):
+        session.latest_observation = current
+        return current if op == 'observe' else {'action': {'submitted': True}, 'observation': current}
+    session.call = call
+    control = Control(session)
+    control.presented_observation = copy.deepcopy(old)
+    try:
+        for n in range(1, 5):
+            current['observation'] = n + 1
+            current['stats']['fatigue']['current'] = 90
+            current['body']['weapon'] = 'Axe'
+            current['combat']['weapon_info'] = {'name': 'Axe', 'condition_current': 20}
+            current['effects'] = [{'name': 'Potion', 'temporary': True,
+                                   'effects': [{'name': 'Night-Eye', 'remaining_seconds': 20}]}]
+            current['ui'] = {'modal': True, 'revision': f'popup-{n}', 'text': f'Popup {n}',
+                             'elements': [{'ref': f'ok-{n}', 'role': 'button', 'text': 'OK', 'enabled': True}]}
+            result = control.execute('choose', {'ref': f'button-{n}'})['observation']
+            assert result['ui']['text'] == f'Popup {n}'
+            assert not (result.keys() & {'stats', 'effects', 'combat', 'terrain', 'scene', 'body'})
+        current['ui'] = {}
+        current['body']['controls_enabled'] = True
+        result = control.execute('choose', {'ref': 'last-popup'})['observation']
+        assert result['body'] == {'controls_enabled': True}
+        assert 'stats' not in result and 'scene' not in result
+        requested = control.execute('observe', {})
+        assert requested['stats']['fatigue']['current'] == 90
+        assert requested['combat']['weapon_info']['name'] == 'Axe'
+        assert requested['effects'][0]['name'] == 'Potion'
+        assert requested['scene']['objects'] and requested['terrain']['passages']
+        current['effects'][0]['effects'][0]['remaining_seconds'] = 19
+        assert control.execute('observe', {})['effects'][0]['effects'][0]['remaining_seconds'] == 19
+        assert 'effects' not in control.execute('observe', {})
+    finally:
+        control.receipts.db.close()
+
+
+def test_requested_movement_combat_and_ui_only_sequences_have_distinct_context():
+    old = observation()
+    current = copy.deepcopy(old)
+    action = {'motion': {'forward_m': 0, 'sideways_m': 0, 'vertical_m': 0, 'moved_m': 0}}
+    raw = {'action': action, 'observation': current}
+    idle = present_response(raw, before=old, operation='act', arguments={'seconds': 5})
+    assert 'terrain' not in idle['observation'] and 'scene' not in idle['observation']
+    attempted = present_response(raw, before=old, operation='act', arguments={'move': 1, 'seconds': 5})
+    assert attempted['observation']['terrain']['passages']
+    fighting = present_response(raw, before=old, operation='act', arguments={'attack': True, 'seconds': 5})
+    assert 'scene' in fighting['observation'] and 'terrain' not in fighting['observation']
+    for operation, expected in [('choose', False), ('walk', True)]:
+        sequence = {'action': {'steps': [{'operation': operation, 'reason': 'completed'}]}, 'observation': current}
+        result = present_response(sequence, before=old, operation='sequence')['observation']
+        assert ('terrain' in result) is expected
+        assert ('scene' in result) is expected
+
+
+def test_finish_session_recording_failures_are_not_hidden_by_compaction():
+    raw = {'closed': False, 'stages': {'recording': {'ok': False, 'reason': 'recording_finalize_failed'}},
+           'reason': 'recording_failed_game_kept_open'}
+    assert present_response(raw, operation='finish_session') == raw
+
+
+def test_new_critical_health_is_reported_once_even_during_ui_only_work():
+    old = observation()
+    new = observation(2)
+    new['stats']['health']['current'] = 10
+    raw = {'action': {'submitted': True}, 'observation': new}
+    assert present_response(raw, before=old, operation='choose')['observation']['stats'] == {
+        'health': {'current': 10, 'maximum': 100}}
+    assert 'stats' not in present_response(raw, before=new, operation='choose')['observation']
+
+
+def test_explicit_character_queries_prevent_repeating_already_requested_vitals(tmp_path):
+    current = observation()
+    session = SimpleNamespace(inbox=tmp_path/'inbox.json', uncertain=False)
+    def call(op, args):
+        if op == 'inspect':
+            return {'stats': current['stats']}
+        return current
+    session.call = call
+    control = Control(session)
+    try:
+        assert control.execute('inspect', {'view': 'stats'})['stats'] == current['stats']
+        assert 'stats' not in control.execute('observe', {})
+    finally:
+        control.receipts.db.close()
+
+
+def test_topic_selection_reports_new_answer_not_accumulated_dialogue_history():
+    old = observation()
+    history = 'An already read greeting and older topic. ' * 100
+    old['ui'] = {'revision': 'before-topic', 'dialogue': {'text': history}}
+    current = observation(2)
+    current.update(ui_mode='Dialogue', ui={
+        'revision': 'new-topic', 'dialogue': {'text': history + '\nNew directions\nTurn left at the stairs.'},
+        'elements': [{'ref': 'goodbye', 'role': 'button', 'text': 'Goodbye', 'enabled': True}]})
+    raw = {'action': {'submitted': True}, 'observation': current}
+    result = present_response(raw, before=old, operation='choose')['observation']
+    assert result['ui']['dialogue']['text'] == 'New directions\nTurn left at the stairs.'
+    assert result['ui']['elements'][0]['ref'] == 'goodbye'
+    assert 'text_has_more' not in result['ui']
+    assert present_response(raw, full=True)['observation']['ui']['dialogue']['text'] == history + '\nNew directions\nTurn left at the stairs.'
+    # Explicit requests still provide the current conversation rather than an empty delta.
+    session = SimpleNamespace(command=lambda *args: copy.deepcopy(current['ui']), latest_observation=current)
+    queried = query_ui(session, {})
+    assert queried['dialogue']['text'].endswith('Turn left at the stairs.')
+    assert queried['text_has_more']
+    assert details(session, {'section': 'ui'})['data']['dialogue']['text'].startswith(history)
+
+
+def test_current_ui_mode_is_not_duplicated_in_an_event_but_extra_diagnostics_survive():
+    raw = {'action': {'submitted': True}, 'summary': {'status': 'succeeded'},
+           'feedback': {'status': 'succeeded', 'events': [
+               {'kind': 'menu_changed', 'name': 'Gameplay'},
+               {'kind': 'menu_changed', 'name': 'Gameplay', 'custom_detail': 'Keep this'}]},
+           'observation': observation()}
+    result = present_response(raw, operation='choose')
+    assert result['summary']['events'] == [{'kind': 'menu_changed', 'name': 'Gameplay', 'custom_detail': 'Keep this'}]
+
+
+def test_recent_ui_query_does_not_break_the_next_topic_answer_comparison(tmp_path):
+    history = 'An old conversation that has already accumulated. ' * 100
+    current = observation()
+    current.update(ui_mode='Dialogue', ui={'revision': 'old-topic', 'dialogue': {'text': history}, 'elements': []})
+    session = SimpleNamespace(inbox=tmp_path/'inbox.json', uncertain=False,
+                              command=lambda *args: copy.deepcopy(current['ui']))
+    def call(op, args):
+        if op == 'ui':
+            return query_ui(session, args)
+        return {'action': {'submitted': True}, 'observation': current}
+    session.call = call
+    control = Control(session)
+    try:
+        assert len(control.execute('ui', {})['dialogue']['text']) == 1600
+        current['ui'] = {'revision': 'new-topic', 'dialogue': {'text': history + '\nThe destination is upstairs.'}}
+        result = control.execute('choose', {'ref': 'topic'})
+        assert result['observation']['ui']['dialogue']['text'] == 'The destination is upstairs.'
+    finally:
+        control.receipts.db.close()
+
+
+def test_delivery_baseline_does_not_repeat_notifications_across_ui_and_world_reads(tmp_path):
+    current = observation()
+    current['messages'] = [{'source': 'notification', 'frame': 1, 'text': 'Follow me.'}]
+    session = SimpleNamespace(inbox=tmp_path/'inbox.json', uncertain=False)
+    session.call = lambda op, args: current if op == 'observe' else {'action': {'submitted': True}, 'observation': current}
+    control = Control(session)
+    try:
+        assert control.execute('observe', {})['messages'] == [{'source': 'notification', 'text': 'Follow me.'}]
+        assert 'messages' not in control.execute('choose', {'ref': 'ok'})['observation']
+        assert 'messages' not in control.execute('observe', {})
+        current['messages'].append({'source': 'notification', 'frame': 2, 'text': 'A new warning.'})
+        assert control.execute('choose', {'ref': 'next'})['observation']['messages'] == [
+            {'source': 'notification', 'text': 'A new warning.'}]
+        assert 'messages' not in control.execute('observe', {})
+    finally:
+        control.receipts.db.close()

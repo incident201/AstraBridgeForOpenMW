@@ -43,6 +43,15 @@ start/end acknowledgements remain separate. Recorder clips shared audio blocks
 to its acknowledged sample interval, including when a live subscriber was
 already active or remains connected afterward.
 
+Recorder continues draining PCM while FramePacer emits a burst of repeated
+frames or waits for space in the video queue. Video waits are sliced into short
+intervals within the existing timeout, so backpressure cannot leave the audio
+ring unattended for the entire burst. This does not change frame rate, quality
+or the engine sample clock. A genuinely stalled encoder or missing PCM still
+fails explicitly. After the acknowledged end sample has been consumed, later
+audio produced for a live subscriber is outside the recording and cannot cause
+a false ring-overrun error during video finalization.
+
 ## Pinned FFmpeg and encoder selection
 
 The OCI image supplies one FFmpeg binary with libx264, VAAPI, NVENC, AAC, Opus

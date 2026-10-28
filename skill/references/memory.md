@@ -5,7 +5,8 @@ Use this when writing or resuming the current task, or attaching durable notes t
 ## Notes about one object
 
 Every safely matched visible instance has a `memory_ref`, even before you know its
-name. Copy that value to attach notes, tasks or conversation reminders to that
+name. Action previews may omit it; get it with `details scene` or `observe`.
+Copy that value to attach notes, tasks or conversation reminders to that
 particular NPC, creature, door or item. In these commands replace `OBJECT_REF` and
 `NOTE_REF` with actual returned handles:
 
@@ -19,7 +20,7 @@ astrabridge game knowledge objects --object-ref OBJECT_REF
 ```
 
 The catalog contains only previously encountered instances in the active atlas
-profile. It reports remembered names/types and note counts; it supplies no current
+profile. It reports remembered names/types and nonzero note counts; it supplies no current
 position, visibility or lock state. The same note remains attached when a new
 observation gives the object a different `visible_…` ref. Two similarly named
 objects have separate memory refs and notes. When the object is visible again,

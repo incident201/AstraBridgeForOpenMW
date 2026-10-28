@@ -230,6 +230,10 @@ class Recorder:
             self._audio_locked()
 
     def _audio_locked(self):
+        # A live subscriber can keep producing after our stop acknowledgement.
+        # Once this recording's interval is complete, later ring wrap is irrelevant.
+        if self.end_sample is not None and self.base_sample+self.audio_samples >= self.end_sample:
+            return
         newest = self.media.sequence
         if newest-self.audio_cursor > self.media.slots:
             raise BridgeError('audio_ring_overrun')
@@ -250,11 +254,24 @@ class Recorder:
             except queue.Full: raise BridgeError('audio_encoder_too_slow') from None
             self.audio_samples += block['samples']
             self.audio_cursor = sequence
+            if self.end_sample is not None and self.base_sample+self.audio_samples >= self.end_sample:
+                break
 
     def _enqueue(self, frame):
-        if self.error: raise BridgeError(self.error)
-        try: self.queue.put(frame['bgra'], timeout=.25)
-        except queue.Full: raise BridgeError('video_encoder_too_slow') from None
+        deadline = time.monotonic()+.25
+        while True:
+            if self.error: raise BridgeError(self.error)
+            # Pacing can emit many frames for one slow render. Keep draining
+            # PCM during that burst and while the video writer is backpressured;
+            # waiting until the next source frame can overflow the audio ring.
+            self._audio()
+            remaining = max(0, deadline-time.monotonic())
+            try:
+                self.queue.put(frame['bgra'], timeout=min(.01, remaining))
+                break
+            except queue.Full:
+                if time.monotonic() >= deadline:
+                    raise BridgeError('video_encoder_too_slow') from None
         self.queue_high_water = max(self.queue_high_water, self.queue.qsize())
 
     def _capture(self):

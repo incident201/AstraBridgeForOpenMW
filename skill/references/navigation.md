@@ -171,7 +171,7 @@ Prefer the helpers when landing is the intended stopping point.
 
 ## Local walking surface: JSON first, SVG optional
 
-`observe` returns `terrain.passages` when available; `observe --full` also returns `terrain.rays`. Rays sample nearby directions; passages are candidate short moves with `ref`, `direction`, `bearing_deg`, `distance_m`, `height_change_m`, `slope` and `terrain.passages[].status`. The usual radius is 6 m. An omitted `clear_m` equals `distance_m`; omitted `height_change_m` is zero and omitted `slope` is level. Gaps between samples are unknown.
+`observe` returns `terrain.passages` when available; `observe --full` also returns `terrain.rays`. Rays sample nearby directions; passages are candidate short moves with `ref`, `direction`, optional `bearing_deg`, `distance_m`, `height_change_m`, `slope` and `terrain.passages[].status`. The usual radius is 6 m. An omitted `clear_m` equals `distance_m`; omitted `height_change_m` is zero and omitted `slope` is level. Standard bearings are omitted when supplied by `direction`: front 0°, front-right 45°, right 90°, back-right 135°, back 180°, back-left −135°, left −90°, front-left −45°. Off-axis bearings remain explicit. Gaps between samples are unknown.
 
 `local_map` is an SVG of those same public data. Its top is **forward relative to the character**. Blue indicates rising terrain, orange descending, green approximately level. Request it with `observe --map`; ordinary observations generate no map files.
 
